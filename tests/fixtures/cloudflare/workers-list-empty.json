@@ -1,0 +1,6 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/workers/scripts (empty — no worker)",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/list/",
+  "shape": "result is a direct array; empty when no script exists",
+  "result": []
+}

@@ -1,0 +1,15 @@
+{
+  "label": "GET /accounts/{account_id}/workers/domains",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/domains/methods/list/",
+  "shape": "result[] Worker custom domains with id/hostname/service/enabled/zone_id/zone_name",
+  "result": [
+    {
+      "id": "023e105f4ecef8ad9ca31a8372d0c353",
+      "hostname": "app.example.com",
+      "service": "my-worker",
+      "enabled": true,
+      "zone_id": "023e105f4ecef8ad9ca31a8372d0c353",
+      "zone_name": "example.com"
+    }
+  ]
+}

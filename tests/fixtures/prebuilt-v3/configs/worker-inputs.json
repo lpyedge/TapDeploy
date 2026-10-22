@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 3,
+  "app": {
+    "id": "example/renamed-worker",
+    "name": "Renamed Worker"
+  },
+  "source": {
+    "allowLocalZip": true
+  },
+  "capabilities": [
+    "workers"
+  ],
+  "inputs": [
+    {
+      "key": "workerName",
+      "type": "string",
+      "label": "Worker name",
+      "requiredWhen": "install",
+      "validation": {
+        "minLength": 3,
+        "maxLength": 63,
+        "pattern": "^[a-z0-9-]+$"
+      }
+    },
+    {
+      "key": "region",
+      "type": "select",
+      "label": "Region",
+      "requiredWhen": "both",
+      "options": [
+        { "label": "Automatic", "value": "auto" },
+        { "label": "Europe", "value": "eu" }
+      ]
+    }
+  ]
+}

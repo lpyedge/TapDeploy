@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 3,
+  "app": {
+    "id": "example/storage",
+    "name": "Storage Only"
+  },
+  "source": {
+    "allowLocalZip": true
+  },
+  "capabilities": [
+    "r2",
+    "kv"
+  ],
+  "units": [
+    {
+      "id": "storage",
+      "kind": "resources",
+      "resources": [
+        {
+          "kind": "r2",
+          "name": "example-data",
+          "mode": "ensure"
+        },
+        {
+          "kind": "kv",
+          "name": "example-cache",
+          "mode": "ensure"
+        }
+      ]
+    }
+  ]
+}

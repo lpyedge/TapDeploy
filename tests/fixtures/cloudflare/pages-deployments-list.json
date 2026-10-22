@@ -1,0 +1,16 @@
+{
+  "label": "GET /accounts/{account_id}/pages/projects/{project_name}/deployments",
+  "source": "https://developers.cloudflare.com/api/resources/pages/subresources/deployments/methods/list/",
+  "shape": "List a Pages project's deployments. result is a direct array of Pages deployment objects (the endpoint does not paginate with cursors).",
+  "result": [
+    {
+      "id": "deployment-id-2",
+      "project_name": "my-pages-app",
+      "url": "https://my-pages-app.pages.dev",
+      "environment": "production",
+      "created_on": "2026-03-01T00:00:00Z",
+      "modified_on": "2026-03-01T00:00:00Z",
+      "latest_stage": { "name": "deploy", "status": "success", "started_on": "2026-03-01T00:00:00Z", "ended_on": "2026-03-01T00:00:03Z" }
+    }
+  ]
+}

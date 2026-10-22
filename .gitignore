@@ -1,0 +1,39 @@
+# Local task records and credentials - never committed
+/plan/
+
+# Dependencies. No trailing slash: the root node_modules may be a managed symlink
+# into temp/deps (scripts/ensure-dev-deps.mjs), which a dir-only pattern misses.
+node_modules
+
+# Disposable tool workspace (npm deps, caches, results)
+/temp/
+
+# Build outputs
+dist/
+dist-ssr/
+
+# Wrangler (.wrangler is a managed symlink to temp/wrangler, see scripts/ensure-wrangler-link.mjs)
+.wrangler
+
+# Env / secrets (never commit)
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+.vitest/

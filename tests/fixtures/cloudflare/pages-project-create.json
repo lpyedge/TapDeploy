@@ -1,0 +1,28 @@
+{
+  "label": "POST /accounts/{account_id}/pages/projects",
+  "source": "https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/create/",
+  "shape": "Create a Pages project. result is a single Pages project object with id, name, subdomain, production_branch, canonical_deployment, and deployment_configs.",
+  "result": {
+    "id": "project-id-1",
+    "name": "my-pages-app",
+    "subdomain": "my-pages-app.pages.dev",
+    "created_on": "2026-01-01T00:00:00Z",
+    "modified_on": "2026-02-01T00:00:00Z",
+    "domains": ["my-pages-app.pages.dev"],
+    "production_branch": "main",
+    "canonical_deployment": {
+      "id": "deployment-id-1",
+      "url": "https://my-pages-app.pages.dev",
+      "environment": "production",
+      "created_on": "2026-02-01T00:00:00Z"
+    },
+    "deployment_configs": {
+      "production": {
+        "compatibility_date": "2026-10-10",
+        "env_vars": {
+          "FOO": { "value": "bar", "type": "plain_text" }
+        }
+      }
+    }
+  }
+}

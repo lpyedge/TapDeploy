@@ -1,0 +1,18 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/storage/kv/namespaces",
+  "source": "https://developers.cloudflare.com/api/resources/kv/subresources/namespaces/methods/list/",
+  "shape": "result[] with id/title/jurisdiction/mode/supports_url_encoding",
+  "result": [
+    {
+      "id": "0f2ac74b498b48028cb68387c421e279",
+      "title": "My Own Namespace",
+      "jurisdiction": "eu",
+      "mode": "instant",
+      "supports_url_encoding": true
+    },
+    {
+      "id": "11111111111111111111111111111111",
+      "title": "Legacy Namespace"
+    }
+  ]
+}

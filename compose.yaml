@@ -1,0 +1,16 @@
+# Docker Compose packaging for the Node runtime. No database volume and no
+# installer-owned storage: sessions are stateless cookies.
+services:
+  tapdeploy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tapdeploy:local
+    ports:
+      - "8787:8787"
+    environment:
+      # Set these in a .env file next to compose.yaml (see .env.example).
+      TAPDEPLOY_PUBLIC_ORIGIN: ${TAPDEPLOY_PUBLIC_ORIGIN:?set TAPDEPLOY_PUBLIC_ORIGIN}
+      TAPDEPLOY_OAUTH_CLIENT_ID: ${TAPDEPLOY_OAUTH_CLIENT_ID:?set TAPDEPLOY_OAUTH_CLIENT_ID}
+      TAPDEPLOY_OAUTH_CLIENT_SECRET: ${TAPDEPLOY_OAUTH_CLIENT_SECRET:?set TAPDEPLOY_OAUTH_CLIENT_SECRET}
+    restart: unless-stopped

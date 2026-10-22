@@ -1,0 +1,8 @@
+{
+  "label": "GET /client/v4/accounts",
+  "source": "https://developers.cloudflare.com/api/resources/accounts/methods/list/",
+  "shape": "result is a direct array of account summaries",
+  "result": [
+    { "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "Test Acct" }
+  ]
+}

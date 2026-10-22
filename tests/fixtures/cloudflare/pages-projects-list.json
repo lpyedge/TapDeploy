@@ -1,0 +1,21 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/pages/projects",
+  "source": "https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/list/",
+  "shape": "result is a direct array of Pages project objects (id, name, subdomain, created_on, modified_on, domains, canonical_deployment). The endpoint does not paginate with cursors.",
+  "result": [
+    {
+      "id": "project-id-1",
+      "name": "my-pages-app",
+      "subdomain": "my-pages-app.pages.dev",
+      "created_on": "2026-01-01T00:00:00Z",
+      "modified_on": "2026-02-01T00:00:00Z",
+      "domains": ["my-pages-app.pages.dev", "example.com"],
+      "canonical_deployment": {
+        "id": "deployment-id-1",
+        "url": "https://my-pages-app.pages.dev",
+        "environment": "production",
+        "created_on": "2026-02-01T00:00:00Z"
+      }
+    }
+  ]
+}

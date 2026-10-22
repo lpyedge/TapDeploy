@@ -1,0 +1,491 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/lpyedge/TapDeploy/main/schemas/tapdeploy.config.v3.schema.json",
+  "title": "TapDeploy standalone project configuration v3 (prebuilt release ZIP)",
+  "description": "Minimal author contract for the prebuilt-ZIP deploy flow. The release ZIP's final wrangler.jsonc is the deployment source of truth; this config only carries app identity, ZIP source, pre-authorized symbolic capabilities and opt-in advanced clauses (inputs/units/install). No scripts, hooks, commands, raw OAuth scopes or arbitrary endpoints can ever be expressed here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "app",
+    "source",
+    "capabilities"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 3
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 180,
+          "pattern": "^[A-Za-z0-9](?!.*\\.\\.)[A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "allowLocalZip": {
+          "type": "boolean"
+        },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "allowLocalZip": {
+                "const": false
+              }
+            },
+            "required": [
+              "allowLocalZip"
+            ]
+          },
+          "then": {
+            "required": [
+              "defaultUrl"
+            ],
+            "properties": {
+              "defaultUrl": true
+            }
+          }
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "workers",
+          "pages",
+          "r2",
+          "d1",
+          "kv",
+          "queues",
+          "hyperdrive",
+          "vectorize",
+          "secrets-store",
+          "workers-ai",
+          "browser-rendering",
+          "routes",
+          "dns",
+          "zone",
+          "workflows",
+          "durable-objects"
+        ]
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "type",
+          "label",
+          "requiredWhen"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "text",
+              "integer",
+              "number",
+              "boolean",
+              "secret",
+              "select"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "placeholder": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "requiredWhen": {
+            "enum": [
+              "install",
+              "upgrade",
+              "both",
+              "never"
+            ]
+          },
+          "secretPolicy": {
+            "enum": [
+              "prompt",
+              "generate-once"
+            ]
+          },
+          "options": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "value"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              }
+            }
+          },
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "minLength": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "pattern": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "minimum": {
+                "type": "number"
+              },
+              "maximum": {
+                "type": "number"
+              },
+              "values": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "select"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "required": [
+                "options"
+              ],
+              "properties": {
+                "options": true
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "secretPolicy": true
+              },
+              "required": [
+                "secretPolicy"
+              ]
+            },
+            "then": {
+              "properties": {
+                "type": {
+                  "const": "secret"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "units": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "wrangler"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/unitId"
+              },
+              "kind": {
+                "enum": [
+                  "worker",
+                  "pages"
+                ]
+              },
+              "wrangler": {
+                "$ref": "#/$defs/wranglerPath"
+              },
+              "dependsOn": {
+                "$ref": "#/$defs/dependsOn"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "resources"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/unitId"
+              },
+              "kind": {
+                "const": "resources"
+              },
+              "resources": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "name",
+                    "mode"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "r2",
+                        "kv",
+                        "d1",
+                        "queue",
+                        "vectorize"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 63,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                    },
+                    "mode": {
+                      "enum": [
+                        "ensure",
+                        "bind-existing"
+                      ]
+                    },
+                    "dimensions": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1536,
+                      "description": "Vectorize only: vector dimensions, required to create the index (mode ensure)."
+                    },
+                    "metric": {
+                      "enum": [
+                        "cosine",
+                        "euclidean",
+                        "dot-product"
+                      ],
+                      "description": "Vectorize only: distance metric, required to create the index (mode ensure)."
+                    }
+                  }
+                }
+              },
+              "dependsOn": {
+                "$ref": "#/$defs/dependsOn"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policies"
+      ],
+      "properties": {
+        "policies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "unitId",
+              "r2Binding",
+              "rootSecret",
+              "armSecret",
+              "armValue",
+              "ownerKey",
+              "markerKey",
+              "initialPasswordKey"
+            ],
+            "properties": {
+              "kind": {
+                "const": "private-r2-owner-bootstrap/v1"
+              },
+              "unitId": {
+                "$ref": "#/$defs/unitId"
+              },
+              "r2Binding": {
+                "$ref": "#/$defs/bindingName"
+              },
+              "rootSecret": {
+                "$ref": "#/$defs/bindingName"
+              },
+              "armSecret": {
+                "$ref": "#/$defs/bindingName"
+              },
+              "armValue": {
+                "const": "yes"
+              },
+              "ownerKey": {
+                "$ref": "#/$defs/objectKey"
+              },
+              "markerKey": {
+                "$ref": "#/$defs/objectKey"
+              },
+              "initialPasswordKey": {
+                "$ref": "#/$defs/objectKey"
+              },
+              "readinessPath": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^/[^\\s]*$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "const": "one-shot-bounded-max"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "unitId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+    },
+    "bindingName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+    },
+    "objectKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "wranglerPath": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 160,
+      "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]*\\.jsonc$"
+    },
+    "dependsOn": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/unitId"
+      }
+    }
+  }
+}

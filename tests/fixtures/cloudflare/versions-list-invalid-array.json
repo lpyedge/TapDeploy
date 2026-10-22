@@ -1,0 +1,8 @@
+{
+  "label": "INVALID versions list: result is a direct array (must be rejected; official is result.items)",
+  "source": "Negated: official is result.items[]",
+  "negated": true,
+  "result": [
+    { "id": "v-1" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/r2/buckets?per_page=100&cursor=...",
+  "source": "https://developers.cloudflare.com/api/resources/r2/subresources/buckets/methods/list/",
+  "shape": "result.buckets[] plus result_info.cursor for cursor pagination",
+  "result": {
+    "buckets": [
+      { "name": "b-1", "creation_date": "2026-01-01T00:00:00Z" }
+    ]
+  }
+}

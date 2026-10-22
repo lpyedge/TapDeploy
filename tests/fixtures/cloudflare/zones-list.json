@@ -1,0 +1,23 @@
+{
+  "label": "GET /client/v4/zones",
+  "source": "https://developers.cloudflare.com/api/resources/zones/methods/list/",
+  "shape": "result[] zones with id/name/status/account",
+  "result": [
+    {
+      "id": "023e105f4ecef8ad9ca31a8372d0c353",
+      "name": "example.com",
+      "status": "active",
+      "paused": false,
+      "type": "full",
+      "account": { "id": "023e105f4ecef8ad9ca31a8372d0c353", "name": "My Account" }
+    },
+    {
+      "id": "023e105f4ecef8ad9ca31a8372d0c354",
+      "name": "other.test",
+      "status": "pending",
+      "paused": false,
+      "type": "partial",
+      "account": { "id": "023e105f4ecef8ad9ca31a8372d0c353", "name": "My Account" }
+    }
+  ]
+}

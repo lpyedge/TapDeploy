@@ -1,0 +1,8 @@
+{
+  "label": "INVALID R2 list: result is a direct array (must be rejected; official is result.buckets)",
+  "source": "Negated: official is result.buckets[] with result_info.cursor",
+  "negated": true,
+  "result": [
+    { "name": "b-1" }
+  ]
+}

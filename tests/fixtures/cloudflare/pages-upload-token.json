@@ -1,0 +1,8 @@
+{
+  "label": "GET /accounts/{account_id}/pages/projects/{project_name}/upload-token",
+  "source": "https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/upload-token/",
+  "shape": "Short-lived upload JWT for Pages Direct Upload. result is { jwt: string }. This JWT (not the OAuth token) authorizes the asset upload calls.",
+  "result": {
+    "jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoicGFnZXMiLCJwcm9qZWN0IjoibXktcGFnZXMtYXBwIiwibWF4X2ZpbGVfY291bnRfYWxsb3dlZCI6MjAwMDAsImlhdCI6MTc2MDAwMDAwMH0.sig"
+  }
+}

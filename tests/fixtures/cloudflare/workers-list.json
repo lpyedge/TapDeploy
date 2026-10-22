@@ -1,0 +1,13 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/workers/scripts",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/list/",
+  "shape": "result is a direct array of worker script metadata (id, created_on, modified_on, etag)",
+  "result": [
+    {
+      "id": "demo-worker",
+      "created_on": "2026-01-01T00:00:00Z",
+      "modified_on": "2026-01-01T00:00:00Z",
+      "etag": "etag-1"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/workers/scripts/{script}/deployments",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/methods/list/",
+  "shape": "result.deployments[]; each versions[] entry uses version_id + percentage",
+  "result": {
+    "deployments": [
+      {
+        "id": "dep-1",
+        "created_on": "2026-01-02T00:00:00Z",
+        "source": "api",
+        "strategy": "percentage",
+        "versions": [
+          { "version_id": "v-2", "percentage": 100 }
+        ],
+        "annotations": {
+          "workers/message": "Deploy."
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+# Build context exclusions for the Node runtime Docker image (Dockerfile).
+node_modules
+temp
+dist
+dist-ssr
+plan
+.git
+.wrangler
+logs
+test-results
+playwright-report
+coverage
+*.log
+.env
+.env.*
+.env.local
+# Keep build-cache/context layers free of local credentials at every depth.
+**/.env*
+**/.dev.vars*
+**/.wrangler
+**/.npmrc
+**/.netrc
+**/*.pem
+**/*.key
+**/id_rsa
+**/id_ed25519

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 3,
+  "app": {
+    "id": "example/worker-stack",
+    "name": "Worker Stack"
+  },
+  "source": {
+    "defaultUrl": "https://example.org/worker-stack.zip",
+    "allowLocalZip": true
+  },
+  "capabilities": [
+    "workers",
+    "r2",
+    "queues"
+  ],
+  "units": [
+    {
+      "id": "jobs",
+      "kind": "worker",
+      "wrangler": "units/jobs/wrangler.jsonc"
+    },
+    {
+      "id": "api",
+      "kind": "worker",
+      "wrangler": "units/api/wrangler.jsonc",
+      "dependsOn": [
+        "jobs"
+      ]
+    }
+  ]
+}

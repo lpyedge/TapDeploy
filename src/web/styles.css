@@ -1,0 +1,533 @@
+/* TapDeploy — Tailwind CSS v4 entry.
+   Component classes are authored with @apply so the JSX stays semantic and the
+   whole stylesheet is compiled at build time (no runtime CDN dependency; works
+   fully offline). */
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+  h1 {
+    @apply text-base sm:text-lg font-semibold tracking-tight text-slate-900;
+  }
+  h2 {
+    @apply text-lg sm:text-xl font-semibold text-slate-700 mb-3;
+  }
+  h3 {
+    @apply text-base font-semibold text-slate-600 mb-2;
+  }
+  pre {
+    @apply bg-slate-900 text-slate-100 p-4 rounded-lg overflow-auto text-sm;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+}
+
+@layer components {
+  .page {
+    @apply mx-auto w-full max-w-3xl px-4 pb-16 pt-2 sm:px-6;
+  }
+
+  .topbar {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 py-3;
+  }
+  .brand {
+    @apply flex items-center gap-2 text-orange-500;
+  }
+  .brand h1 {
+    @apply m-0;
+  }
+  .account-control {
+    @apply flex items-center gap-2 text-sm text-slate-600;
+  }
+  .account-control select {
+    @apply w-auto max-w-[14rem] py-1.5;
+  }
+
+  .stepper {
+    @apply mt-2;
+  }
+  .stepper ol {
+    @apply hidden sm:flex list-none m-0 p-0 items-center gap-1;
+  }
+  .stepper li {
+    @apply flex items-center gap-1.5 text-xs text-slate-400 after:content-[''] after:block after:w-5 after:h-px after:bg-slate-300 last:after:hidden;
+  }
+  .stepper-dot {
+    @apply inline-flex size-5 items-center justify-center rounded-full border border-slate-300 bg-white text-[11px] font-semibold;
+  }
+  .stepper li[data-state="current"] {
+    @apply text-slate-900 font-semibold;
+  }
+  .stepper li[data-state="current"] .stepper-dot {
+    @apply bg-blue-600 border-blue-600 text-white;
+  }
+  .stepper li[data-state="done"] {
+    @apply text-slate-500;
+  }
+  .stepper li[data-state="done"] .stepper-dot {
+    @apply bg-emerald-50 border-emerald-500 text-emerald-600;
+  }
+  .stepper-compact {
+    @apply sm:hidden m-0 text-xs font-medium text-slate-500;
+  }
+
+  .seg {
+    @apply inline-flex max-w-full flex-wrap gap-1 rounded-lg bg-slate-100 p-1;
+  }
+  .seg-opt {
+    @apply relative cursor-pointer rounded-md px-3 py-1.5 text-sm text-slate-600 transition hover:text-slate-900 has-[:checked]:bg-white has-[:checked]:text-slate-900 has-[:checked]:font-medium has-[:checked]:shadow-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/50;
+  }
+
+  .seg[data-disabled="true"] {
+    @apply opacity-50;
+  }
+  .seg[data-disabled="true"] .seg-opt {
+    @apply cursor-not-allowed;
+  }
+  .infotip {
+    @apply relative inline-flex align-middle;
+  }
+  .infotip-btn {
+    @apply ml-1.5 inline-flex size-[18px] items-center justify-center rounded-full border border-slate-300 bg-white p-0 text-[11px] font-semibold italic text-slate-500 shadow-none hover:border-blue-500 hover:text-blue-600;
+  }
+  .infotip-pop {
+    @apply pointer-events-none invisible absolute left-0 top-full z-20 mt-1.5 w-64 max-w-[80vw] rounded-lg bg-slate-900 px-3 py-2 text-xs font-normal not-italic leading-snug text-slate-100 opacity-0 shadow-lg transition;
+  }
+  .infotip:hover .infotip-pop,
+  .infotip:has(:focus-visible) .infotip-pop,
+  .infotip[data-open="true"] .infotip-pop {
+    @apply visible opacity-100;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600;
+  }
+  .chip-warn {
+    @apply bg-amber-50 text-amber-800;
+  }
+
+  .fold {
+    @apply mt-3 rounded-lg border border-slate-200;
+  }
+  .fold > summary {
+    @apply cursor-pointer list-none px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50;
+  }
+  .fold[open] > summary {
+    @apply border-b border-slate-200;
+  }
+  .fold > :not(summary) {
+    @apply px-3;
+  }
+
+  .actionbar {
+    @apply sticky bottom-0 z-10 -mx-4 mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:pb-0;
+  }
+
+  button.link {
+    @apply border-0 bg-transparent p-0 text-blue-700 shadow-none hover:bg-transparent hover:underline;
+  }
+
+  .dropzone {
+    @apply flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600 hover:border-blue-400 hover:bg-blue-50/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/50;
+  }
+
+  .inline-row {
+    @apply flex flex-col gap-2 sm:flex-row sm:items-end;
+  }
+  .inline-row > .field {
+    @apply my-0 sm:flex-1;
+  }
+
+  .res-grid {
+    @apply grid list-none gap-2 p-0 sm:grid-cols-2;
+  }
+  .res-item {
+    @apply flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-200 px-3 py-2 text-sm;
+  }
+  .section-title {
+    @apply mb-1 mt-4 flex items-center text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .meta {
+    @apply text-sm text-slate-500;
+  }
+
+  .option-card {
+    @apply mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3;
+  }
+  input[type="checkbox"].switch {
+    @apply relative mt-0.5 h-6 w-10 shrink-0 cursor-pointer appearance-none rounded-full bg-slate-300 transition checked:bg-blue-600 focus-visible:ring-2 focus-visible:ring-blue-500/50;
+  }
+  input[type="checkbox"].switch::after {
+    content: "";
+    @apply absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow transition-transform;
+  }
+  input[type="checkbox"].switch:checked::after {
+    @apply translate-x-4;
+  }
+  .result-open {
+    @apply my-4 flex flex-wrap items-center gap-3;
+  }
+  .result-open a.open-app {
+    @apply inline-flex max-w-full items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white no-underline shadow-sm hover:bg-blue-700;
+    overflow-wrap: anywhere;
+  }
+  .result-open a.open-more {
+    @apply text-sm text-blue-700 underline;
+    overflow-wrap: anywhere;
+  }
+  .result-open a.open-dashboard,
+  .result-card a.open-dashboard {
+    @apply text-sm text-blue-700 underline;
+  }
+  .btn-row {
+    @apply mt-4 flex flex-wrap gap-3 max-sm:[&>button]:w-full;
+  }
+  .res-card {
+    @apply mb-3 rounded-lg border border-slate-200 px-3 pb-1 pt-3;
+  }
+  .res-card .field {
+    @apply my-2;
+  }
+  .res-card .meta {
+    @apply my-1;
+  }
+
+  .panel {
+    @apply bg-white border border-slate-200 rounded-xl p-4 sm:p-6 mt-4 shadow-sm;
+  }
+
+  .error {
+    @apply text-red-600 font-medium;
+  }
+
+  .notice {
+    @apply text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mt-3 text-sm leading-relaxed;
+  }
+
+  .success {
+    @apply text-emerald-600 font-semibold;
+  }
+
+  .panel-note {
+    @apply text-slate-500 text-sm my-2 leading-relaxed;
+  }
+
+  .req {
+    @apply text-red-600 text-sm font-medium;
+  }
+
+  button {
+    @apply font-medium text-sm px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-700 cursor-pointer shadow-sm transition
+      hover:bg-slate-50 hover:border-slate-400
+      disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  button.primary {
+    @apply bg-blue-600 text-white border-blue-600 font-semibold
+      hover:bg-blue-700 hover:border-blue-700;
+  }
+
+  .field {
+    @apply my-4 w-full;
+  }
+
+  .field > label {
+    @apply block font-medium text-slate-700 mb-1.5 text-sm;
+  }
+
+  .field-hint {
+    @apply text-slate-500 text-xs mt-1 mb-2 leading-snug;
+  }
+
+  .field-error {
+    @apply text-red-600 text-xs font-medium mt-1.5 leading-snug;
+  }
+
+  input:not([type]),
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="search"],
+  textarea,
+  select {
+    @apply w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 shadow-sm transition
+      focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30;
+  }
+
+  textarea {
+    @apply resize-y min-h-[100px];
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    @apply size-4 cursor-pointer accent-blue-600;
+  }
+
+  .radio-group,
+  .checkbox-group {
+    @apply flex flex-col gap-2.5 my-2;
+  }
+
+  .radio-option,
+  .checkbox-option {
+    @apply flex items-center gap-2.5 p-3 border border-slate-200 rounded-lg bg-white cursor-pointer transition flex-wrap
+      hover:bg-slate-50 hover:border-slate-300;
+  }
+
+  .radio-option > label,
+  .checkbox-option > label {
+    @apply m-0 font-normal text-slate-700 cursor-pointer flex-1 min-w-0 break-words;
+  }
+
+  .facts {
+    @apply grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 my-2;
+  }
+
+  .facts dt {
+    @apply font-semibold text-slate-600 text-xs uppercase tracking-wide mb-1;
+  }
+
+  .facts dd {
+    @apply m-0 text-slate-900 text-sm break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .diff-list {
+    @apply list-none p-0 my-4;
+  }
+
+  .diff-list li {
+    @apply py-3 border-b border-slate-100 text-sm text-slate-700 leading-relaxed last:border-b-0;
+  }
+
+  .confirm-block {
+    @apply mt-6 pt-6 border-t border-slate-100;
+  }
+
+  .confirm-label {
+    @apply flex items-start gap-2.5 font-medium text-slate-700 mb-4 cursor-pointer leading-relaxed;
+  }
+
+  .confirm-label input[type="checkbox"] {
+    @apply mt-0.5 shrink-0;
+  }
+
+  .blocked-block {
+    @apply mt-4 p-4 rounded-lg bg-red-50 border border-red-200;
+  }
+
+  .warn-block {
+    @apply mt-4 p-4 rounded-lg bg-amber-50 border border-amber-200;
+  }
+
+  .paid-risk-block {
+    @apply mt-4 p-4 rounded-lg bg-amber-50 border border-amber-300;
+  }
+
+  /* One HTTP unit's custom-domain choices in the Configure step. */
+  .domain-unit {
+    @apply mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 p-3;
+  }
+
+  .blocked-block h3,
+  .warn-block h3,
+  .paid-risk-block h3 {
+    @apply text-sm mb-2;
+  }
+
+  .blocked-block h3 {
+    @apply text-red-800;
+  }
+  .warn-block h3,
+  .paid-risk-block h3 {
+    @apply text-amber-800;
+  }
+
+  .blocked-block p {
+    @apply text-red-900 text-sm my-1 leading-relaxed;
+  }
+  .warn-block p,
+  .paid-risk-block p {
+    @apply text-amber-900 text-sm my-1 leading-relaxed;
+  }
+
+  .step-list {
+    @apply list-none p-0 m-0;
+  }
+  .step-list li {
+    @apply flex flex-wrap items-baseline gap-x-3 gap-y-1 py-1 text-sm;
+  }
+  .step-state {
+    @apply text-slate-500;
+  }
+  .step-list li[data-state="done"] .step-state {
+    @apply text-emerald-600;
+  }
+  .step-list li[data-state="error"] .step-state,
+  .step-detail {
+    @apply text-red-600;
+  }
+  .step-detail {
+    @apply basis-full break-words;
+  }
+
+  /* --- entry, flow header and status blocks --- */
+  .lead {
+    @apply text-sm leading-relaxed text-slate-600 sm:text-[15px];
+  }
+  .loading {
+    @apply mt-10 flex items-center justify-center gap-3 text-sm text-slate-500;
+  }
+  .loading::before {
+    content: "";
+    @apply size-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600;
+  }
+  .flow-head {
+    @apply mb-2 flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3;
+  }
+  .error-code {
+    @apply ml-1 rounded bg-red-100 px-1.5 py-0.5 text-[11px] text-red-700;
+  }
+  .error-block {
+    @apply mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-800 outline-none;
+  }
+
+  /* --- release / configure --- */
+  .release-summary {
+    @apply rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm;
+  }
+  .unit-chips {
+    @apply m-0 mt-2 flex list-none flex-wrap gap-2 p-0;
+  }
+  .unit-chips .chip strong {
+    @apply font-semibold text-slate-800;
+  }
+
+  /* --- plan review --- */
+  .review-head {
+    @apply flex flex-wrap items-center justify-between gap-2;
+  }
+  .plan-units {
+    @apply mt-3 flex flex-col gap-3;
+  }
+  .plan-unit {
+    @apply rounded-lg border border-slate-200 px-4 py-3;
+  }
+  .plan-unit-title {
+    @apply m-0 mb-2 text-sm font-semibold text-slate-800;
+  }
+  .plan-diffs {
+    @apply m-0 flex list-none flex-col gap-1.5 p-0 text-sm text-slate-700;
+  }
+  .plan-diffs li {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .badge {
+    @apply inline-flex min-w-[4.5rem] justify-center rounded-md px-2 py-0.5 text-xs font-semibold;
+  }
+  .badge-create {
+    @apply bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200;
+  }
+  .badge-update {
+    @apply bg-blue-50 text-blue-700 ring-1 ring-blue-200;
+  }
+  .badge-keep {
+    @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200;
+  }
+  .badge-conflict {
+    @apply bg-red-50 text-red-700 ring-1 ring-red-200;
+  }
+
+  /* --- progress checklist --- */
+  .progress {
+    @apply mt-2;
+  }
+  .progress-head {
+    @apply flex flex-wrap items-baseline justify-between gap-2;
+  }
+  .progress-bar {
+    @apply mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100;
+  }
+  .progress-bar > span {
+    @apply block h-full rounded-full bg-blue-600 transition-[width] duration-500;
+  }
+  .step-list li {
+    @apply border-b border-slate-100 py-2 last:border-b-0;
+  }
+  .step-icon {
+    @apply inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-400;
+  }
+  .step-list li[data-state="done"] .step-icon {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+  .step-list li[data-state="running"] .step-icon,
+  .step-list li[data-state="waiting"] .step-icon {
+    @apply animate-pulse bg-blue-100 text-blue-700;
+  }
+  .step-list li[data-state="error"] .step-icon {
+    @apply bg-red-100 text-red-700;
+  }
+  .step-name {
+    @apply min-w-0 flex-1 text-slate-800;
+  }
+  .step-target {
+    @apply font-semibold;
+  }
+  .step-unit {
+    @apply ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500;
+  }
+
+  /* --- result --- */
+  .result-card {
+    @apply mt-4 rounded-xl border px-4 py-4 sm:px-5;
+  }
+  .result-ok {
+    @apply border-emerald-200 bg-emerald-50/60;
+  }
+  .result-fail {
+    @apply border-red-200 bg-red-50 text-red-900;
+  }
+  .result-pending {
+    @apply border-amber-200 bg-amber-50 text-amber-900;
+  }
+  .result-title {
+    @apply flex items-center gap-3;
+  }
+  .result-icon {
+    @apply inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-lg font-bold text-white;
+  }
+
+}
+
+@media (max-width: 639px) {
+  /* On phones a tooltip spans the card instead of hanging off its icon, so it
+     can never push the page wider than the screen. */
+  .panel {
+    position: relative;
+  }
+  .infotip {
+    position: static;
+  }
+  .infotip-pop {
+    left: 1rem;
+    right: 1rem;
+    top: auto;
+    width: auto;
+    max-width: none;
+  }
+  .panel button.primary,
+  .actionbar button:not(.link) {
+    @apply w-full;
+  }
+}

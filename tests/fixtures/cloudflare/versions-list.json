@@ -1,0 +1,25 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/workers/scripts/{script}/versions",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/",
+  "shape": "result.items[] with metadata {created_on}; number is monotonically increasing",
+  "result": {
+    "items": [
+      {
+        "id": "v-2",
+        "number": 2,
+        "metadata": {
+          "created_on": "2026-02-01T00:00:00Z",
+          "author_id": "a-1",
+          "source": "api"
+        }
+      },
+      {
+        "id": "v-1",
+        "number": 1,
+        "metadata": {
+          "created_on": "2026-01-01T00:00:00Z"
+        }
+      }
+    ]
+  }
+}

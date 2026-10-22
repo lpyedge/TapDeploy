@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, lint, unit/contract and e2e tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # A physical node_modules from npm ci; scripts/ensure-dev-deps.mjs leaves it alone.
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+
+      # The runtime contract tests repackage dist/, so rebuild before the e2e runs.
+      - run: npm run build
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Playwright (Vite dev server)
+        run: npm run test:e2e
+      - name: Playwright (built Node server)
+        run: npm run test:e2e
+        env:
+          TAPDEPLOY_PW_RUNTIME: node
+      - name: Playwright (built Worker, wrangler dev --local)
+        run: npm run test:e2e
+        env:
+          TAPDEPLOY_PW_RUNTIME: workers
+
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: temp/playwright/results
+          if-no-files-found: ignore
+          retention-days: 7

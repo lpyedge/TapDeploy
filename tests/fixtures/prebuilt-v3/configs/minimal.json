@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 3,
+  "app": {
+    "id": "example/notes",
+    "name": "Notes"
+  },
+  "source": {
+    "defaultUrl": "https://example.org/notes-release.zip",
+    "allowLocalZip": true
+  },
+  "capabilities": [
+    "workers"
+  ]
+}

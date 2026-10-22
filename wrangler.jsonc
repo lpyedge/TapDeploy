@@ -1,0 +1,14 @@
+{
+  "name": "tapdeploy",
+  "main": "dist/workers/worker.mjs",
+  "compatibility_date": "2026-09-04",
+  "assets": {
+    "directory": "./dist/workers/assets",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

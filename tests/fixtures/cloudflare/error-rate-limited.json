@@ -1,0 +1,14 @@
+{
+  "label": "Rate-limited error envelope",
+  "source": "https://developers.cloudflare.com/api/",
+  "shape": "response success=false, errors[], with HTTP 429 and retry-after header",
+  "response_meta": {
+    "status": 429,
+    "headers": { "retry-after": "32" }
+  },
+  "success": false,
+  "errors": [
+    { "message": "throttled" }
+  ],
+  "messages": []
+}

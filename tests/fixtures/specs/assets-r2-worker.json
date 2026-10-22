@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "fixture/assets-r2-worker",
+    "version": "0.1.0"
+  },
+  "worker": {
+    "path": "worker/main.mjs",
+    "size": 266,
+    "sha256": "a32954fe10835a4a9ca15ac0ab2ae0764f4e63210f885dea231d65e0b37afc94"
+  },
+  "assets": [
+    {
+      "path": "assets/index.html",
+      "size": 123,
+      "sha256": "fe6dadf646cf023aac3edd205fbea3a1da08536d1706d48318fb85e53832bd3a",
+      "workersHash": "11111111111111111111111111111111"
+    }
+  ],
+  "inputs": {
+    "workerName": "tapdeploy-fixture-assets-r2",
+    "bucket": "tapdeploy-test-placeholder"
+  },
+  "cloudflare": {
+    "workerName": "tapdeploy-fixture-assets-r2",
+    "r2": [
+      {
+        "binding": "FILES",
+        "bucketName": "tapdeploy-test-placeholder",
+        "createIfMissing": true
+      }
+    ],
+    "d1": [],
+    "kv": [],
+    "queues": [],
+    "workflows": [],
+    "hyperdrive": [],
+    "vectorize": [],
+    "secretsStore": [],
+    "runtimeBindings": [],
+    "cron": [],
+    "secrets": {}
+  },
+  "ui": {
+    "description": "A Worker with static assets and an R2 bucket."
+  },
+  "wrangler": {
+    "name": "tapdeploy-fixture-assets-r2",
+    "main": "./worker/main.mjs",
+    "compatibility_date": "2026-10-10",
+    "assets": {
+      "directory": "./assets",
+      "binding": "ASSETS",
+      "run_worker_first": [
+        "/api/*"
+      ]
+    },
+    "r2_buckets": [
+      {
+        "binding": "FILES",
+        "bucket_name": "tapdeploy-test-placeholder"
+      }
+    ],
+    "crons": []
+  },
+  "targetKind": "workers"
+}

@@ -1,0 +1,10 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/workers/scripts/{script}/schedules",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/schedules/methods/get/",
+  "shape": "result.schedules[{cron, created_on}]",
+  "result": {
+    "schedules": [
+      { "cron": "*/30 * * * *", "created_on": "2026-01-01T00:00:00Z" }
+    ]
+  }
+}

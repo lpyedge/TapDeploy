@@ -1,0 +1,15 @@
+{
+  "label": "GET /accounts/{account_id}/pages/projects/{project_name}/domains",
+  "source": "https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/domains/methods/list/",
+  "shape": "result[] Pages custom domains with id/domain_id/name/status/zone_tag",
+  "result": [
+    {
+      "id": "c05b3b6f-2ae8-4a3b-9232-3e4b1c7b8f90",
+      "domain_id": "c05b3b6f-2ae8-4a3b-9232-3e4b1c7b8f90",
+      "name": "docs.example.com",
+      "status": "active",
+      "zone_tag": "023e105f4ecef8ad9ca31a8372d0c353",
+      "created_on": "2026-03-01T00:00:00Z"
+    }
+  ]
+}

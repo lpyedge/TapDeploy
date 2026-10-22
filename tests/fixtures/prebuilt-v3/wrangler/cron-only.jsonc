@@ -1,0 +1,7 @@
+{
+  // Cron-only unit: no fetch handler, still a Worker.
+  "name": "nightly-jobs",
+  "main": "worker/cron.mjs",
+  "compatibility_date": "2026-10-10",
+  "triggers": { "crons": ["*/5 * * * *", "0 3 * * *"] }
+}

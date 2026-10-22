@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "fixture/conflicting-r2",
+    "version": "0.1.0"
+  },
+  "worker": {
+    "path": "worker/main.mjs",
+    "size": 147,
+    "sha256": "ac0c698753ca81190a1a8fcd3854f46cd7a9fad7c102a6afd45d013ae50e0f5a"
+  },
+  "assets": [],
+  "inputs": {
+    "workerName": "tapdeploy-r2conflict",
+    "bucket": "manifest-bucket-name"
+  },
+  "cloudflare": {
+    "workerName": "tapdeploy-r2conflict",
+    "r2": [
+      {
+        "binding": "FILES",
+        "bucketName": "manifest-bucket-name",
+        "createIfMissing": false
+      }
+    ],
+    "d1": [],
+    "kv": [],
+    "queues": [],
+    "workflows": [],
+    "hyperdrive": [],
+    "vectorize": [],
+    "secretsStore": [],
+    "runtimeBindings": [],
+    "cron": [],
+    "secrets": {}
+  },
+  "wrangler": {
+    "name": "tapdeploy-r2conflict",
+    "main": "./worker/main.mjs",
+    "compatibility_date": "2026-10-10",
+    "r2_buckets": [
+      {
+        "binding": "FILES",
+        "bucket_name": "manifest-bucket-name"
+      }
+    ],
+    "crons": []
+  },
+  "targetKind": "workers"
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 3,
+  "app": {
+    "id": "example/owner-app",
+    "name": "Owner App"
+  },
+  "source": {
+    "defaultUrl": "https://example.org/owner-app-release.zip",
+    "allowLocalZip": true
+  },
+  "capabilities": [
+    "workers",
+    "r2"
+  ],
+  "install": {
+    "policies": [
+      {
+        "kind": "private-r2-owner-bootstrap/v1",
+        "unitId": "main",
+        "r2Binding": "R2_STORAGE",
+        "rootSecret": "JWT_SECRET",
+        "armSecret": "SETUP_ARMED",
+        "armValue": "yes",
+        "ownerKey": "auth/owner.json",
+        "markerKey": "auth/bootstrap-marker",
+        "initialPasswordKey": "auth/initial-owner-password.txt",
+        "readinessPath": "/api/auth/methods"
+      }
+    ]
+  }
+}

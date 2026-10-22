@@ -1,0 +1,14 @@
+{
+  "label": "GET /client/v4/zones/{zone_id}/workers/routes",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/routes/methods/list/",
+  "shape": "result[] Worker routes with id/pattern/script/zone_id/zone_name",
+  "result": [
+    {
+      "id": "023e105f4ecef8ad9ca31a8372d0c353",
+      "pattern": "example.com/*",
+      "script": "my-worker",
+      "zone_id": "023e105f4ecef8ad9ca31a8372d0c353",
+      "zone_name": "example.com"
+    }
+  ]
+}

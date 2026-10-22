@@ -1,0 +1,12 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/workers/scripts/{script}/settings",
+  "source": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/methods/get/",
+  "shape": "result.bindings[] (incl. ratelimit + r2_bucket), compatibility_date",
+  "result": {
+    "bindings": [
+      { "name": "RL", "type": "ratelimit" },
+      { "type": "r2_bucket", "name": "FILES", "bucket_name": "tapdeploy-test-placeholder" }
+    ],
+    "compatibility_date": "2026-10-10"
+  }
+}

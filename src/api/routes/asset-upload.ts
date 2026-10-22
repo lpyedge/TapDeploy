@@ -1,0 +1,88 @@
+// Same-origin forwarder for the JWT-scoped static-asset upload calls.
+//
+// api.cloudflare.com sends no CORS headers, so a browser cannot call these
+// endpoints itself ("TypeError: Failed to fetch"). The browser instead POSTs the
+// exact upload request here; this route relays it to one of four FIXED
+// Cloudflare URLs with the short-lived upload JWT as the only credential. The
+// OAuth access token is never involved, the destination cannot be chosen by the
+// caller, the request and response bodies are bounded, and nothing is logged.
+
+import type { Context, Hono } from "hono";
+import type { AppEnv, TapDeployEnv } from "../app.js";
+import { readBoundedResponse } from "../../core/bounded-response.js";
+import {
+  buildPagesAssetsCheckMissingUrl,
+  buildPagesAssetsUploadUrl,
+  buildPagesAssetsUpsertHashesUrl,
+  buildWorkerAssetsUploadUrl,
+} from "../../cloudflare/client/index.js";
+import { authenticate } from "../session-guard.js";
+
+const UPSTREAM_TIMEOUT_MS = 60_000;
+const UPSTREAM_RESPONSE_MAX_BYTES = 1024 * 1024;
+// Token characters only (no whitespace or control characters can reach a header).
+const JWT_RE = /^[A-Za-z0-9._~+/=-]{16,8192}$/;
+
+const TARGETS = {
+  "workers-assets": { contentType: "multipart/form-data", url: (account: string | undefined) => buildWorkerAssetsUploadUrl(account ?? "") },
+  "pages-check-missing": { contentType: "application/json", url: () => buildPagesAssetsCheckMissingUrl() },
+  "pages-upload": { contentType: "application/json", url: () => buildPagesAssetsUploadUrl() },
+  "pages-upsert-hashes": { contentType: "application/json", url: () => buildPagesAssetsUpsertHashesUrl() },
+} as const;
+
+type UploadTarget = keyof typeof TARGETS;
+
+function isTarget(value: string | undefined): value is UploadTarget {
+  return value !== undefined && Object.hasOwn(TARGETS, value);
+}
+
+export function attachAssetUploadRoutes(app: Hono<AppEnv>, env: TapDeployEnv): void {
+  app.post("/api/upload/assets", (c) => forwardUpload(c, env));
+}
+
+async function forwardUpload(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
+  const auth = await authenticate(c, env);
+  if ("denied" in auth) return auth.denied;
+
+  const target = c.req.query("target");
+  if (!isTarget(target)) return c.json({ error: "unknown_target" }, 400);
+  const spec = TARGETS[target];
+
+  const jwt = c.req.header("x-tapdeploy-upload-jwt") ?? "";
+  if (!JWT_RE.test(jwt)) return c.json({ error: "invalid_upload_token" }, 400);
+
+  const contentType = c.req.header("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith(spec.contentType)) {
+    return c.json({ error: "unsupported_content_type", expected: spec.contentType }, 415);
+  }
+
+  let url: string;
+  try {
+    url = spec.url(c.req.query("account"));
+  } catch {
+    return c.json({ error: "invalid_account" }, 400);
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${jwt}`, "Content-Type": contentType },
+      body: await c.req.arrayBuffer(),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    });
+  } catch {
+    return c.json({ error: "upstream_unreachable" }, 502);
+  }
+
+  let body: Uint8Array;
+  try {
+    body = await readBoundedResponse(upstream, UPSTREAM_RESPONSE_MAX_BYTES);
+  } catch {
+    return c.json({ error: "upstream_response_too_large" }, 502);
+  }
+  const headers = new Headers({ "Content-Type": upstream.headers.get("content-type") ?? "application/json", "Cache-Control": "no-store" });
+  const retryAfter = upstream.headers.get("retry-after");
+  if (retryAfter) headers.set("Retry-After", retryAfter);
+  return new Response(body.slice().buffer as ArrayBuffer, { status: upstream.status, headers });
+}

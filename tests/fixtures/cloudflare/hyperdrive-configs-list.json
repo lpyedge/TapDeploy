@@ -1,0 +1,30 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/hyperdrive/configs",
+  "source": "https://developers.cloudflare.com/api/resources/hyperdrive/subresources/configs/methods/list/",
+  "shape": "result[] with id/name/caching/origin/created_on/modified_on",
+  "result": [
+    {
+      "id": "0f2ac74b498b48028cb68387c421e279",
+      "name": "my-hyperdrive",
+      "caching": {
+        "disabled": false,
+        "max_age": 60,
+        "stale_while_revalidate": 10
+      },
+      "origin": {
+        "database": "postgres",
+        "host": "database.example.com",
+        "port": 5432,
+        "scheme": "postgres",
+        "user": "postgres"
+      },
+      "created_on": "2026-01-01T00:00:00Z",
+      "modified_on": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "legacy-hyperdrive",
+      "created_on": "2026-02-01T00:00:00Z"
+    }
+  ]
+}

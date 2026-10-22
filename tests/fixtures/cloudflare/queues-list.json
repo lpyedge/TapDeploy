@@ -1,0 +1,24 @@
+{
+  "label": "GET /client/v4/accounts/{account_id}/queues",
+  "source": "https://developers.cloudflare.com/api/resources/queues/methods/list/",
+  "shape": "result[] with queue_id/queue_name/created_on/settings/consumers_total_count/producers_total_count",
+  "result": [
+    {
+      "queue_id": "f0a0f0a0f0a0f0a0f0a0f0a0f0a0f0a0",
+      "queue_name": "my-queue",
+      "created_on": "2026-01-01T00:00:00Z",
+      "settings": {
+        "delivery_delay": 5,
+        "delivery_paused": false,
+        "message_retention_period": 694800
+      },
+      "consumers_total_count": 1,
+      "producers_total_count": 1
+    },
+    {
+      "queue_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "queue_name": "legacy-queue",
+      "created_on": "2026-02-01T00:00:00Z"
+    }
+  ]
+}

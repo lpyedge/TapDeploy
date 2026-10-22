@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "fixture/minimal-worker",
+    "version": "0.1.0"
+  },
+  "worker": {
+    "path": "worker/main.mjs",
+    "size": 147,
+    "sha256": "ac0c698753ca81190a1a8fcd3854f46cd7a9fad7c102a6afd45d013ae50e0f5a"
+  },
+  "assets": [],
+  "inputs": {
+    "workerName": "tapdeploy-fixture-minimal"
+  },
+  "cloudflare": {
+    "workerName": "tapdeploy-fixture-minimal",
+    "r2": [],
+    "d1": [],
+    "kv": [],
+    "queues": [],
+    "workflows": [],
+    "hyperdrive": [],
+    "vectorize": [],
+    "secretsStore": [],
+    "runtimeBindings": [],
+    "cron": [
+      "0 0 * * *"
+    ],
+    "secrets": {}
+  },
+  "ui": {
+    "description": "Offline local fixture; no Cloudflare write unless operator explicitly runs isolated live test."
+  },
+  "wrangler": {
+    "name": "tapdeploy-fixture-minimal",
+    "main": "./worker/main.mjs",
+    "compatibility_date": "2026-10-10",
+    "r2_buckets": [],
+    "crons": [
+      "0 0 * * *"
+    ]
+  },
+  "targetKind": "workers"
+}

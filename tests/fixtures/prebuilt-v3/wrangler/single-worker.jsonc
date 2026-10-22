@@ -1,0 +1,18 @@
+{
+  // Final build output for the notes example (runbook 11 standard layout).
+  "name": "example-notes",
+  "main": "worker/main.mjs",
+  "compatibility_date": "2026-10-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [{ "pattern": "notes.example.com", "custom_domain": true }],
+  "vars": { "APP_NAME": "Example Notes", "RETENTION_DAYS": 30, "BETA": false },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  "$schema": "node_modules/wrangler/config-schema.json"
+}

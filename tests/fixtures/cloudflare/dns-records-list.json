@@ -1,0 +1,25 @@
+{
+  "label": "GET /client/v4/zones/{zone_id}/dns_records",
+  "source": "https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/list/",
+  "shape": "result[] DNS records with id/name/type/content/ttl/proxied/comment",
+  "result": [
+    {
+      "id": "023e105f4ecef8ad9ca31a8372d0c353",
+      "name": "www.example.com",
+      "type": "A",
+      "content": "192.0.2.1",
+      "ttl": 300,
+      "proxied": false,
+      "created_on": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": "023e105f4ecef8ad9ca31a8372d0c354",
+      "name": "example.com",
+      "type": "MX",
+      "content": "mail.example.com",
+      "ttl": 3600,
+      "proxied": false,
+      "created_on": "2026-02-01T00:00:00Z"
+    }
+  ]
+}

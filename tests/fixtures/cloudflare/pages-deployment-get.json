@@ -1,0 +1,23 @@
+{
+  "label": "GET /accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}",
+  "source": "https://developers.cloudflare.com/api/resources/pages/subresources/deployments/methods/get/",
+  "shape": "Get a single Pages deployment. result is a Pages deployment object with id, project_name, url, environment, latest_stage and deployment_trigger.",
+  "result": {
+    "id": "deployment-id-2",
+    "project_name": "my-pages-app",
+    "url": "https://my-pages-app.pages.dev",
+    "environment": "production",
+    "created_on": "2026-03-01T00:00:00Z",
+    "modified_on": "2026-03-01T00:00:00Z",
+    "latest_stage": {
+      "name": "deploy",
+      "status": "success",
+      "started_on": "2026-03-01T00:00:00Z",
+      "ended_on": "2026-03-01T00:00:03Z"
+    },
+    "deployment_trigger": {
+      "type": "direct_upload",
+      "metadata": { "branch": "main", "commit_hash": "deadbeef" }
+    }
+  }
+}
