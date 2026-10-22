@@ -21,9 +21,9 @@ import type { AppEnv, TapDeployEnv } from "../../src/api/app.js";
 
 const BASE_ENV: TapDeployEnv = {
   RUNTIME: "node",
-  TAPDEPLOY_PUBLIC_ORIGIN: "http://localhost:8787",
-  TAPDEPLOY_OAUTH_CLIENT_ID: "tapdeploy-test-client",
-  TAPDEPLOY_OAUTH_CLIENT_SECRET: "tapdeploy-test-secret",
+  PUBLIC_ORIGIN: "http://localhost:8787",
+  OAUTH_CLIENT_ID: "tapdeploy-test-client",
+  OAUTH_CLIENT_SECRET: "tapdeploy-test-secret",
 };
 
 function makeApp(env: TapDeployEnv = BASE_ENV): Hono<AppEnv> {

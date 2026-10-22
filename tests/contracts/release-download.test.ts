@@ -14,7 +14,7 @@ const ASSET = "https://github.com/example/app/releases/download/v1.0.0/app.zip";
 const CDN = "https://release-assets.githubusercontent.com/github-production-release-asset/1/abc?sig=x";
 
 async function setup() {
-  const app = createApp({ RUNTIME: "node", TAPDEPLOY_PUBLIC_ORIGIN: ORIGIN, TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", TAPDEPLOY_OAUTH_CLIENT_ID: "fake-client" });
+  const app = createApp({ RUNTIME: "node", PUBLIC_ORIGIN: ORIGIN, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", OAUTH_CLIENT_ID: "fake-client" });
   return { app, login: await runConfigLogin(app, { configText: CONFIG_TEXT, scope: scopes }) };
 }
 

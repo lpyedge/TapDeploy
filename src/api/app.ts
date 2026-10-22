@@ -14,9 +14,9 @@ export interface AppEnv {
 }
 
 export interface TapDeployEnv {
-  TAPDEPLOY_PUBLIC_ORIGIN?: string;
-  TAPDEPLOY_OAUTH_CLIENT_ID?: string;
-  TAPDEPLOY_OAUTH_CLIENT_SECRET?: string;
+  PUBLIC_ORIGIN?: string;
+  OAUTH_CLIENT_ID?: string;
+  OAUTH_CLIENT_SECRET?: string;
   RUNTIME: "node" | "workers";
 }
 

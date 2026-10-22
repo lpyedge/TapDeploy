@@ -31,7 +31,7 @@ const V3_CONFIG_TEXT = JSON.stringify({
 });
 
 async function setup() {
-  const app = createApp({ RUNTIME: "node", TAPDEPLOY_PUBLIC_ORIGIN: ORIGIN, TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", TAPDEPLOY_OAUTH_CLIENT_ID: "fake-client" });
+  const app = createApp({ RUNTIME: "node", PUBLIC_ORIGIN: ORIGIN, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", OAUTH_CLIENT_ID: "fake-client" });
   const login = await runConfigLogin(app, { configText: V3_CONFIG_TEXT, scope: scopes });
   return { app, login };
 }
@@ -156,9 +156,9 @@ describe("worker static-asset pair (graph API)", () => {
   interface MockVersion { id: string; message: string; bindings: Record<string, unknown>[]; runtime: Record<string, unknown> }
 
   async function setupGraph(runtime: "node" | "workers") {
-    const env = { RUNTIME: runtime, TAPDEPLOY_PUBLIC_ORIGIN: ORIGIN, TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
+    const env = { RUNTIME: runtime, PUBLIC_ORIGIN: ORIGIN, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
     const app = createApp(env);
-    const key = await deriveSealKey(env.TAPDEPLOY_OAUTH_CLIENT_SECRET);
+    const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
     const session = await createSession(key, { ttlMs: 120_000, publicOrigin: ORIGIN }, {
       accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId: ACCOUNT,
       configHash: await computeConfigV3Id(V3_CONFIG as never),

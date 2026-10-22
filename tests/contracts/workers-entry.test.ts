@@ -3,9 +3,9 @@ import worker from "../../src/runtime/workers.js";
 
 function env(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    TAPDEPLOY_PUBLIC_ORIGIN: "https://installer.example",
-    TAPDEPLOY_OAUTH_CLIENT_ID: "client-123",
-    TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    PUBLIC_ORIGIN: "https://installer.example",
+    OAUTH_CLIENT_ID: "client-123",
+    OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     ...overrides,
   };
 }
@@ -43,7 +43,7 @@ describe("workers entry routing", () => {
   it("fails closed on /api/auth/session when the seal key is missing", async () => {
     const res = await worker.fetch(
       new Request("https://installer.example/api/auth/session"),
-      env({ TAPDEPLOY_OAUTH_CLIENT_SECRET: undefined }),
+      env({ OAUTH_CLIENT_SECRET: undefined }),
     );
     expect(res.status).toBe(200);
     expect((await res.json()).authenticated).toBe(false);

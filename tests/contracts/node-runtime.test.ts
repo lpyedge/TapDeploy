@@ -1,6 +1,6 @@
 // Node runtime contract: boot the compiled Node server and exercise the
 // real local HTTP surface + static UI, and prove that a spoofed
-// X-Forwarded-Host cannot hijack the OAuth callback (only TAPDEPLOY_PUBLIC_ORIGIN is
+// X-Forwarded-Host cannot hijack the OAuth callback (only PUBLIC_ORIGIN is
 // trusted).
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -62,19 +62,16 @@ describe("node runtime bundle", () => {
     base = PUBLIC_ORIGIN;
 
     foreignCwd = mkdtempSync(path.join(tmpdir(), "tapdeploy-node-cwd-"));
-    writeFileSync(path.join(foreignCwd, ".env.local"), "TAPDEPLOY_OAUTH_SCOPES=NOT_SCOPE_CANARY\n");
     const productionEnv: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "production" };
-    delete productionEnv.TAPDEPLOY_OAUTH_SCOPES;
     child = spawn(process.execPath, [path.join(root, "dist/node/server.mjs")], {
       cwd: foreignCwd,
       stdio: "pipe",
       env: {
         ...productionEnv,
-        HOST: "127.0.0.1",
         PORT: String(PORT),
-        TAPDEPLOY_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
-        TAPDEPLOY_OAUTH_CLIENT_ID: "contract-client",
-        TAPDEPLOY_OAUTH_CLIENT_SECRET: SESSION_KEY,
+        PUBLIC_ORIGIN: PUBLIC_ORIGIN,
+        OAUTH_CLIENT_ID: "contract-client",
+        OAUTH_CLIENT_SECRET: SESSION_KEY,
       },
     });
 
@@ -104,7 +101,7 @@ describe("node runtime bundle", () => {
     expect(html).toContain('id="root"');
   });
 
-  it("pins the OAuth callback to TAPDEPLOY_PUBLIC_ORIGIN despite X-Forwarded-Host", async () => {
+  it("pins the OAuth callback to PUBLIC_ORIGIN despite X-Forwarded-Host", async () => {
     const res = await fetch(`${base}/api/auth/callback?error=access_denied`, {
       redirect: "manual",
       headers: { "X-Forwarded-Host": "evil.example" },
@@ -115,7 +112,7 @@ describe("node runtime bundle", () => {
     expect(location).not.toContain("evil.example");
   });
 
-  it("builds the authorize URL redirect_uri from TAPDEPLOY_PUBLIC_ORIGIN, not the forwarded host", async () => {
+  it("builds the authorize URL redirect_uri from PUBLIC_ORIGIN, not the forwarded host", async () => {
     // the legacy v2 config shape no longer validates; the
     // redirect_uri invariant is config-format-agnostic, so this uses the
     // equivalent V3 config (workers capability derives worker-admin, which

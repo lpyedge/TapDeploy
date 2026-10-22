@@ -69,7 +69,7 @@ export function attachDeployPlanRoutes(
 }
 
 async function planHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
-  const publicOrigin = env.TAPDEPLOY_PUBLIC_ORIGIN ?? "";
+  const publicOrigin = env.PUBLIC_ORIGIN ?? "";
   const origin = c.req.header("origin");
   const csrf = c.req.header("x-tapdeploy-csrf");
 

@@ -154,7 +154,7 @@ refused rather than ignored (`UNKNOWN_WRANGLER_FIELD`,
   `ratelimits`, `services`, `vars`, `compatibility_flags`, zone `routes`
   (add-only), and on Worker units `hyperdrive`, `vectorize`,
   `secrets_store_secrets`, `ai`, `browser`. Behaviour per family:
-  [supported-resources.md](supported-resources.md).
+  [support.md](support.md).
 - Workers static assets: `assets.directory` (+ optional `binding`).
 - Pages: `pages_build_output_dir` instead of `main`/`assets`.
 - `routes[].custom_domain: true` is refused: the installing user chooses

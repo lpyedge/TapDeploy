@@ -15,7 +15,7 @@ it("deployment metadata/module requests have a finite shared Node/Workers bound"
   expect(response.status).toBe(413);
 });
 it("small malformed config text still reaches the handler (not the byte bound)", async () => {
-  const env = { RUNTIME: "workers", TAPDEPLOY_PUBLIC_ORIGIN: "https://installer.example", TAPDEPLOY_OAUTH_CLIENT_ID: "client", TAPDEPLOY_OAUTH_CLIENT_SECRET: "secret".repeat(43) } as const;
+  const env = { RUNTIME: "workers", PUBLIC_ORIGIN: "https://installer.example", OAUTH_CLIENT_ID: "client", OAUTH_CLIENT_SECRET: "secret".repeat(43) } as const;
   const response = await createApp(env).request("/api/auth/start", { method: "POST", body: "not-json" });
   expect(response.status).toBe(400);
   expect((await response.json()).error).toBe("config_required");

@@ -369,7 +369,7 @@ export async function extractPrebuiltZip(
     .sort();
   if (wranglerPaths.length === 0 && !options.allowResourceOnly && !wranglerToml) {
     errors.push(
-      "NO_WRANGLER_CONFIG: no wrangler.jsonc found — every Worker or Pages unit needs one (see docs/release-publisher-guide.md)",
+      "NO_WRANGLER_CONFIG: no wrangler.jsonc found — every Worker or Pages unit needs one (see docs/publishing.md)",
     );
   }
 

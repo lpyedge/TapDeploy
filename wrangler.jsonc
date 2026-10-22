@@ -2,6 +2,8 @@
   "name": "tapdeploy",
   "main": "dist/workers/worker.mjs",
   "compatibility_date": "2026-09-04",
+  // Keep the PUBLIC_ORIGIN / OAUTH_CLIENT_* values set in the dashboard across deploys.
+  "keep_vars": true,
   "assets": {
     "directory": "./dist/workers/assets",
     "binding": "ASSETS",

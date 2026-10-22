@@ -377,8 +377,8 @@ it("executes a Pages static release through project, asset handoff, deploy and p
 it("rejects a forged V3 execution context in the real Hono route before provider access", async () => {
   const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
   const origin = "https://installer.example";
-  const env = { RUNTIME: "node", TAPDEPLOY_PUBLIC_ORIGIN: origin, TAPDEPLOY_OAUTH_CLIENT_ID: "x", TAPDEPLOY_OAUTH_CLIENT_SECRET: "x" } as const;
-  const key = await deriveSealKey(env.TAPDEPLOY_OAUTH_CLIENT_SECRET);
+  const env = { RUNTIME: "node", PUBLIC_ORIGIN: origin, OAUTH_CLIENT_ID: "x", OAUTH_CLIENT_SECRET: "x" } as const;
+  const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
   const session = await createSession(key, { ttlMs: 60_000, publicOrigin: origin }, { accessToken: "token", tokenType: "Bearer", scope: [], source: "v3", accountId: "a".repeat(32), configHash: "c".repeat(64), sourcePolicy: { allowLocalZip: true, appId: "app", units: [] } });
   const app = createApp(env);
   const response = await app.request("/api/deploy/step", { method: "POST", headers: { origin, "content-type": "application/json", "x-tapdeploy-csrf": session.payload.csrf, cookie: `${sessionCookieName(origin)}=${session.cookieValue}` }, body: JSON.stringify({ executionContext: { forged: true }, unitId: "x", actionId: "x", phase: "create-r2-buckets", step: "create-r2-buckets" }) });
@@ -492,9 +492,9 @@ describe("workers.dev exposure (graph API)", () => {
   interface MockVersion { id: string; message: string; bindings: Record<string, unknown>[]; runtime: Record<string, unknown> }
 
   async function setupExposure(runtime: "node" | "workers", wrangler: Record<string, unknown>, seed: { accountSubdomain?: string; scriptEnabled?: boolean } = {}) {
-    const env = { RUNTIME: runtime, TAPDEPLOY_PUBLIC_ORIGIN: ORIGIN, TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
+    const env = { RUNTIME: runtime, PUBLIC_ORIGIN: ORIGIN, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
     const app = createApp(env);
-    const key = await deriveSealKey(env.TAPDEPLOY_OAUTH_CLIENT_SECRET);
+    const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
     const session = await createSession(key, { ttlMs: 120_000, publicOrigin: ORIGIN }, {
       accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId: ACCOUNT,
       configHash: await computeConfigV3Id(V3_CONFIG as never),
@@ -686,9 +686,9 @@ describe("worker secret input and inheritance (graph API)", () => {
       capabilities: ["workers"],
       inputs,
     };
-    const env = { RUNTIME: runtime, TAPDEPLOY_PUBLIC_ORIGIN: ORIGIN, TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
+    const env = { RUNTIME: runtime, PUBLIC_ORIGIN: ORIGIN, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
     const app = createApp(env);
-    const key = await deriveSealKey(env.TAPDEPLOY_OAUTH_CLIENT_SECRET);
+    const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
     const session = await createSession(key, { ttlMs: 120_000, publicOrigin: ORIGIN }, {
       accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId: ACCOUNT,
       configHash: await computeConfigV3Id(V3_CONFIG as never),
@@ -1044,8 +1044,8 @@ it("prepares raw ZIP bytes and creates a server-derived V3 graph plan", async ()
     ],
   };
   const configText = JSON.stringify(config);
-  const env = { RUNTIME: "node", TAPDEPLOY_PUBLIC_ORIGIN: origin, TAPDEPLOY_OAUTH_CLIENT_ID: "x", TAPDEPLOY_OAUTH_CLIENT_SECRET: "x" } as const;
-  const key = await deriveSealKey(env.TAPDEPLOY_OAUTH_CLIENT_SECRET);
+  const env = { RUNTIME: "node", PUBLIC_ORIGIN: origin, OAUTH_CLIENT_ID: "x", OAUTH_CLIENT_SECRET: "x" } as const;
+  const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
   const session = await createSession(key, { ttlMs: 60_000, publicOrigin: origin }, {
     accessToken: "token", tokenType: "Bearer", scope: [], source: "v3", accountId,
     configHash: await computeConfigV3Id(config),
@@ -1194,9 +1194,9 @@ async function setupBootstrap(
     denyObjects: boolean; ownerAfterFirstRead: boolean;
   }> = {},
 ) {
-  const env = { RUNTIME: runtime, TAPDEPLOY_PUBLIC_ORIGIN: ORIGIN, TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
+  const env = { RUNTIME: runtime, PUBLIC_ORIGIN: ORIGIN, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } as const;
   const app = createApp(env);
-  const key = await deriveSealKey(env.TAPDEPLOY_OAUTH_CLIENT_SECRET);
+  const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
   const config = configWith(policy);
   const session = await createSession(key, { ttlMs: 120_000, publicOrigin: ORIGIN }, {
     accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId: ACCOUNT,

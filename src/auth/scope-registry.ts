@@ -8,7 +8,7 @@
 // NOT redundantly add a Read scope.
 //
 // The `level` field records whether a scope has been exercised against a real
-// account; docs/release-status.md is the narrative record. The registry is what
+// account; docs/support.md is the narrative record. The registry is what
 // the scope planner (and the pre-auth permission preview) consults; it never
 // invents a scope, and it never requests a scope the installer cannot actually
 // use for a supported operation.

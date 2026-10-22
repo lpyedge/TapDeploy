@@ -8,9 +8,9 @@ const CLIENT_SECRET = "B".repeat(43);
 function env(): TapDeployEnv {
   return {
     RUNTIME: "node",
-    TAPDEPLOY_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
-    TAPDEPLOY_OAUTH_CLIENT_ID: "client-123",
-    TAPDEPLOY_OAUTH_CLIENT_SECRET: CLIENT_SECRET,
+    PUBLIC_ORIGIN: PUBLIC_ORIGIN,
+    OAUTH_CLIENT_ID: "client-123",
+    OAUTH_CLIENT_SECRET: CLIENT_SECRET,
     // Register the scopes the workers config fixture derives ().
   };
 }

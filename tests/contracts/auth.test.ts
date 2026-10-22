@@ -30,9 +30,9 @@ const CLIENT_SECRET = "secret-456";
 function authEnv(overrides: Partial<TapDeployEnv> = {}): TapDeployEnv {
   return {
     RUNTIME: "node",
-    TAPDEPLOY_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
-    TAPDEPLOY_OAUTH_CLIENT_ID: CLIENT_ID,
-    TAPDEPLOY_OAUTH_CLIENT_SECRET: CLIENT_SECRET,
+    PUBLIC_ORIGIN: PUBLIC_ORIGIN,
+    OAUTH_CLIENT_ID: CLIENT_ID,
+    OAUTH_CLIENT_SECRET: CLIENT_SECRET,
     // Register the scopes the workers fixture requires on the OAuth client, so
     // the config-bounded start can derive them.
     ...overrides,
@@ -65,21 +65,21 @@ async function getSessionCookie(res: Response): Promise<string> {
 
 describe("auth routes", () => {
   it("returns 500 when OAuth client id is not configured", async () => {
-    const app = createApp(authEnv({ TAPDEPLOY_OAUTH_CLIENT_ID: "" }));
+    const app = createApp(authEnv({ OAUTH_CLIENT_ID: "" }));
     const res = await startReq(app);
     expect(res.status).toBe(500);
-    expect((await res.json()).error).toMatch(/TAPDEPLOY_OAUTH_CLIENT_ID is required/);
+    expect((await res.json()).error).toMatch(/OAUTH_CLIENT_ID is required/);
   });
 
-  it("fails closed on /api/auth/start when TAPDEPLOY_OAUTH_CLIENT_SECRET is missing", async () => {
-    const app = createApp(authEnv({ TAPDEPLOY_OAUTH_CLIENT_SECRET: undefined }));
+  it("fails closed on /api/auth/start when OAUTH_CLIENT_SECRET is missing", async () => {
+    const app = createApp(authEnv({ OAUTH_CLIENT_SECRET: undefined }));
     const res = await startReq(app);
     expect(res.status).toBe(500);
-    expect((await res.json()).error).toMatch(/TAPDEPLOY_OAUTH_CLIENT_SECRET is required/);
+    expect((await res.json()).error).toMatch(/OAUTH_CLIENT_SECRET is required/);
   });
 
-  it("fails closed on /api/auth/session when TAPDEPLOY_OAUTH_CLIENT_SECRET is missing", async () => {
-    const app = createApp(authEnv({ TAPDEPLOY_OAUTH_CLIENT_SECRET: undefined }));
+  it("fails closed on /api/auth/session when OAUTH_CLIENT_SECRET is missing", async () => {
+    const app = createApp(authEnv({ OAUTH_CLIENT_SECRET: undefined }));
     const res = await app.request("/api/auth/session", {
       headers: { cookie: "__Host-tapdeploy_session=stale" },
     });

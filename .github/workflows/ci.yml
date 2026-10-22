@@ -44,11 +44,11 @@ jobs:
       - name: Playwright (built Node server)
         run: npm run test:e2e
         env:
-          TAPDEPLOY_PW_RUNTIME: node
+          PW_RUNTIME: node
       - name: Playwright (built Worker, wrangler dev --local)
         run: npm run test:e2e
         env:
-          TAPDEPLOY_PW_RUNTIME: workers
+          PW_RUNTIME: workers
 
       - name: Upload Playwright results
         if: failure()

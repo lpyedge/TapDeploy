@@ -31,11 +31,11 @@ const server = serve(
   },
   (info) => {
     console.log(`[tapdeploy] node runtime listening on port ${info.port}`);
-    // TAPDEPLOY_PUBLIC_ORIGIN is the single trusted origin for cookies, CSRF and the
+    // PUBLIC_ORIGIN is the single trusted origin for cookies, CSRF and the
     // OAuth redirect_uri. Request Host / X-Forwarded-Host are never consulted,
     // so a reverse proxy only needs to forward to this port.
-    if (!process.env.TAPDEPLOY_PUBLIC_ORIGIN) {
-      console.warn("[tapdeploy] TAPDEPLOY_PUBLIC_ORIGIN is not set; OAuth endpoints will fail closed");
+    if (!process.env.PUBLIC_ORIGIN) {
+      console.warn("[tapdeploy] PUBLIC_ORIGIN is not set; OAuth endpoints will fail closed");
     }
   },
 );

@@ -27,9 +27,9 @@ const BANNED_BINDINGS = [
 ];
 
 const BINDINGS: Record<string, unknown> = {
-  TAPDEPLOY_PUBLIC_ORIGIN: "https://installer.example",
-  TAPDEPLOY_OAUTH_CLIENT_ID: "contract-client",
-  TAPDEPLOY_OAUTH_CLIENT_SECRET: "A".repeat(43),
+  PUBLIC_ORIGIN: "https://installer.example",
+  OAUTH_CLIENT_ID: "contract-client",
+  OAUTH_CLIENT_SECRET: "A".repeat(43),
 };
 
 let workerScript: string;
@@ -181,9 +181,9 @@ describe("workers-hosted OAuth/session contract", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it.each([
-    ["TAPDEPLOY_PUBLIC_ORIGIN", /TAPDEPLOY_PUBLIC_ORIGIN is required/],
-    ["TAPDEPLOY_OAUTH_CLIENT_ID", /TAPDEPLOY_OAUTH_CLIENT_ID is required/],
-    ["TAPDEPLOY_OAUTH_CLIENT_SECRET", /TAPDEPLOY_OAUTH_CLIENT_SECRET is required/],
+    ["PUBLIC_ORIGIN", /PUBLIC_ORIGIN is required/],
+    ["OAUTH_CLIENT_ID", /OAUTH_CLIENT_ID is required/],
+    ["OAUTH_CLIENT_SECRET", /OAUTH_CLIENT_SECRET is required/],
   ])("start fails closed with 500 when %s is missing, whatever Host/Forwarded headers say", async (missing, message) => {
     const bindings = { ...AUTH_BINDINGS };
     delete bindings[missing];
@@ -195,7 +195,7 @@ describe("workers-hosted OAuth/session contract", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
-  it("the redirect URI is exactly TAPDEPLOY_PUBLIC_ORIGIN/api/auth/callback; forged Host/Forwarded headers cannot change it", async () => {
+  it("the redirect URI is exactly PUBLIC_ORIGIN/api/auth/callback; forged Host/Forwarded headers cannot change it", async () => {
     const res = await workerFetch(startRequest({ "x-forwarded-host": "evil.example", forwarded: "host=evil.example", "x-original-url": "https://evil.example/" }), AUTH_BINDINGS);
     expect(res.status).toBe(200);
     const url = new URL(((await res.json()) as { url: string }).url);
@@ -203,12 +203,12 @@ describe("workers-hosted OAuth/session contract", () => {
     expect(url.searchParams.get("scope")?.split(" ").sort()).toEqual(SCOPES);
   });
 
-  it.each(["http://installer.example", "https://installer.example/", "https://installer.example/app", "https://installer.example?x=1", "installer.example"])(
-    "start refuses TAPDEPLOY_PUBLIC_ORIGIN %j (must be a bare https origin)",
+  it.each(["http://installer.example", "https://installer.example/app", "https://installer.example?x=1", "installer.example"])(
+    "start refuses PUBLIC_ORIGIN %j (must be a bare https origin)",
     async (origin) => {
-      const res = await workerFetch(startRequest(), { ...AUTH_BINDINGS, TAPDEPLOY_PUBLIC_ORIGIN: origin });
+      const res = await workerFetch(startRequest(), { ...AUTH_BINDINGS, PUBLIC_ORIGIN: origin });
       expect(res.status).toBe(500);
-      expect(((await res.json()) as { error: string }).error).toMatch(/TAPDEPLOY_PUBLIC_ORIGIN/);
+      expect(((await res.json()) as { error: string }).error).toMatch(/PUBLIC_ORIGIN/);
     },
   );
 
@@ -265,7 +265,7 @@ describe("workers-hosted OAuth/session contract", () => {
 
   it("a session sealed with another key, and one read after the key is removed, is not authenticated", async () => {
     const cookie = await signIn();
-    for (const bindings of [{ ...AUTH_BINDINGS, TAPDEPLOY_OAUTH_CLIENT_SECRET: "B".repeat(43) }, { ...AUTH_BINDINGS, TAPDEPLOY_OAUTH_CLIENT_SECRET: undefined }]) {
+    for (const bindings of [{ ...AUTH_BINDINGS, OAUTH_CLIENT_SECRET: "B".repeat(43) }, { ...AUTH_BINDINGS, OAUTH_CLIENT_SECRET: undefined }]) {
       const res = await workerFetch(new Request(`${ORIGIN}/api/auth/session`, { headers: { cookie } }), bindings);
       expect(((await res.json()) as { authenticated: boolean }).authenticated).toBe(false);
     }
@@ -296,11 +296,23 @@ describe("workers-hosted OAuth/session contract", () => {
     }
   });
 
-  it("wrangler.jsonc ships no vars or secrets, so TAPDEPLOY_DEV_EPHEMERAL_KEY and OAuth values can only come from the account's own secret store", () => {
+  it("wrangler.jsonc ships no vars or secrets and keeps the dashboard values across deploys", () => {
     const errors: ParseError[] = [];
     const config = parse(readFileSync(path.join(root, "wrangler.jsonc"), "utf8"), errors, { allowTrailingComma: true }) as Record<string, unknown>;
     expect(errors).toHaveLength(0);
     for (const key of ["vars", "secrets", "env", "define"]) expect(config, key).not.toHaveProperty(key);
-    expect(JSON.stringify(config)).not.toMatch(/TAPDEPLOY_|EPHEMERAL/);
+    expect(JSON.stringify(config)).not.toMatch(/PUBLIC_ORIGIN|OAUTH_CLIENT/);
+    expect(config.keep_vars).toBe(true);
+  });
+
+  it("accepts the origin with a trailing slash and refuses one with a path, naming the value", async () => {
+    stubTokenEndpoint(SCOPES.join(" "));
+    const slash = await workerFetch(startRequest(), { ...AUTH_BINDINGS, PUBLIC_ORIGIN: `${ORIGIN}/` });
+    expect(slash.status).toBe(200);
+    const url = new URL(((await slash.json()) as { url: string }).url);
+    expect(url.searchParams.get("redirect_uri")).toBe(`${ORIGIN}/api/auth/callback`);
+    const path = await workerFetch(startRequest(), { ...AUTH_BINDINGS, PUBLIC_ORIGIN: `${ORIGIN}/app` });
+    expect(path.status).toBe(500);
+    expect(((await path.json()) as { error: string }).error).toContain(`got "${ORIGIN}/app"`);
   });
 });

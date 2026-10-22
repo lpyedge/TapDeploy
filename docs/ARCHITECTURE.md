@@ -1,9 +1,7 @@
-# Business contract and architecture baseline
+# Architecture
 
-What this installer promises and how the code is shaped. Review any change
-against this page; update it in the same change when behavior really changes.
-Facts here were verified against the code and its tests; anything not yet
-verified live is marked as such.
+How TapDeploy is shaped and what it promises. Review a change against this
+page and update it in the same change when behavior changes.
 
 ## 1. Product
 
@@ -77,7 +75,7 @@ first calls the read-only `POST /api/auth/check-config`; covered configs go
 straight to Release, others re-authorize; a plan/step `config_mismatch` (409)
 returns the UI to the same panel. The config text lives only in the tab
 (`sessionStorage`, 30 minutes); the server stores only its hash. Cookies, CSRF
-and the redirect URI derive from the single trusted origin `TAPDEPLOY_PUBLIC_ORIGIN`.
+and the redirect URI derive from the single trusted origin `PUBLIC_ORIGIN`.
 The session and OAuth-transaction cookies are sealed with AES-GCM under a key
 derived (HKDF) from the OAuth client secret; sessions last 20 minutes. The
 scopes requested are exactly the config's; the client registration is the

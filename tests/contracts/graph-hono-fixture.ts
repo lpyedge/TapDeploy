@@ -29,8 +29,8 @@ export interface GraphHonoFixtureOptions {
 export async function graphHonoFixture(config: ConfigV3, files: Record<string, Uint8Array>, runtime: TapDeployEnv["RUNTIME"] = "node", seed: { queues?: Array<{ name: string; consumers?: Array<{ script: string; settings?: Record<string, unknown> }> }>; workflows?: Array<{ name: string; className: string; scriptName: string; schedules?: string[] }>; zones?: Array<{ id: string; name: string }>; dnsRecords?: Array<{ zoneId: string; id: string; name: string; type: string; content?: string }>; workerDomains?: Array<{ id: string; hostname: string; service: string; zone_id?: string }>; hyperdriveConfigs?: Array<{ id: string; name: string }>; vectorizeIndexes?: Array<{ name: string; dimensions: number; metric: string }>; secretsStores?: Array<{ id: string; name: string; secrets: string[] }> } = {}, options: GraphHonoFixtureOptions = {}) {
   const origin = "https://installer.example";
   const accountId = "a".repeat(32);
-  const env: TapDeployEnv = { RUNTIME: runtime, TAPDEPLOY_PUBLIC_ORIGIN: origin, TAPDEPLOY_OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" };
-  const key = await deriveSealKey(env.TAPDEPLOY_OAUTH_CLIENT_SECRET!);
+  const env: TapDeployEnv = { RUNTIME: runtime, PUBLIC_ORIGIN: origin, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" };
+  const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET!);
   const session = await createSession(key, { ttlMs: 120_000, publicOrigin: origin }, {
     accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId,
     configHash: await computeConfigV3Id(config),

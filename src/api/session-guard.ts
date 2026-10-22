@@ -8,7 +8,7 @@ import { sessionCookieName, readSession, type SessionPayload } from "../auth/ses
 import { loadKey } from "./routes/auth.js";
 
 export async function authenticate(c: Context<AppEnv>, env: TapDeployEnv): Promise<{ session: SessionPayload } | { denied: Response }> {
-  const publicOrigin = env.TAPDEPLOY_PUBLIC_ORIGIN ?? "";
+  const publicOrigin = env.PUBLIC_ORIGIN ?? "";
   const cookies = parseCookies(c.req.raw.headers.get("cookie"));
   const raw = cookies[sessionCookieName(publicOrigin)];
   const key = raw ? await loadKey(env).catch(() => null) : null;

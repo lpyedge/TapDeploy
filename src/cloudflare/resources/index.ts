@@ -1,6 +1,6 @@
 // Resource-adapter registry and support matrix. This is the single place that
 // decides which Cloudflare resource kinds the installer supports. Unknown kinds
-// fail closed. The matrix is also what docs/supported-resources.md renders.
+// fail closed. docs/support.md summarizes it.
 
 import { r2BucketAdapter, R2_BUCKET_SUPPORT } from "./r2.js";
 import { rateLimitAdapter, RATE_LIMIT_SUPPORT } from "./rate-limits.js";

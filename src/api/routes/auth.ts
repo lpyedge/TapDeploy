@@ -43,10 +43,10 @@ interface AuthCfg {
 }
 
 function resolveAuthConfig(env: TapDeployEnv): AuthCfg {
-  const publicOrigin = env.TAPDEPLOY_PUBLIC_ORIGIN ?? "";
+  const publicOrigin = env.PUBLIC_ORIGIN ?? "";
   return {
-    clientId: env.TAPDEPLOY_OAUTH_CLIENT_ID ?? "",
-    clientSecret: env.TAPDEPLOY_OAUTH_CLIENT_SECRET ?? "",
+    clientId: env.OAUTH_CLIENT_ID ?? "",
+    clientSecret: env.OAUTH_CLIENT_SECRET ?? "",
     redirectUri: `${publicOrigin}/api/auth/callback`,
     publicOrigin,
   };
@@ -54,9 +54,9 @@ function resolveAuthConfig(env: TapDeployEnv): AuthCfg {
 
 function validatePublicOrigin(origin: string): { ok: boolean; error?: string } {
   if (!origin) {
-    return { ok: false, error: "TAPDEPLOY_PUBLIC_ORIGIN is required" };
+    return { ok: false, error: "PUBLIC_ORIGIN is required" };
   }
-  const bareOriginError = "TAPDEPLOY_PUBLIC_ORIGIN must be a bare origin (scheme://host[:port], no path or trailing slash)";
+  const bareOriginError = `PUBLIC_ORIGIN must be an origin like https://deploy.example.com (no path); got "${origin}"`;
   let url: URL;
   try {
     url = new URL(origin);
@@ -70,16 +70,16 @@ function validatePublicOrigin(origin: string): { ok: boolean; error?: string } {
   if (url.protocol === "https:" || (isLocalhost && url.protocol === "http:")) {
     return { ok: true };
   }
-  return { ok: false, error: "TAPDEPLOY_PUBLIC_ORIGIN must be https (or http for localhost dev)" };
+  return { ok: false, error: `PUBLIC_ORIGIN must be https (or http for localhost); got "${origin}"` };
 }
 
 function validateAuthConfig(cfg: AuthCfg): string | null {
   const issues: string[] = [];
   if (!cfg.clientId) {
-    issues.push("TAPDEPLOY_OAUTH_CLIENT_ID is required");
+    issues.push("OAUTH_CLIENT_ID is required");
   }
   if (!cfg.clientSecret) {
-    issues.push("TAPDEPLOY_OAUTH_CLIENT_SECRET is required");
+    issues.push("OAUTH_CLIENT_SECRET is required");
   }
   const originCheck = validatePublicOrigin(cfg.publicOrigin);
   if (!originCheck.ok && originCheck.error) {
@@ -101,9 +101,9 @@ function oauthConfig(cfg: AuthCfg, scopes: string[] = []): OAuthConfig {
 const keyCache = new Map<string, Promise<CryptoKey>>();
 
 export async function loadKey(env: TapDeployEnv): Promise<CryptoKey> {
-  const secret = env.TAPDEPLOY_OAUTH_CLIENT_SECRET;
+  const secret = env.OAUTH_CLIENT_SECRET;
   if (!secret) {
-    throw new Error("TAPDEPLOY_OAUTH_CLIENT_SECRET is required");
+    throw new Error("OAUTH_CLIENT_SECRET is required");
   }
   let cached = keyCache.get(secret);
   if (!cached) {
