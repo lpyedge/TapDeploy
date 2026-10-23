@@ -99,6 +99,13 @@ describe("tapdeploy.config.v3 schema contract", () => {
     expect(bad.ok).toBe(false);
   });
 
+  it("accepts upgrade.switchable resource keys and rejects anything else", () => {
+    const base = loadFixture("minimal");
+    expect(expectValid({ ...base, upgrade: { switchable: ["r2:cache", "queue:jobs"] } }).upgrade!.switchable).toEqual(["r2:cache", "queue:jobs"]);
+    for (const switchable of [["pages:site"], ["r2:"], ["r2:a", "r2:a"]]) expect(validateConfigV3({ ...base, upgrade: { switchable } }).ok).toBe(false);
+    expect(validateConfigV3({ ...base, upgrade: { other: true } }).ok).toBe(false);
+  });
+
   it("keeps the schema capability enum in sync with the code-owned vocabulary", () => {
     const schema = schemaData as unknown as {
       properties: { capabilities: { items: { enum: string[] } } };

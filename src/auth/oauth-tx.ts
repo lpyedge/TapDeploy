@@ -37,7 +37,9 @@ export interface OAuthTxRequest {
   // Nonsecret app identity + source policy bound into the session.
   appId: string;
   source: { defaultUrl?: string; allowLocalZip: boolean; expectedSha256?: string };
-  units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string }>;
+  units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string }> }>;
+  // Resources the user may swap on upgrade (`upgrade.switchable`).
+  switchable?: string[];
   // The modes covered by this single OAuth (install AND upgrade).
   modes: Array<"install" | "upgrade">;
 }
@@ -77,7 +79,13 @@ export async function prepareOAuthTxRequest(
         ? { expectedSha256: config.source.expectedSha256 }
         : {}),
     },
-    units: (config.units ?? []).map((unit) => ({ id: unit.id, kind: unit.kind, ...(unit.wrangler ? { wrangler: unit.wrangler } : {}) })),
+    units: (config.units ?? []).map((unit) => ({
+      id: unit.id,
+      kind: unit.kind,
+      ...(unit.wrangler ? { wrangler: unit.wrangler } : {}),
+      ...(unit.resources ? { resources: unit.resources.map((resource) => ({ kind: resource.kind, name: resource.name })) } : {}),
+    })),
+    ...(config.upgrade?.switchable?.length ? { switchable: [...config.upgrade.switchable] } : {}),
     modes: ["install", "upgrade"],
   };
 }

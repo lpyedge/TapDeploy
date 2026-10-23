@@ -44,6 +44,8 @@ export interface R2BindingSpec {
   binding: string;
   bucketName: string;
   createIfMissing: boolean;
+  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
+  switchable?: true;
 }
 
 // D1 database binding spec resolved from a manifest declaration + input.
@@ -56,6 +58,8 @@ export interface D1BindingSpec {
   binding: string;
   databaseName: string;
   createIfMissing: boolean;
+  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
+  switchable?: true;
   databaseId?: string;
 }
 
@@ -70,6 +74,8 @@ export interface KvBindingSpec {
   binding: string;
   namespaceName: string;
   createIfMissing: boolean;
+  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
+  switchable?: true;
   namespaceId?: string;
 }
 
@@ -97,6 +103,8 @@ export interface QueueBindingSpec {
   binding?: string;
   queueName: string;
   createIfMissing: boolean;
+  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
+  switchable?: true;
   role?: QueueRole;
   consumer?: QueueConsumerSpec;
 }
@@ -138,6 +146,8 @@ export interface VectorizeBindingSpec {
   binding: string;
   indexName: string;
   createIfMissing: boolean;
+  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
+  switchable?: true;
   config?: VectorizeIndexInputConfig;
 }
 

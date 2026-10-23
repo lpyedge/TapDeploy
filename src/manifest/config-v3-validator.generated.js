@@ -286,10 +286,10 @@ var require_formats = __commonJS({
 // <stdin>
 var validate = validate20;
 var stdin_default = validate20;
-var schema31 = { "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://raw.githubusercontent.com/lpyedge/TapDeploy/main/schemas/tapdeploy.config.v3.schema.json", "title": "TapDeploy standalone project configuration v3 (prebuilt release ZIP)", "description": "Minimal author contract for the prebuilt-ZIP deploy flow. The release ZIP's final wrangler.jsonc is the deployment source of truth; this config only carries app identity, ZIP source, pre-authorized symbolic capabilities and opt-in advanced clauses (inputs/units/install). No scripts, hooks, commands, raw OAuth scopes or arbitrary endpoints can ever be expressed here.", "type": "object", "additionalProperties": false, "required": ["schemaVersion", "app", "source", "capabilities"], "properties": { "schemaVersion": { "const": 3 }, "app": { "type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": { "id": { "type": "string", "minLength": 3, "maxLength": 180, "pattern": "^[A-Za-z0-9](?!.*\\.\\.)[A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$" }, "name": { "type": "string", "minLength": 1, "maxLength": 100 }, "description": { "type": "string", "maxLength": 500 } } }, "source": { "type": "object", "additionalProperties": false, "properties": { "defaultUrl": { "type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048 }, "allowLocalZip": { "type": "boolean" }, "expectedSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }, "allOf": [{ "if": { "properties": { "allowLocalZip": { "const": false } }, "required": ["allowLocalZip"] }, "then": { "required": ["defaultUrl"], "properties": { "defaultUrl": true } } }] }, "capabilities": { "type": "array", "minItems": 1, "maxItems": 24, "uniqueItems": true, "items": { "enum": ["workers", "pages", "r2", "d1", "kv", "queues", "hyperdrive", "vectorize", "secrets-store", "workers-ai", "browser-rendering", "routes", "dns", "zone", "workflows", "durable-objects"] } }, "inputs": { "type": "array", "maxItems": 32, "items": { "type": "object", "additionalProperties": false, "required": ["key", "type", "label", "requiredWhen"], "properties": { "key": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" }, "type": { "enum": ["string", "text", "integer", "number", "boolean", "secret", "select"] }, "label": { "type": "string", "minLength": 1, "maxLength": 100 }, "description": { "type": "string", "maxLength": 500 }, "placeholder": { "type": "string", "maxLength": 200 }, "requiredWhen": { "enum": ["install", "upgrade", "both", "never"] }, "secretPolicy": { "enum": ["prompt", "generate-once"] }, "options": { "type": "array", "maxItems": 64, "items": { "type": "object", "additionalProperties": false, "required": ["label", "value"], "properties": { "label": { "type": "string", "minLength": 1, "maxLength": 100 }, "value": { "type": ["string", "number", "boolean"] } } } }, "validation": { "type": "object", "additionalProperties": false, "properties": { "minLength": { "type": "integer", "minimum": 0, "maximum": 1e4 }, "maxLength": { "type": "integer", "minimum": 0, "maximum": 1e4 }, "pattern": { "type": "string", "maxLength": 200 }, "minimum": { "type": "number" }, "maximum": { "type": "number" }, "values": { "type": "array", "maxItems": 64, "items": { "type": ["string", "number"] } } } } }, "allOf": [{ "if": { "properties": { "type": { "const": "select" } }, "required": ["type"] }, "then": { "required": ["options"], "properties": { "options": true } } }, { "if": { "properties": { "secretPolicy": true }, "required": ["secretPolicy"] }, "then": { "properties": { "type": { "const": "secret" } }, "required": ["type"] } }] } }, "units": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "oneOf": [{ "type": "object", "additionalProperties": false, "required": ["id", "kind", "wrangler"], "properties": { "id": { "$ref": "#/$defs/unitId" }, "kind": { "enum": ["worker", "pages"] }, "wrangler": { "$ref": "#/$defs/wranglerPath" }, "dependsOn": { "$ref": "#/$defs/dependsOn" } } }, { "type": "object", "additionalProperties": false, "required": ["id", "kind", "resources"], "properties": { "id": { "$ref": "#/$defs/unitId" }, "kind": { "const": "resources" }, "resources": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "object", "additionalProperties": false, "required": ["kind", "name", "mode"], "properties": { "kind": { "enum": ["r2", "kv", "d1", "queue", "vectorize"] }, "name": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }, "mode": { "enum": ["ensure", "bind-existing"] }, "dimensions": { "type": "integer", "minimum": 1, "maximum": 1536, "description": "Vectorize only: vector dimensions, required to create the index (mode ensure)." }, "metric": { "enum": ["cosine", "euclidean", "dot-product"], "description": "Vectorize only: distance metric, required to create the index (mode ensure)." } } } }, "dependsOn": { "$ref": "#/$defs/dependsOn" } } }] } }, "install": { "type": "object", "additionalProperties": false, "required": ["policies"], "properties": { "policies": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "object", "additionalProperties": false, "required": ["kind", "unitId", "r2Binding", "rootSecret", "armSecret", "armValue", "ownerKey", "markerKey", "initialPasswordKey"], "properties": { "kind": { "const": "private-r2-owner-bootstrap/v1" }, "unitId": { "$ref": "#/$defs/unitId" }, "r2Binding": { "$ref": "#/$defs/bindingName" }, "rootSecret": { "$ref": "#/$defs/bindingName" }, "armSecret": { "$ref": "#/$defs/bindingName" }, "armValue": { "const": "yes" }, "ownerKey": { "$ref": "#/$defs/objectKey" }, "markerKey": { "$ref": "#/$defs/objectKey" }, "initialPasswordKey": { "$ref": "#/$defs/objectKey" }, "readinessPath": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^/[^\\s]*$" } } } } } }, "authorization": { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "const": "one-shot-bounded-max" } } } }, "$defs": { "unitId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" }, "bindingName": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, "objectKey": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]*$" }, "wranglerPath": { "type": "string", "minLength": 7, "maxLength": 160, "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]*\\.jsonc$" }, "dependsOn": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "$ref": "#/$defs/unitId" } } } };
-var func1 = require_ucs2length().default;
+var schema31 = { "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://raw.githubusercontent.com/lpyedge/TapDeploy/main/schemas/tapdeploy.config.v3.schema.json", "title": "TapDeploy standalone project configuration v3 (prebuilt release ZIP)", "description": "Minimal author contract for the prebuilt-ZIP deploy flow. The release ZIP's final wrangler.jsonc is the deployment source of truth; this config only carries app identity, ZIP source, pre-authorized symbolic capabilities and opt-in advanced clauses (inputs/units/install). No scripts, hooks, commands, raw OAuth scopes or arbitrary endpoints can ever be expressed here.", "type": "object", "additionalProperties": false, "required": ["schemaVersion", "app", "source", "capabilities"], "properties": { "schemaVersion": { "const": 3 }, "app": { "type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": { "id": { "type": "string", "minLength": 3, "maxLength": 180, "pattern": "^[A-Za-z0-9](?!.*\\.\\.)[A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$" }, "name": { "type": "string", "minLength": 1, "maxLength": 100 }, "description": { "type": "string", "maxLength": 500 } } }, "source": { "type": "object", "additionalProperties": false, "properties": { "defaultUrl": { "type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048 }, "allowLocalZip": { "type": "boolean" }, "expectedSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }, "allOf": [{ "if": { "properties": { "allowLocalZip": { "const": false } }, "required": ["allowLocalZip"] }, "then": { "required": ["defaultUrl"], "properties": { "defaultUrl": true } } }] }, "capabilities": { "type": "array", "minItems": 1, "maxItems": 24, "uniqueItems": true, "items": { "enum": ["workers", "pages", "r2", "d1", "kv", "queues", "hyperdrive", "vectorize", "secrets-store", "workers-ai", "browser-rendering", "routes", "dns", "zone", "workflows", "durable-objects"] } }, "inputs": { "type": "array", "maxItems": 32, "items": { "type": "object", "additionalProperties": false, "required": ["key", "type", "label", "requiredWhen"], "properties": { "key": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" }, "type": { "enum": ["string", "text", "integer", "number", "boolean", "secret", "select"] }, "label": { "type": "string", "minLength": 1, "maxLength": 100 }, "description": { "type": "string", "maxLength": 500 }, "placeholder": { "type": "string", "maxLength": 200 }, "requiredWhen": { "enum": ["install", "upgrade", "both", "never"] }, "secretPolicy": { "enum": ["prompt", "generate-once"] }, "options": { "type": "array", "maxItems": 64, "items": { "type": "object", "additionalProperties": false, "required": ["label", "value"], "properties": { "label": { "type": "string", "minLength": 1, "maxLength": 100 }, "value": { "type": ["string", "number", "boolean"] } } } }, "validation": { "type": "object", "additionalProperties": false, "properties": { "minLength": { "type": "integer", "minimum": 0, "maximum": 1e4 }, "maxLength": { "type": "integer", "minimum": 0, "maximum": 1e4 }, "pattern": { "type": "string", "maxLength": 200 }, "minimum": { "type": "number" }, "maximum": { "type": "number" }, "values": { "type": "array", "maxItems": 64, "items": { "type": ["string", "number"] } } } } }, "allOf": [{ "if": { "properties": { "type": { "const": "select" } }, "required": ["type"] }, "then": { "required": ["options"], "properties": { "options": true } } }, { "if": { "properties": { "secretPolicy": true }, "required": ["secretPolicy"] }, "then": { "properties": { "type": { "const": "secret" } }, "required": ["type"] } }] } }, "units": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "oneOf": [{ "type": "object", "additionalProperties": false, "required": ["id", "kind", "wrangler"], "properties": { "id": { "$ref": "#/$defs/unitId" }, "kind": { "enum": ["worker", "pages"] }, "wrangler": { "$ref": "#/$defs/wranglerPath" }, "dependsOn": { "$ref": "#/$defs/dependsOn" } } }, { "type": "object", "additionalProperties": false, "required": ["id", "kind", "resources"], "properties": { "id": { "$ref": "#/$defs/unitId" }, "kind": { "const": "resources" }, "resources": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "object", "additionalProperties": false, "required": ["kind", "name", "mode"], "properties": { "kind": { "enum": ["r2", "kv", "d1", "queue", "vectorize"] }, "name": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }, "mode": { "enum": ["ensure", "bind-existing"] }, "dimensions": { "type": "integer", "minimum": 1, "maximum": 1536, "description": "Vectorize only: vector dimensions, required to create the index (mode ensure)." }, "metric": { "enum": ["cosine", "euclidean", "dot-product"], "description": "Vectorize only: distance metric, required to create the index (mode ensure)." } } } }, "dependsOn": { "$ref": "#/$defs/dependsOn" } } }] } }, "install": { "type": "object", "additionalProperties": false, "required": ["policies"], "properties": { "policies": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "object", "additionalProperties": false, "required": ["kind", "unitId", "r2Binding", "rootSecret", "armSecret", "armValue", "ownerKey", "markerKey", "initialPasswordKey"], "properties": { "kind": { "const": "private-r2-owner-bootstrap/v1" }, "unitId": { "$ref": "#/$defs/unitId" }, "r2Binding": { "$ref": "#/$defs/bindingName" }, "rootSecret": { "$ref": "#/$defs/bindingName" }, "armSecret": { "$ref": "#/$defs/bindingName" }, "armValue": { "const": "yes" }, "ownerKey": { "$ref": "#/$defs/objectKey" }, "markerKey": { "$ref": "#/$defs/objectKey" }, "initialPasswordKey": { "$ref": "#/$defs/objectKey" }, "readinessPath": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^/[^\\s]*$" } } } } } }, "upgrade": { "type": "object", "additionalProperties": false, "description": "What the user may change when upgrading an installed app. Resources not listed stay bound to what the installed Worker uses today.", "properties": { "switchable": { "type": "array", "maxItems": 64, "uniqueItems": true, "description": "Resources the user may swap on upgrade, as <kind>:<name as in the release> (e.g. r2:cache). Use for caches and other replaceable data; leave persistent data such as D1 databases out.", "items": { "type": "string", "pattern": "^(r2|d1|kv|queue|vectorize):[A-Za-z0-9][A-Za-z0-9._-]{0,62}$" } } } }, "authorization": { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "const": "one-shot-bounded-max" } } } }, "$defs": { "unitId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" }, "bindingName": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, "objectKey": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]*$" }, "wranglerPath": { "type": "string", "minLength": 7, "maxLength": 160, "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]*\\.jsonc$" }, "dependsOn": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "$ref": "#/$defs/unitId" } } } };
+var func1 = Object.prototype.hasOwnProperty;
+var func2 = require_ucs2length().default;
 var func0 = require_equal().default;
-var func8 = Object.prototype.hasOwnProperty;
 var pattern4 = new RegExp("^[A-Za-z0-9](?!.*\\.\\.)[A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "u");
 var pattern5 = new RegExp("^https://", "u");
 var pattern6 = new RegExp("^[0-9a-f]{64}$", "u");
@@ -300,6 +300,7 @@ var pattern12 = new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]*$", "u");
 var pattern14 = new RegExp("^[A-Za-z][A-Za-z0-9_]*$", "u");
 var pattern17 = new RegExp("^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]*$", "u");
 var pattern20 = new RegExp("^/[^\\s]*$", "u");
+var pattern21 = new RegExp("^(r2|d1|kv|queue|vectorize):[A-Za-z0-9][A-Za-z0-9._-]{0,62}$", "u");
 var formats0 = require_formats().fullFormats.uri;
 function validate21(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
   let vErrors = null;
@@ -325,7 +326,7 @@ function validate21(data, { instancePath = "", parentData, parentDataProperty, r
     for (let i0 = 0; i0 < len0; i0++) {
       let data0 = data[i0];
       if (typeof data0 === "string") {
-        if (func1(data0) > 64) {
+        if (func2(data0) > 64) {
           const err1 = { instancePath: instancePath + "/" + i0, schemaPath: "#/$defs/unitId/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
           if (vErrors === null) {
             vErrors = [err1];
@@ -334,7 +335,7 @@ function validate21(data, { instancePath = "", parentData, parentDataProperty, r
           }
           errors++;
         }
-        if (func1(data0) < 1) {
+        if (func2(data0) < 1) {
           const err2 = { instancePath: instancePath + "/" + i0, schemaPath: "#/$defs/unitId/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
           if (vErrors === null) {
             vErrors = [err2];
@@ -442,7 +443,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
       errors++;
     }
     for (const key0 in data) {
-      if (!(key0 === "schemaVersion" || key0 === "app" || key0 === "source" || key0 === "capabilities" || key0 === "inputs" || key0 === "units" || key0 === "install" || key0 === "authorization")) {
+      if (!func1.call(schema31.properties, key0)) {
         const err4 = { instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
         if (vErrors === null) {
           vErrors = [err4];
@@ -498,7 +499,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
         if (data1.id !== void 0) {
           let data2 = data1.id;
           if (typeof data2 === "string") {
-            if (func1(data2) > 180) {
+            if (func2(data2) > 180) {
               const err9 = { instancePath: instancePath + "/app/id", schemaPath: "#/properties/app/properties/id/maxLength", keyword: "maxLength", params: { limit: 180 }, message: "must NOT have more than 180 characters" };
               if (vErrors === null) {
                 vErrors = [err9];
@@ -507,7 +508,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
               }
               errors++;
             }
-            if (func1(data2) < 3) {
+            if (func2(data2) < 3) {
               const err10 = { instancePath: instancePath + "/app/id", schemaPath: "#/properties/app/properties/id/minLength", keyword: "minLength", params: { limit: 3 }, message: "must NOT have fewer than 3 characters" };
               if (vErrors === null) {
                 vErrors = [err10];
@@ -538,7 +539,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
         if (data1.name !== void 0) {
           let data3 = data1.name;
           if (typeof data3 === "string") {
-            if (func1(data3) > 100) {
+            if (func2(data3) > 100) {
               const err13 = { instancePath: instancePath + "/app/name", schemaPath: "#/properties/app/properties/name/maxLength", keyword: "maxLength", params: { limit: 100 }, message: "must NOT have more than 100 characters" };
               if (vErrors === null) {
                 vErrors = [err13];
@@ -547,7 +548,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
               }
               errors++;
             }
-            if (func1(data3) < 1) {
+            if (func2(data3) < 1) {
               const err14 = { instancePath: instancePath + "/app/name", schemaPath: "#/properties/app/properties/name/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
               if (vErrors === null) {
                 vErrors = [err14];
@@ -569,7 +570,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
         if (data1.description !== void 0) {
           let data4 = data1.description;
           if (typeof data4 === "string") {
-            if (func1(data4) > 500) {
+            if (func2(data4) > 500) {
               const err16 = { instancePath: instancePath + "/app/description", schemaPath: "#/properties/app/properties/description/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" };
               if (vErrors === null) {
                 vErrors = [err16];
@@ -681,7 +682,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
         if (data5.defaultUrl !== void 0) {
           let data7 = data5.defaultUrl;
           if (typeof data7 === "string") {
-            if (func1(data7) > 2048) {
+            if (func2(data7) > 2048) {
               const err24 = { instancePath: instancePath + "/source/defaultUrl", schemaPath: "#/properties/source/properties/defaultUrl/maxLength", keyword: "maxLength", params: { limit: 2048 }, message: "must NOT have more than 2048 characters" };
               if (vErrors === null) {
                 vErrors = [err24];
@@ -1015,7 +1016,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
               errors++;
             }
             for (const key3 in data13) {
-              if (!func8.call(schema31.properties.inputs.items.properties, key3)) {
+              if (!func1.call(schema31.properties.inputs.items.properties, key3)) {
                 const err50 = { instancePath: instancePath + "/inputs/" + i2, schemaPath: "#/properties/inputs/items/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key3 }, message: "must NOT have additional properties" };
                 if (vErrors === null) {
                   vErrors = [err50];
@@ -1028,7 +1029,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
             if (data13.key !== void 0) {
               let data16 = data13.key;
               if (typeof data16 === "string") {
-                if (func1(data16) > 64) {
+                if (func2(data16) > 64) {
                   const err51 = { instancePath: instancePath + "/inputs/" + i2 + "/key", schemaPath: "#/properties/inputs/items/properties/key/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
                   if (vErrors === null) {
                     vErrors = [err51];
@@ -1037,7 +1038,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                   }
                   errors++;
                 }
-                if (func1(data16) < 1) {
+                if (func2(data16) < 1) {
                   const err52 = { instancePath: instancePath + "/inputs/" + i2 + "/key", schemaPath: "#/properties/inputs/items/properties/key/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                   if (vErrors === null) {
                     vErrors = [err52];
@@ -1080,7 +1081,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
             if (data13.label !== void 0) {
               let data18 = data13.label;
               if (typeof data18 === "string") {
-                if (func1(data18) > 100) {
+                if (func2(data18) > 100) {
                   const err56 = { instancePath: instancePath + "/inputs/" + i2 + "/label", schemaPath: "#/properties/inputs/items/properties/label/maxLength", keyword: "maxLength", params: { limit: 100 }, message: "must NOT have more than 100 characters" };
                   if (vErrors === null) {
                     vErrors = [err56];
@@ -1089,7 +1090,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                   }
                   errors++;
                 }
-                if (func1(data18) < 1) {
+                if (func2(data18) < 1) {
                   const err57 = { instancePath: instancePath + "/inputs/" + i2 + "/label", schemaPath: "#/properties/inputs/items/properties/label/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                   if (vErrors === null) {
                     vErrors = [err57];
@@ -1111,7 +1112,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
             if (data13.description !== void 0) {
               let data19 = data13.description;
               if (typeof data19 === "string") {
-                if (func1(data19) > 500) {
+                if (func2(data19) > 500) {
                   const err59 = { instancePath: instancePath + "/inputs/" + i2 + "/description", schemaPath: "#/properties/inputs/items/properties/description/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" };
                   if (vErrors === null) {
                     vErrors = [err59];
@@ -1133,7 +1134,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
             if (data13.placeholder !== void 0) {
               let data20 = data13.placeholder;
               if (typeof data20 === "string") {
-                if (func1(data20) > 200) {
+                if (func2(data20) > 200) {
                   const err61 = { instancePath: instancePath + "/inputs/" + i2 + "/placeholder", schemaPath: "#/properties/inputs/items/properties/placeholder/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" };
                   if (vErrors === null) {
                     vErrors = [err61];
@@ -1224,7 +1225,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                     if (data24.label !== void 0) {
                       let data25 = data24.label;
                       if (typeof data25 === "string") {
-                        if (func1(data25) > 100) {
+                        if (func2(data25) > 100) {
                           const err69 = { instancePath: instancePath + "/inputs/" + i2 + "/options/" + i3 + "/label", schemaPath: "#/properties/inputs/items/properties/options/items/properties/label/maxLength", keyword: "maxLength", params: { limit: 100 }, message: "must NOT have more than 100 characters" };
                           if (vErrors === null) {
                             vErrors = [err69];
@@ -1233,7 +1234,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                           }
                           errors++;
                         }
-                        if (func1(data25) < 1) {
+                        if (func2(data25) < 1) {
                           const err70 = { instancePath: instancePath + "/inputs/" + i2 + "/options/" + i3 + "/label", schemaPath: "#/properties/inputs/items/properties/options/items/properties/label/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                           if (vErrors === null) {
                             vErrors = [err70];
@@ -1365,7 +1366,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data27.pattern !== void 0) {
                   let data30 = data27.pattern;
                   if (typeof data30 === "string") {
-                    if (func1(data30) > 200) {
+                    if (func2(data30) > 200) {
                       const err82 = { instancePath: instancePath + "/inputs/" + i2 + "/validation/pattern", schemaPath: "#/properties/inputs/items/properties/validation/properties/pattern/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" };
                       if (vErrors === null) {
                         vErrors = [err82];
@@ -1543,7 +1544,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
             if (data36.id !== void 0) {
               let data37 = data36.id;
               if (typeof data37 === "string") {
-                if (func1(data37) > 64) {
+                if (func2(data37) > 64) {
                   const err98 = { instancePath: instancePath + "/units/" + i5 + "/id", schemaPath: "#/$defs/unitId/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
                   if (vErrors === null) {
                     vErrors = [err98];
@@ -1552,7 +1553,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                   }
                   errors++;
                 }
-                if (func1(data37) < 1) {
+                if (func2(data37) < 1) {
                   const err99 = { instancePath: instancePath + "/units/" + i5 + "/id", schemaPath: "#/$defs/unitId/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                   if (vErrors === null) {
                     vErrors = [err99];
@@ -1595,7 +1596,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
             if (data36.wrangler !== void 0) {
               let data39 = data36.wrangler;
               if (typeof data39 === "string") {
-                if (func1(data39) > 160) {
+                if (func2(data39) > 160) {
                   const err103 = { instancePath: instancePath + "/units/" + i5 + "/wrangler", schemaPath: "#/$defs/wranglerPath/maxLength", keyword: "maxLength", params: { limit: 160 }, message: "must NOT have more than 160 characters" };
                   if (vErrors === null) {
                     vErrors = [err103];
@@ -1604,7 +1605,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                   }
                   errors++;
                 }
-                if (func1(data39) < 7) {
+                if (func2(data39) < 7) {
                   const err104 = { instancePath: instancePath + "/units/" + i5 + "/wrangler", schemaPath: "#/$defs/wranglerPath/minLength", keyword: "minLength", params: { limit: 7 }, message: "must NOT have fewer than 7 characters" };
                   if (vErrors === null) {
                     vErrors = [err104];
@@ -1696,7 +1697,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
             if (data36.id !== void 0) {
               let data41 = data36.id;
               if (typeof data41 === "string") {
-                if (func1(data41) > 64) {
+                if (func2(data41) > 64) {
                   const err112 = { instancePath: instancePath + "/units/" + i5 + "/id", schemaPath: "#/$defs/unitId/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
                   if (vErrors === null) {
                     vErrors = [err112];
@@ -1705,7 +1706,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                   }
                   errors++;
                 }
-                if (func1(data41) < 1) {
+                if (func2(data41) < 1) {
                   const err113 = { instancePath: instancePath + "/units/" + i5 + "/id", schemaPath: "#/$defs/unitId/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                   if (vErrors === null) {
                     vErrors = [err113];
@@ -1822,7 +1823,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                     if (data44.name !== void 0) {
                       let data46 = data44.name;
                       if (typeof data46 === "string") {
-                        if (func1(data46) > 63) {
+                        if (func2(data46) > 63) {
                           const err124 = { instancePath: instancePath + "/units/" + i5 + "/resources/" + i6 + "/name", schemaPath: "#/properties/units/items/oneOf/1/properties/resources/items/properties/name/maxLength", keyword: "maxLength", params: { limit: 63 }, message: "must NOT have more than 63 characters" };
                           if (vErrors === null) {
                             vErrors = [err124];
@@ -1831,7 +1832,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                           }
                           errors++;
                         }
-                        if (func1(data46) < 1) {
+                        if (func2(data46) < 1) {
                           const err125 = { instancePath: instancePath + "/units/" + i5 + "/resources/" + i6 + "/name", schemaPath: "#/properties/units/items/oneOf/1/properties/resources/items/properties/name/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                           if (vErrors === null) {
                             vErrors = [err125];
@@ -2122,7 +2123,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                   errors++;
                 }
                 for (const key10 in data53) {
-                  if (!func8.call(schema31.properties.install.properties.policies.items.properties, key10)) {
+                  if (!func1.call(schema31.properties.install.properties.policies.items.properties, key10)) {
                     const err151 = { instancePath: instancePath + "/install/policies/" + i7, schemaPath: "#/properties/install/properties/policies/items/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key10 }, message: "must NOT have additional properties" };
                     if (vErrors === null) {
                       vErrors = [err151];
@@ -2146,7 +2147,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.unitId !== void 0) {
                   let data55 = data53.unitId;
                   if (typeof data55 === "string") {
-                    if (func1(data55) > 64) {
+                    if (func2(data55) > 64) {
                       const err153 = { instancePath: instancePath + "/install/policies/" + i7 + "/unitId", schemaPath: "#/$defs/unitId/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
                       if (vErrors === null) {
                         vErrors = [err153];
@@ -2155,7 +2156,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data55) < 1) {
+                    if (func2(data55) < 1) {
                       const err154 = { instancePath: instancePath + "/install/policies/" + i7 + "/unitId", schemaPath: "#/$defs/unitId/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err154];
@@ -2186,7 +2187,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.r2Binding !== void 0) {
                   let data56 = data53.r2Binding;
                   if (typeof data56 === "string") {
-                    if (func1(data56) > 64) {
+                    if (func2(data56) > 64) {
                       const err157 = { instancePath: instancePath + "/install/policies/" + i7 + "/r2Binding", schemaPath: "#/$defs/bindingName/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
                       if (vErrors === null) {
                         vErrors = [err157];
@@ -2195,7 +2196,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data56) < 1) {
+                    if (func2(data56) < 1) {
                       const err158 = { instancePath: instancePath + "/install/policies/" + i7 + "/r2Binding", schemaPath: "#/$defs/bindingName/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err158];
@@ -2226,7 +2227,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.rootSecret !== void 0) {
                   let data57 = data53.rootSecret;
                   if (typeof data57 === "string") {
-                    if (func1(data57) > 64) {
+                    if (func2(data57) > 64) {
                       const err161 = { instancePath: instancePath + "/install/policies/" + i7 + "/rootSecret", schemaPath: "#/$defs/bindingName/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
                       if (vErrors === null) {
                         vErrors = [err161];
@@ -2235,7 +2236,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data57) < 1) {
+                    if (func2(data57) < 1) {
                       const err162 = { instancePath: instancePath + "/install/policies/" + i7 + "/rootSecret", schemaPath: "#/$defs/bindingName/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err162];
@@ -2266,7 +2267,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.armSecret !== void 0) {
                   let data58 = data53.armSecret;
                   if (typeof data58 === "string") {
-                    if (func1(data58) > 64) {
+                    if (func2(data58) > 64) {
                       const err165 = { instancePath: instancePath + "/install/policies/" + i7 + "/armSecret", schemaPath: "#/$defs/bindingName/maxLength", keyword: "maxLength", params: { limit: 64 }, message: "must NOT have more than 64 characters" };
                       if (vErrors === null) {
                         vErrors = [err165];
@@ -2275,7 +2276,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data58) < 1) {
+                    if (func2(data58) < 1) {
                       const err166 = { instancePath: instancePath + "/install/policies/" + i7 + "/armSecret", schemaPath: "#/$defs/bindingName/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err166];
@@ -2317,7 +2318,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.ownerKey !== void 0) {
                   let data60 = data53.ownerKey;
                   if (typeof data60 === "string") {
-                    if (func1(data60) > 128) {
+                    if (func2(data60) > 128) {
                       const err170 = { instancePath: instancePath + "/install/policies/" + i7 + "/ownerKey", schemaPath: "#/$defs/objectKey/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" };
                       if (vErrors === null) {
                         vErrors = [err170];
@@ -2326,7 +2327,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data60) < 1) {
+                    if (func2(data60) < 1) {
                       const err171 = { instancePath: instancePath + "/install/policies/" + i7 + "/ownerKey", schemaPath: "#/$defs/objectKey/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err171];
@@ -2357,7 +2358,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.markerKey !== void 0) {
                   let data61 = data53.markerKey;
                   if (typeof data61 === "string") {
-                    if (func1(data61) > 128) {
+                    if (func2(data61) > 128) {
                       const err174 = { instancePath: instancePath + "/install/policies/" + i7 + "/markerKey", schemaPath: "#/$defs/objectKey/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" };
                       if (vErrors === null) {
                         vErrors = [err174];
@@ -2366,7 +2367,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data61) < 1) {
+                    if (func2(data61) < 1) {
                       const err175 = { instancePath: instancePath + "/install/policies/" + i7 + "/markerKey", schemaPath: "#/$defs/objectKey/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err175];
@@ -2397,7 +2398,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.initialPasswordKey !== void 0) {
                   let data62 = data53.initialPasswordKey;
                   if (typeof data62 === "string") {
-                    if (func1(data62) > 128) {
+                    if (func2(data62) > 128) {
                       const err178 = { instancePath: instancePath + "/install/policies/" + i7 + "/initialPasswordKey", schemaPath: "#/$defs/objectKey/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" };
                       if (vErrors === null) {
                         vErrors = [err178];
@@ -2406,7 +2407,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data62) < 1) {
+                    if (func2(data62) < 1) {
                       const err179 = { instancePath: instancePath + "/install/policies/" + i7 + "/initialPasswordKey", schemaPath: "#/$defs/objectKey/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err179];
@@ -2437,7 +2438,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                 if (data53.readinessPath !== void 0) {
                   let data63 = data53.readinessPath;
                   if (typeof data63 === "string") {
-                    if (func1(data63) > 128) {
+                    if (func2(data63) > 128) {
                       const err182 = { instancePath: instancePath + "/install/policies/" + i7 + "/readinessPath", schemaPath: "#/properties/install/properties/policies/items/properties/readinessPath/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" };
                       if (vErrors === null) {
                         vErrors = [err182];
@@ -2446,7 +2447,7 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
                       }
                       errors++;
                     }
-                    if (func1(data63) < 1) {
+                    if (func2(data63) < 1) {
                       const err183 = { instancePath: instancePath + "/install/policies/" + i7 + "/readinessPath", schemaPath: "#/properties/install/properties/policies/items/properties/readinessPath/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
                       if (vErrors === null) {
                         vErrors = [err183];
@@ -2504,56 +2505,148 @@ function validate20(data, { instancePath = "", parentData, parentDataProperty, r
         errors++;
       }
     }
-    if (data.authorization !== void 0) {
-      let data64 = data.authorization;
+    if (data.upgrade !== void 0) {
+      let data64 = data.upgrade;
       if (data64 && typeof data64 == "object" && !Array.isArray(data64)) {
-        if (data64.mode === void 0) {
-          const err189 = { instancePath: instancePath + "/authorization", schemaPath: "#/properties/authorization/required", keyword: "required", params: { missingProperty: "mode" }, message: "must have required property 'mode'" };
-          if (vErrors === null) {
-            vErrors = [err189];
-          } else {
-            vErrors.push(err189);
-          }
-          errors++;
-        }
         for (const key11 in data64) {
-          if (!(key11 === "mode")) {
-            const err190 = { instancePath: instancePath + "/authorization", schemaPath: "#/properties/authorization/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key11 }, message: "must NOT have additional properties" };
+          if (!(key11 === "switchable")) {
+            const err189 = { instancePath: instancePath + "/upgrade", schemaPath: "#/properties/upgrade/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key11 }, message: "must NOT have additional properties" };
             if (vErrors === null) {
-              vErrors = [err190];
+              vErrors = [err189];
             } else {
-              vErrors.push(err190);
+              vErrors.push(err189);
             }
             errors++;
           }
         }
-        if (data64.mode !== void 0) {
-          if ("one-shot-bounded-max" !== data64.mode) {
-            const err191 = { instancePath: instancePath + "/authorization/mode", schemaPath: "#/properties/authorization/properties/mode/const", keyword: "const", params: { allowedValue: "one-shot-bounded-max" }, message: "must be equal to constant" };
+        if (data64.switchable !== void 0) {
+          let data65 = data64.switchable;
+          if (Array.isArray(data65)) {
+            if (data65.length > 64) {
+              const err190 = { instancePath: instancePath + "/upgrade/switchable", schemaPath: "#/properties/upgrade/properties/switchable/maxItems", keyword: "maxItems", params: { limit: 64 }, message: "must NOT have more than 64 items" };
+              if (vErrors === null) {
+                vErrors = [err190];
+              } else {
+                vErrors.push(err190);
+              }
+              errors++;
+            }
+            const len7 = data65.length;
+            for (let i8 = 0; i8 < len7; i8++) {
+              let data66 = data65[i8];
+              if (typeof data66 === "string") {
+                if (!pattern21.test(data66)) {
+                  const err191 = { instancePath: instancePath + "/upgrade/switchable/" + i8, schemaPath: "#/properties/upgrade/properties/switchable/items/pattern", keyword: "pattern", params: { pattern: "^(r2|d1|kv|queue|vectorize):[A-Za-z0-9][A-Za-z0-9._-]{0,62}$" }, message: 'must match pattern "^(r2|d1|kv|queue|vectorize):[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"' };
+                  if (vErrors === null) {
+                    vErrors = [err191];
+                  } else {
+                    vErrors.push(err191);
+                  }
+                  errors++;
+                }
+              } else {
+                const err192 = { instancePath: instancePath + "/upgrade/switchable/" + i8, schemaPath: "#/properties/upgrade/properties/switchable/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                if (vErrors === null) {
+                  vErrors = [err192];
+                } else {
+                  vErrors.push(err192);
+                }
+                errors++;
+              }
+            }
+            let i9 = data65.length;
+            let j1;
+            if (i9 > 1) {
+              const indices0 = {};
+              for (; i9--; ) {
+                let item0 = data65[i9];
+                if (typeof item0 !== "string") {
+                  continue;
+                }
+                if (typeof indices0[item0] == "number") {
+                  j1 = indices0[item0];
+                  const err193 = { instancePath: instancePath + "/upgrade/switchable", schemaPath: "#/properties/upgrade/properties/switchable/uniqueItems", keyword: "uniqueItems", params: { i: i9, j: j1 }, message: "must NOT have duplicate items (items ## " + j1 + " and " + i9 + " are identical)" };
+                  if (vErrors === null) {
+                    vErrors = [err193];
+                  } else {
+                    vErrors.push(err193);
+                  }
+                  errors++;
+                  break;
+                }
+                indices0[item0] = i9;
+              }
+            }
+          } else {
+            const err194 = { instancePath: instancePath + "/upgrade/switchable", schemaPath: "#/properties/upgrade/properties/switchable/type", keyword: "type", params: { type: "array" }, message: "must be array" };
             if (vErrors === null) {
-              vErrors = [err191];
+              vErrors = [err194];
             } else {
-              vErrors.push(err191);
+              vErrors.push(err194);
             }
             errors++;
           }
         }
       } else {
-        const err192 = { instancePath: instancePath + "/authorization", schemaPath: "#/properties/authorization/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        const err195 = { instancePath: instancePath + "/upgrade", schemaPath: "#/properties/upgrade/type", keyword: "type", params: { type: "object" }, message: "must be object" };
         if (vErrors === null) {
-          vErrors = [err192];
+          vErrors = [err195];
         } else {
-          vErrors.push(err192);
+          vErrors.push(err195);
+        }
+        errors++;
+      }
+    }
+    if (data.authorization !== void 0) {
+      let data67 = data.authorization;
+      if (data67 && typeof data67 == "object" && !Array.isArray(data67)) {
+        if (data67.mode === void 0) {
+          const err196 = { instancePath: instancePath + "/authorization", schemaPath: "#/properties/authorization/required", keyword: "required", params: { missingProperty: "mode" }, message: "must have required property 'mode'" };
+          if (vErrors === null) {
+            vErrors = [err196];
+          } else {
+            vErrors.push(err196);
+          }
+          errors++;
+        }
+        for (const key12 in data67) {
+          if (!(key12 === "mode")) {
+            const err197 = { instancePath: instancePath + "/authorization", schemaPath: "#/properties/authorization/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key12 }, message: "must NOT have additional properties" };
+            if (vErrors === null) {
+              vErrors = [err197];
+            } else {
+              vErrors.push(err197);
+            }
+            errors++;
+          }
+        }
+        if (data67.mode !== void 0) {
+          if ("one-shot-bounded-max" !== data67.mode) {
+            const err198 = { instancePath: instancePath + "/authorization/mode", schemaPath: "#/properties/authorization/properties/mode/const", keyword: "const", params: { allowedValue: "one-shot-bounded-max" }, message: "must be equal to constant" };
+            if (vErrors === null) {
+              vErrors = [err198];
+            } else {
+              vErrors.push(err198);
+            }
+            errors++;
+          }
+        }
+      } else {
+        const err199 = { instancePath: instancePath + "/authorization", schemaPath: "#/properties/authorization/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        if (vErrors === null) {
+          vErrors = [err199];
+        } else {
+          vErrors.push(err199);
         }
         errors++;
       }
     }
   } else {
-    const err193 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    const err200 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
     if (vErrors === null) {
-      vErrors = [err193];
+      vErrors = [err200];
     } else {
-      vErrors.push(err193);
+      vErrors.push(err200);
     }
     errors++;
   }

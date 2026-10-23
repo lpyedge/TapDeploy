@@ -28,6 +28,54 @@ export function attachAccountsRoutes(app: Hono<AppEnv>, env: TapDeployEnv): void
   // Read-only list of the account's Hyperdrive configurations (names only, never
   // connection details) so the operator can pick one per Hyperdrive binding.
   app.post("/api/cloudflare/hyperdrive", async (c) => hyperdriveHandler(c, env));
+  app.post("/api/cloudflare/inventory", async (c) => inventoryHandler(c, env));
+}
+
+// The account's existing names per resource kind (Configure: reuse on install,
+// pick on upgrade), and, for an upgrade target Worker, the resource each of
+// its bindings uses today. Only kinds the session's scopes cover are listed.
+const INVENTORY_SCOPES: Record<string, string> = { r2: "workers-r2.write", d1: "d1.write", kv: "workers-kv-storage.write", queue: "queues.write", vectorize: "vectorize.write", pages: "page.write" };
+
+async function inventoryHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
+  const auth = await authenticate(c, env);
+  if ("denied" in auth) return auth.denied;
+  const body = (await c.req.json().catch(() => null)) as { accountId?: unknown; kinds?: unknown; worker?: unknown } | null;
+  if (typeof body?.accountId !== "string" || body.accountId.length === 0) return c.json({ error: "accountId is required" }, 400);
+  const kinds = Array.isArray(body.kinds) ? body.kinds.filter((kind): kind is string => typeof kind === "string" && kind in INVENTORY_SCOPES && auth.session.scope.includes(INVENTORY_SCOPES[kind]!)) : [];
+  const client = createCloudflareClient({ accessToken: auth.session.accessToken }).withAccount(body.accountId);
+  try {
+    const names: Record<string, string[]> = {};
+    const d1 = kinds.includes("d1") || typeof body.worker === "string" ? await client.listD1Databases().catch(() => []) : [];
+    for (const kind of kinds) {
+      const list = kind === "r2" ? (await client.listR2Buckets()).map((item) => item.name)
+        : kind === "d1" ? d1.map((item) => item.name)
+        : kind === "kv" ? (await client.listKvNamespaces()).map((item) => item.title)
+        : kind === "queue" ? (await client.listQueues()).map((item) => item.name)
+        : kind === "vectorize" ? (await client.listVectorizeIndexes()).map((item) => item.name)
+        : (await client.listPages()).map((item) => item.name);
+      names[kind] = [...new Set(list.filter((name): name is string => typeof name === "string"))].sort();
+    }
+    let bindings: Array<{ binding: string; kind: string; name: string }> | undefined;
+    if (typeof body.worker === "string" && body.worker.length > 0) {
+      const settings = await client.getWorkerSettings(body.worker);
+      bindings = ((settings.bindings ?? []) as Array<Record<string, unknown>>).flatMap((binding) => {
+        const name = typeof binding.name === "string" ? binding.name : "";
+        if (binding.type === "r2_bucket" && typeof binding.bucket_name === "string") return [{ binding: name, kind: "r2", name: binding.bucket_name }];
+        if (binding.type === "d1") {
+          const id = typeof binding.id === "string" ? binding.id : typeof binding.database_id === "string" ? binding.database_id : "";
+          const database = d1.find((item) => item.id === id);
+          return database ? [{ binding: name, kind: "d1", name: database.name }] : [];
+        }
+        if (binding.type === "queue" && typeof binding.queue_name === "string") return [{ binding: name, kind: "queue", name: binding.queue_name }];
+        if (binding.type === "vectorize" && typeof binding.index_name === "string") return [{ binding: name, kind: "vectorize", name: binding.index_name }];
+        return [];
+      });
+    }
+    return c.json({ accountId: body.accountId, names, ...(bindings ? { bindings } : {}) });
+  } catch (error) {
+    if (isUpstreamError(error)) return c.json({ error: "upstream", upstream: error.kind }, 502);
+    throw error;
+  }
 }
 
 async function hyperdriveHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {

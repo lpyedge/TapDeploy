@@ -5,6 +5,7 @@ import { loadKey } from "./auth.js";
 import { extractPrebuiltZip } from "../../release/prebuilt-zip.js";
 import { sealVerifiedReleaseContext } from "../../core/planning/graph-execution-context.js";
 import { buildPerUnitBundles } from "../../release/per-unit-bundles.js";
+import { releaseResourceNames } from "../../core/planning/resource-names.js";
 
 export const MAX_VERIFIED_ZIP_COMPRESSED = 8 * 1024 * 1024;
 const MAX_VERIFIED_ZIP_EXPANDED = 24 * 1024 * 1024;
@@ -53,6 +54,9 @@ export function attachDeployPrepareRoutes(app: Hono<AppEnv>, env: TapDeployEnv):
       const hyperdrive = Array.isArray(canonical.hyperdrive) ? canonical.hyperdrive.flatMap((entry) => typeof (entry as { binding?: unknown }).binding === "string" ? [(entry as { binding: string }).binding] : []) : [];
       return { unitId: unit.unitId, kind, name, ...(hyperdrive.length > 0 ? { hyperdrive } : {}) };
     });
-    return c.json({ releaseProof: proof, releaseSummary: { archiveSha256: result.manifest.archiveSha256, manifestDigest: result.manifest.manifestDigest, entryCount: result.manifest.entryCount, units: unitSummary } });
+    // The names the operator may change at install (and that upgrade reads
+    // back from the live Worker's bindings).
+    const resources = releaseResourceNames(perUnit.units ?? [], { units: policy.units, upgrade: { switchable: policy.switchable } });
+    return c.json({ releaseProof: proof, releaseSummary: { archiveSha256: result.manifest.archiveSha256, manifestDigest: result.manifest.manifestDigest, entryCount: result.manifest.entryCount, units: unitSummary, resources } });
   });
 }

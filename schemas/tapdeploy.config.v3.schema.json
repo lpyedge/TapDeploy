@@ -441,6 +441,23 @@
         }
       }
     },
+    "upgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the user may change when upgrading an installed app. Resources not listed stay bound to what the installed Worker uses today.",
+      "properties": {
+        "switchable": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "description": "Resources the user may swap on upgrade, as <kind>:<name as in the release> (e.g. r2:cache). Use for caches and other replaceable data; leave persistent data such as D1 databases out.",
+          "items": {
+            "type": "string",
+            "pattern": "^(r2|d1|kv|queue|vectorize):[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
+          }
+        }
+      }
+    },
     "authorization": {
       "type": "object",
       "additionalProperties": false,

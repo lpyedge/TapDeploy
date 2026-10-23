@@ -234,8 +234,8 @@ export async function buildDeployPlan(
 
   // binding identity. On upgrade, a declared binding that already
   // exists on the deployed Worker must keep its bucket. A different bucket
-  // name for the same binding is an unapproved remap and blocks (fail closed).
-  // Installs (no worker) and bindings with no deployed entry are unaffected.
+  // name for the same binding is an unapproved remap and blocks (fail closed),
+  // unless the config lets the user swap it (`upgrade.switchable`). Installs (no worker) and bindings with no deployed entry are unaffected.
   // Missing scope yields an empty deployed map and therefore cannot verify;
   // the later version upload still carries the declared bindings and the
   // provider fails closed on permission errors.
@@ -243,7 +243,7 @@ export async function buildDeployPlan(
     const deployed = snapshot.workerR2Bindings ?? {};
     for (const binding of spec.cloudflare.r2) {
       const liveBucket = deployed[binding.binding];
-      if (liveBucket !== undefined && liveBucket !== binding.bucketName) {
+      if (liveBucket !== undefined && liveBucket !== binding.bucketName && !binding.switchable) {
         guards.push({
           code: "r2-drift",
           level: "block",
@@ -1036,7 +1036,8 @@ function planDnsRecordDiff(
 //   vectorize           index_name    (name)        -> spec indexName
 //   secrets_store       {store_id, secret_name}     -> spec storeName/secretName
 // A binding that is absent on the deployed Worker (new binding) or whose target
-// matches is left alone; only a confirmed remap is blocked. Ids are resolved
+// matches is left alone, as is one the config lets the user swap on upgrade
+// (`switchable`); only an unapproved remap is blocked. Ids are resolved
 // against the live account-resource snapshot so a rename is not mistaken for a
 // rebind. Missing worker/scope yields an empty map and cannot verify (the later
 // write fails closed with the real permission error).
@@ -1049,7 +1050,7 @@ function deployedRebindGuards(
   // R2: compare bucket name.
   for (const b of spec.cloudflare.r2) {
     const live = bindings.r2?.[b.binding];
-    if (live !== undefined && live !== b.bucketName) {
+    if (live !== undefined && live !== b.bucketName && !b.switchable) {
       guards.push(rebindGuard("r2", b.binding, live, b.bucketName));
     }
   }
@@ -1058,7 +1059,7 @@ function deployedRebindGuards(
   for (const b of spec.cloudflare.d1) {
     const live = bindings.d1?.[b.binding];
     const declaredId = dbIds.get(b.databaseName);
-    if (live !== undefined && declaredId && live !== declaredId) {
+    if (live !== undefined && declaredId && live !== declaredId && !b.switchable) {
       guards.push(rebindGuard("d1", b.binding, describeBindingId(live), describeBindingId(declaredId)));
     }
   }
@@ -1067,7 +1068,7 @@ function deployedRebindGuards(
   for (const b of spec.cloudflare.kv) {
     const live = bindings.kv?.[b.binding];
     const declaredId = nsIds.get(b.namespaceName);
-    if (live !== undefined && declaredId && live !== declaredId) {
+    if (live !== undefined && declaredId && live !== declaredId && !b.switchable) {
       guards.push(rebindGuard("kv", b.binding, describeBindingId(live), describeBindingId(declaredId)));
     }
   }
@@ -1076,7 +1077,7 @@ function deployedRebindGuards(
   for (const b of spec.cloudflare.queues) {
     if (b.binding === undefined) continue;
     const live = bindings.queue?.[b.binding];
-    if (live !== undefined && live !== b.queueName) {
+    if (live !== undefined && live !== b.queueName && !b.switchable) {
       guards.push(rebindGuard("queue", b.binding, live, b.queueName));
     }
   }
@@ -1092,7 +1093,7 @@ function deployedRebindGuards(
   // Vectorize: compare index name.
   for (const b of spec.cloudflare.vectorize) {
     const live = bindings.vectorize?.[b.binding];
-    if (live !== undefined && live !== b.indexName) {
+    if (live !== undefined && live !== b.indexName && !b.switchable) {
       guards.push(rebindGuard("vectorize", b.binding, live, b.indexName));
     }
   }

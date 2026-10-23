@@ -203,9 +203,30 @@ export type GraphDomainRequest = Record<string, {
 // A forged or stale value fails closed server-side (4xx, zero writes).
 // ---------------------------------------------------------------------------
 
+/** A renamable resource or Pages project of the release (server: resource-names.ts). */
+export interface ReleaseResourceName {
+  key: string;
+  kind: string;
+  name: string;
+  bindings: Array<{ unitId: string; binding: string }>;
+  switchable?: true;
+}
+
+export interface InventoryEnvelope {
+  accountId: string;
+  /** Existing names per kind (`r2`, `d1`, `kv`, `queue`, `vectorize`, `pages`). */
+  names: Record<string, string[]>;
+  /** The upgrade target Worker's bindings and the resource each uses today. */
+  bindings?: Array<{ binding: string; kind: string; name: string }>;
+}
+
+export async function getInventory(csrf: string, accountId: string, kinds: string[], worker?: string): Promise<InventoryEnvelope> {
+  return (await request("/api/cloudflare/inventory", csrf, { accountId, kinds, ...(worker ? { worker } : {}) })) as InventoryEnvelope;
+}
+
 export interface GraphPrepareEnvelope {
   releaseProof: unknown;
-  releaseSummary: { archiveSha256: string; manifestDigest: string; entryCount: number; units?: Array<{ unitId: string; kind: string; name: string; hyperdrive?: string[] }> };
+  releaseSummary: { archiveSha256: string; manifestDigest: string; entryCount: number; units?: Array<{ unitId: string; kind: string; name: string; hyperdrive?: string[] }>; resources?: ReleaseResourceName[] };
 }
 
 /**
@@ -290,6 +311,8 @@ export interface GraphPlanRequest {
   domains?: GraphDomainRequest;
   // Per unit: the account Hyperdrive configuration chosen for each binding.
   bindings?: Record<string, { hyperdrive: Record<string, string> }>;
+  // Operator-chosen names, keyed like ReleaseResourceName.key.
+  names?: Record<string, string>;
   paidRiskConfirmed?: boolean;
 }
 

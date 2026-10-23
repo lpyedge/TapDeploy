@@ -259,7 +259,7 @@ async function callbackHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<R
     scope: tx.scopes,
     source: cfg.clientId,
     configHash: tx.configHash,
-    sourcePolicy: { ...tx.source, appId: tx.appId, units: tx.units },
+    sourcePolicy: { ...tx.source, appId: tx.appId, units: tx.units, ...(tx.switchable ? { switchable: tx.switchable } : {}) },
   });
   const attrs = sessionCookie(session, { ttlMs: SESSION_TTL_MS, publicOrigin: cfg.publicOrigin });
   const setCookie = sessionCookieHeader(attrs);

@@ -39,7 +39,16 @@ stepper follows the machine stage.
 Worker name override: any valid name (`^[a-z0-9-]{1,63}$`, plus the declared
 input's own validation when the config declares one) for a release with exactly
 one Worker (a Worker plus Pages counts as one). With zero or several Workers the
-release names are kept. Pages project names and service references never change.
+release names are kept. Resource and Pages project names (`names` in the plan
+request, `src/core/planning/resource-names.ts`): at install every R2 bucket,
+D1 database (unless bound by id), queue and Vectorize index of the release, a
+`resources` unit's KV namespace, and every Pages project, may be renamed; the
+release's names are suggestions. The mapping is applied to the prepared units
+and the config before any spec or graph exists. On upgrade the Configure step
+sends the names the target Worker binds today (read from its settings) and the
+plan's rebind guard refuses any other, except for the resources the config
+lists in `upgrade.switchable`: their bindings are marked `switchable` and may
+move to another (or a new) resource. Service references never change.
 
 ## 3. Sealed-graph protocol (do not weaken)
 

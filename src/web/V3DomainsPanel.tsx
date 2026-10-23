@@ -12,6 +12,8 @@ export interface V3DomainsPanelProps {
   drafts: Readonly<Record<string, UnitDomainDraft>>;
   errors: Readonly<Record<string, string>>;
   onDraft: (unitId: string, draft: UnitDomainDraft) => void;
+  /** The address of this TapDeploy instance: never offered for binding. */
+  selfHostname: string;
 }
 
 /**
@@ -21,7 +23,7 @@ export interface V3DomainsPanelProps {
  * a live address needs the operator's explicit confirmation; the server
  * re-verifies every choice before it writes.
  */
-export function V3DomainsPanel({ units, mode, facts, factsLoading, factsError, recordsByZone, drafts, errors, onDraft }: V3DomainsPanelProps) {
+export function V3DomainsPanel({ units, mode, facts, factsLoading, factsError, recordsByZone, drafts, errors, onDraft, selfHostname }: V3DomainsPanelProps) {
   if (units.length === 0) return null;
   return (
     <div className="field" data-testid="v3-domains">
@@ -40,6 +42,9 @@ export function V3DomainsPanel({ units, mode, facts, factsLoading, factsError, r
         return (
           <div key={unit.unitId} className="domain-unit" data-testid={`v3-domain-${unit.unitId}`}>
             <p className="m-0">{unit.kind === "pages" ? "Pages site" : "Worker"} <strong>{unit.target}</strong></p>
+            {mode === "upgrade" && (
+              <p className="meta m-0">{bound.length > 0 ? "Bound today — kept unless you untick it:" : "No custom domain is bound to it today."}</p>
+            )}
             {bound.length > 0 && (
               <ul className="m-0 list-none p-0" data-testid={`v3-domain-bound-${unit.unitId}`}>
                 {bound.map((name) => (
@@ -101,7 +106,10 @@ export function V3DomainsPanel({ units, mode, facts, factsLoading, factsError, r
                         data-testid={`v3-domain-existing-${unit.unitId}`}
                       >
                         <option value="">{draft.zone ? (existing.length > 0 ? "Choose a name…" : "No names in this domain yet") : "Choose a domain first"}</option>
-                        {existing.map((name) => <option key={name || "@"} value={name || "@"}>{name || "@ (the domain itself)"}</option>)}
+                        {existing.map((name) => {
+                          const self = (name ? `${name}.${draft.zone}` : draft.zone) === selfHostname;
+                          return <option key={name || "@"} value={name || "@"} disabled={self}>{name || "@ (the domain itself)"}{self ? " (this TapDeploy instance)" : ""}</option>;
+                        })}
                       </select>
                     )}
                   </div>
@@ -119,10 +127,10 @@ export function V3DomainsPanel({ units, mode, facts, factsLoading, factsError, r
                   </div>
                 </div>
                 <p className="meta" data-testid={`v3-domain-preview-${unit.unitId}`}>{hostname ? `https://${hostname}` : "Choose a domain and a subdomain."}{hostname && bound.includes(hostname) ? " is already bound." : ""}</p>
-                {occupant && (
+                {occupant && hostname !== selfHostname && (
                   <label className="warn-block flex items-start gap-2 text-sm text-amber-900">
                     <input type="checkbox" checked={draft.confirmReplace} onChange={(e) => set({ confirmReplace: e.target.checked })} data-testid={`v3-domain-confirm-replace-${unit.unitId}`} />
-                    <span><strong>{hostname}</strong> is used by {occupant}. Replace it — whatever it serves today may stop working at this address.</span>
+                    <span>I understand <strong>{hostname}</strong> will be bound to this {unit.kind === "pages" ? "Pages site" : "Worker"}; what uses it today ({occupant}) may stop working at this address.</span>
                   </label>
                 )}
               </>

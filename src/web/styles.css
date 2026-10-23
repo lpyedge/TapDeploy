@@ -339,6 +339,18 @@
   .domain-unit {
     @apply mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 p-3;
   }
+  .name-rows {
+    @apply flex flex-col gap-2;
+  }
+  .name-row {
+    @apply grid grid-cols-1 items-center gap-1 sm:grid-cols-[10rem_1fr];
+  }
+  .name-label {
+    @apply m-0 text-sm text-slate-600;
+  }
+  .name-note {
+    @apply m-0 sm:col-start-2;
+  }
   .diff-detail {
     @apply basis-full text-sm text-red-700;
   }

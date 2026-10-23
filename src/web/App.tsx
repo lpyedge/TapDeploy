@@ -12,7 +12,10 @@ import {
   getTargets,
   getDomains,
   getHyperdriveConfigs,
+  getInventory,
   type DomainsEnvelope,
+  type InventoryEnvelope,
+  type ReleaseResourceName,
   isAuthFailure,
   startOAuth,
   checkConfigCoverage,
@@ -33,6 +36,8 @@ import { V3DeployPanel, secretPromptsFor } from "./V3DeployPanel.js";
 import { V3ConfigurePanel, declaredConfigInputs, inputError } from "./V3ConfigurePanel.js";
 import { V3DomainsPanel } from "./V3DomainsPanel.js";
 import { V3HyperdrivePanel } from "./V3HyperdrivePanel.js";
+import { V3NamesPanel } from "./V3NamesPanel.js";
+import { nameRows, requestNames } from "./name-choices.js";
 import { domainRequest, draftErrors, type HttpUnit, type UnitDomainDraft } from "./domain-choices.js";
 import { Shell } from "./Shell.js";
 import { phaseLabel } from "./step-labels.js";
@@ -372,6 +377,15 @@ function V3Flow(props: V3FlowProps) {
   const [hyperdriveError, setHyperdriveError] = useState<string | null>(null);
   const [hyperdriveLoading, setHyperdriveLoading] = useState(false);
   const [hyperdriveChoices, setHyperdriveChoices] = useState<Record<string, Record<string, string>>>({});
+  // Resource / Pages project names: the release's renamable items, the
+  // operator's choices, and the account inventory (plus, on upgrade, what the
+  // target Worker binds today).
+  const [releaseResources, setReleaseResources] = useState<ReleaseResourceName[]>([]);
+  const [nameValues, setNameValues] = useState<Record<string, string>>({});
+  const [inventory, setInventory] = useState<InventoryEnvelope | null>(null);
+  const [inventoryFor, setInventoryFor] = useState<string | null>(null);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
   useEffect(() => {
     if (snap.stage !== "configure" || !props.csrf || !props.accountId || hyperdriveFor === props.accountId) return;
     if (!machine.snapshot().releaseUnits.some((u) => (u.hyperdrive ?? []).length > 0)) return;
@@ -462,6 +476,10 @@ function V3Flow(props: V3FlowProps) {
     setInputValues({});
     setDomainDrafts({});
     setHyperdriveChoices({});
+    setReleaseResources([]);
+    setNameValues({});
+    setInventory(null);
+    setInventoryFor(null);
     setModeIntent("install");
     setPaidConfirmed(false);
     setStatuses([]);
@@ -540,6 +558,8 @@ function V3Flow(props: V3FlowProps) {
       if (!retained) throw new Error("choose a release ZIP file first");
       const prepared = await prepareReleaseZip(props.csrf, retained.bytes);
       if (!prepared.releaseProof) throw new Error("prepare did not return a release proof");
+      setReleaseResources(prepared.releaseSummary.resources ?? []);
+      setNameValues({});
       setSnap(machine.setSource(retained, prepared.releaseProof, (prepared.releaseSummary.units ?? []).map((u) => ({ unitId: String(u.unitId), kind: String(u.kind), name: String(u.name), ...(Array.isArray(u.hyperdrive) && u.hyperdrive.length > 0 ? { hyperdrive: u.hyperdrive.map(String) } : {}) }))));
       // Prefill operator-editable names from the sealed release; the operator
       // may still change them on the configure stage (server re-validates).
@@ -580,6 +600,24 @@ function V3Flow(props: V3FlowProps) {
   // A flat name cannot address one unit of several: multi-executable releases
   // keep release names instead of failing late at plan.
   const renameAllowed = workerUnits.length === 1;
+  const inventoryWorker = modeIntent === "upgrade" && renameAllowed ? inputValues.workerName ?? "" : "";
+  const inventoryKey = `${props.accountId}|${inventoryWorker}`;
+  useEffect(() => {
+    if (snap.stage !== "configure" || !props.csrf || !props.accountId || releaseResources.length === 0 || inventoryFor === inventoryKey) return;
+    let cancelled = false;
+    setInventoryLoading(true);
+    setInventoryError(null);
+    const kinds = [...new Set(releaseResources.map((item) => item.kind))];
+    void getInventory(props.csrf, props.accountId, kinds, inventoryWorker || undefined)
+      .then((envelope) => { if (!cancelled) { setInventory(envelope); setInventoryFor(inventoryKey); } })
+      .catch((error) => { if (!cancelled) { setInventory(null); setInventoryFor(inventoryKey); setInventoryError(safeErrorMessage(error)); } })
+      .finally(() => { if (!cancelled) setInventoryLoading(false); });
+    return () => { cancelled = true; };
+  }, [snap.stage, props.csrf, props.accountId, releaseResources, inventoryKey, inventoryFor, inventoryWorker]);
+  // Install names and upgrade picks mean different things: switching mode starts over.
+  useEffect(() => { setNameValues({}); }, [modeIntent]);
+  const names = nameRows(releaseResources, modeIntent, inventory, nameValues);
+  const namesReady = names.every((row) => !row.error);
   const workerNameDef = declaredInputs.find((def) => def.key === "workerName");
   const visibleInputs = declaredInputs.filter((def) => def.key !== "workerName");
   const workerNameError = renameAllowed ? inputError("workerName", inputValues.workerName ?? "", { required: true, validation: workerNameDef?.validation }) : null;
@@ -588,7 +626,7 @@ function V3Flow(props: V3FlowProps) {
   const nameTaken = modeIntent === "install" && renameAllowed && (upgradeTargets ?? []).some((target) => target.name === (inputValues.workerName ?? ""));
   const inputsReady = workerNameError === null && visibleInputs.every((def) => inputError(def.key, inputValues[def.key] ?? "", def) === null);
   const httpUnits: HttpUnit[] = snap.releaseUnits.flatMap((unit) => unit.kind === "worker" || unit.kind === "pages"
-    ? [{ unitId: unit.unitId, kind: unit.kind, target: unit.kind === "worker" && renameAllowed && inputValues.workerName ? inputValues.workerName : unit.name }]
+    ? [{ unitId: unit.unitId, kind: unit.kind, target: unit.kind === "worker" && renameAllowed && inputValues.workerName ? inputValues.workerName : names.find((row) => row.key === `pages:${unit.unitId}`)?.value || unit.name }]
     : []);
   const domainErrors = draftErrors(httpUnits, domainDrafts, domainFacts, recordsByZone, window.location.hostname);
   const domainsReady = Object.keys(domainErrors).length === 0;
@@ -626,6 +664,7 @@ function V3Flow(props: V3FlowProps) {
         mode: modeIntent,
         ...(() => { const domains = domainRequest(httpUnits, domainDrafts, domainFacts, recordsByZone); return domains ? { domains } : {}; })(),
         ...(hyperdriveUnits.length > 0 ? { bindings: Object.fromEntries(hyperdriveUnits.map((unit) => [unit.unitId, { hyperdrive: { ...(hyperdriveChoices[unit.unitId] ?? {}) } }])) } : {}),
+        ...(() => { const chosen = requestNames(names); return chosen ? { names: chosen } : {}; })(),
         paidRiskConfirmed,
       });
       if (envelope.error || !envelope.graphPlan) {
@@ -752,6 +791,13 @@ function V3Flow(props: V3FlowProps) {
           upgradeTargetsError={upgradeTargetsError}
           extras={
             <>
+            <V3NamesPanel
+              rows={names}
+              mode={modeIntent}
+              loading={inventoryLoading}
+              error={inventoryError}
+              onName={(key, value) => setNameValues((prev) => ({ ...prev, [key]: value }))}
+            />
             <V3HyperdrivePanel
               units={hyperdriveUnits}
               configs={hyperdriveConfigs}
@@ -769,11 +815,12 @@ function V3Flow(props: V3FlowProps) {
               recordsByZone={recordsByZone}
               drafts={domainDrafts}
               errors={domainErrors}
+              selfHostname={window.location.hostname}
               onDraft={(unitId, draft) => setDomainDrafts((prev) => ({ ...prev, [unitId]: draft }))}
             />
             </>
           }
-          continueDisabled={busy || !inputsReady || !domainsReady || !hyperdriveReady || !machine.can("PLAN_READY") || nameTaken}
+          continueDisabled={busy || !inputsReady || !namesReady || !domainsReady || !hyperdriveReady || !machine.can("PLAN_READY") || nameTaken}
           onBack={() => { setSnap(machine.backToRelease()); }}
           onContinue={() => void continueFromConfigure()}
         />

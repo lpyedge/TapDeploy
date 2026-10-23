@@ -117,6 +117,16 @@ written. The same bytes from the URL are the same release.
 
 - `app.id` is the immutable project identity (stamped into versions, Pages
   ownership markers and receipts). Keep it stable across releases.
+- Resource names in your `wrangler.jsonc` files and `resources` units, and
+  Pages project names, are suggestions: the user may rename them at install,
+  and an upgrade keeps whatever the installed Worker is bound to. Refer to
+  resources through bindings in your code, never by name. A KV binding in
+  `wrangler.jsonc` names an existing namespace by `id` and is never renamed.
+- `upgrade.switchable` (optional): resources the user may swap on upgrade,
+  as `<kind>:<name>` with the release's name, e.g. `["r2:cache"]`. Use it for
+  disposable data such as caches; leave persistent data such as a D1 database
+  out, so an upgrade stays bound to it. Custom domains can always change on
+  upgrade.
 - `capabilities` are symbolic (table in the quick start); they map to OAuth
   scopes in code, and a config can never author a raw scope.
 - `units` (optional): omitted means one implicit unit (`main`) whose

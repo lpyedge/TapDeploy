@@ -32,7 +32,7 @@ describe("domain drafts", () => {
   });
   it("requires consent for replacement and removal, and builds the plan request", () => {
     const drafts = { main: { ...EMPTY_DRAFT, bind: true, zone: "example.com", sub: "www" }, web: { ...EMPTY_DRAFT, remove: ["docs.example.com"] } };
-    expect(draftErrors([api, site], drafts, facts, records)).toEqual({ main: "confirm the replacement first", web: "confirm the removal first" });
+    expect(draftErrors([api, site], drafts, facts, records)).toEqual({ main: "www.example.com is in use: tick the confirmation to bind it here", web: "confirm the removal first" });
     const confirmed = { main: { ...drafts.main, confirmReplace: true }, web: { ...drafts.web, confirmRemove: true } };
     expect(draftErrors([api, site], confirmed, facts, records)).toEqual({});
     expect(domainRequest([api, site], confirmed, facts, records)).toEqual({

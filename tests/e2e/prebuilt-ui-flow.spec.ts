@@ -121,7 +121,7 @@ async function mockBase(page: Page, mocks: FlowMocks, sessionHash = "v3-session-
   // dev proxy). Records compiler pulls and any /api call that escaped above.
   page.on("request", (req) => {
     const url = req.url();
-    if (url.includes("/api/") && !url.includes("/api/auth/session") && !url.includes("/api/auth/check-config") && !url.includes("/api/cloudflare/accounts") && !url.includes("/api/cloudflare/targets") && !url.includes("/api/cloudflare/domains") && !url.includes("/api/cloudflare/hyperdrive") && !url.includes("/api/auth/start") && !url.includes("/api/deploy/prepare") && !url.includes("/api/deploy/plan") && !url.includes("/api/deploy/step") && !url.includes("/api/upload/assets")) {
+    if (url.includes("/api/") && !url.includes("/api/auth/session") && !url.includes("/api/auth/check-config") && !url.includes("/api/cloudflare/accounts") && !url.includes("/api/cloudflare/targets") && !url.includes("/api/cloudflare/domains") && !url.includes("/api/cloudflare/hyperdrive") && !url.includes("/api/cloudflare/inventory") && !url.includes("/api/auth/start") && !url.includes("/api/deploy/prepare") && !url.includes("/api/deploy/plan") && !url.includes("/api/deploy/step") && !url.includes("/api/upload/assets")) {
       mocks.unexpectedApi.push(`${req.method()} ${url}`);
     }
     if (/\.wasm$|esbuild|compiler/i.test(url)) mocks.compilerRequests.push(url);
@@ -408,6 +408,7 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-domain-preview-main")).toContainText("https://www.example.com");
     // An existing record: the operator must confirm the replacement first.
     await expect(page.getByTestId("v3-domain-confirm-replace-main")).toBeVisible();
+    await expect(page.getByTestId("v3-domain-main")).toContainText("www.example.com will be bound to this Worker; what uses it today (DNS A → 192.0.2.1) may stop working");
     await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
     await page.getByTestId("v3-domain-confirm-replace-main").check();
     await page.getByTestId("v3-to-deploy").click();
@@ -504,6 +505,63 @@ test.describe("prebuilt UI flow", () => {
     expect(mocks.planBodies).toHaveLength(1);
     expect((mocks.planBodies[0] as Record<string, unknown>).inputs).toEqual({ workerName: "live-two" });
     expect((mocks.planBodies[0] as Record<string, unknown>).mode).toBe("upgrade");
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("install names each resource (release suggestion first); upgrade keeps what the Worker binds unless switchable", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/deploy/prepare");
+    await page.route("**/api/deploy/prepare", (route) =>
+      json(route, {
+        releaseProof: "proof-sealed",
+        releaseSummary: {
+          archiveSha256: "a".repeat(64), manifestDigest: "b".repeat(64), entryCount: 2,
+          units: [{ unitId: "main", kind: "worker", name: "api" }],
+          resources: [
+            { key: "r2:media", kind: "r2", name: "media", bindings: [{ unitId: "main", binding: "MEDIA" }] },
+            { key: "r2:cache", kind: "r2", name: "cache", bindings: [{ unitId: "main", binding: "CACHE" }], switchable: true },
+          ],
+        },
+      }),
+    );
+    await page.unroute("**/api/cloudflare/targets");
+    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api" }], pages: [] }));
+    const inventoryQueries: Array<Record<string, unknown>> = [];
+    await page.route("**/api/cloudflare/inventory", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      inventoryQueries.push(body);
+      return json(route, { accountId: "a".repeat(32), names: { r2: ["live-media", "media", "live-cache"] }, ...(body.worker ? { bindings: [{ binding: "MEDIA", kind: "r2", name: "live-media" }, { binding: "CACHE", kind: "r2", name: "live-cache" }] } : {}) });
+    });
+    await page.goto("/");
+    await pasteV3Config(page, V3_TEXT);
+    await page.getByTestId("v3-source-file-mode").check();
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    // Install: editable, prefilled from the release; an existing name is reused.
+    await expect(page.getByTestId("v3-name-r2-media")).toHaveValue("media");
+    await expect(page.getByTestId("v3-names")).toContainText("it will be reused");
+    await page.getByTestId("v3-name-r2-media").fill("photos");
+    await page.getByTestId("v3-input-workerName").fill("api-two");
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-plan-review")).toBeVisible();
+    expect((mocks.planBodies.at(-1) as Record<string, unknown>).names).toEqual({ "r2:media": "photos" });
+    // Upgrade: the Worker's binding decides, shown read-only; a resource the
+    // config marks switchable stays editable, starting at today's binding.
+    await page.getByTestId("v3-back-to-configure").click();
+    await page.getByTestId("v3-mode-upgrade").check();
+    await page.getByTestId("v3-upgrade-target").selectOption("api");
+    await expect(page.getByTestId("v3-name-r2-media")).toBeDisabled();
+    await expect(page.getByTestId("v3-name-r2-media")).toHaveValue("live-media");
+    await expect(page.getByTestId("v3-name-r2-cache")).toBeEditable();
+    await expect(page.getByTestId("v3-name-r2-cache")).toHaveValue("live-cache");
+    await page.getByTestId("v3-name-r2-cache").fill("new-cache");
+    await expect(page.getByTestId("v3-names")).toContainText("Will be created; the Worker switches to it.");
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-plan-review")).toBeVisible();
+    expect((mocks.planBodies.at(-1) as Record<string, unknown>).names).toEqual({ "r2:media": "live-media", "r2:cache": "new-cache" });
+    expect(inventoryQueries.some((query) => query.worker === "api")).toBe(true);
     expect(mocks.unexpectedApi).toEqual([]);
   });
 

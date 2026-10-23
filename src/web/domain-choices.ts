@@ -92,10 +92,10 @@ export function draftErrors(
     if (draft.bind) {
       const hostname = draftHostname(draft);
       if (!hostname) { errors[unit.unitId] = "choose a domain and a subdomain (@ for the domain itself)"; continue; }
-      if (hostname === selfHostname) { errors[unit.unitId] = `${hostname} is the address of this TapDeploy instance; binding it would take TapDeploy offline`; continue; }
+      if (hostname === selfHostname) { errors[unit.unitId] = `${hostname} is the address of this TapDeploy instance and cannot be bound to an app (TapDeploy would go offline). Choose another name, or untick "Bind a domain".`; continue; }
       if (seen.has(hostname)) { errors[unit.unitId] = `${hostname} is already chosen for ${seen.get(hostname)}`; continue; }
       seen.set(hostname, unit.target);
-      if (hostnameOccupant(hostname, unit, facts, recordsByZone[draft.zone] ?? []) && !draft.confirmReplace) { errors[unit.unitId] = "confirm the replacement first"; continue; }
+      if (hostnameOccupant(hostname, unit, facts, recordsByZone[draft.zone] ?? []) && !draft.confirmReplace) { errors[unit.unitId] = `${hostname} is in use: tick the confirmation to bind it here`; continue; }
     }
     if (draft.remove.length > 0 && !draft.confirmRemove) errors[unit.unitId] = "confirm the removal first";
   }

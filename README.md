@@ -35,8 +35,11 @@ browser and a Cloudflare account.
    permissions; the token never reaches the page's JavaScript.
 3. **Pick the release ZIP** (the published URL or a local file). The server
    verifies every byte; nothing is compiled.
-4. **Configure:** new install or upgrade, an optional domain per Worker or Pages
-   site, and the Hyperdrive configuration if the app uses one.
+4. **Configure:** new install or upgrade; on install, the name of every Worker,
+   Pages site and resource (the release's names are suggestions); on upgrade,
+   the resources in use today are kept unless the app allows changing them. An
+   optional domain per Worker or Pages site, and the Hyperdrive configuration if
+   the app uses one.
 5. **Review and confirm.** The plan lists everything that will be created or
    changed and any billing risk. Every step is read back from Cloudflare before
    the next; nothing is rolled back or deleted behind your back.

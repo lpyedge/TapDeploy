@@ -20,6 +20,7 @@ import {
 } from "../../cloudflare/client/index.js";
 import { snapshotGraphTargets } from "../../core/planning/snapshot.js";
 import { domainEntriesFromChoices } from "../../core/deploy/custom-domains.js";
+import { applyResourceNames, markSwitchable } from "../../core/planning/resource-names.js";
 import { buildGraphDeployPlan, graphPlanReferences } from "../../core/planning/plan.js";
 import { buildDeployGraph } from "../../core/planning/deploy-graph.js";
 import type { ExpectedTarget } from "../../core/planning/types.js";
@@ -51,6 +52,9 @@ interface DeployPlanBody {
   // Operator-chosen existing account resources for bindings whose release id
   // belongs to the publisher: `{ [unitId]: { hyperdrive: { [binding]: name } } }`.
   bindings?: unknown;
+  // Operator-chosen names for the release's resources and Pages projects:
+  // `{ "<kind>:<release name>" | "pages:<unitId>": name }` (resource-names.ts).
+  names?: unknown;
   // The verified bundle proof + digest binding the
   // exact ZIP content, the per-unit drift reference of a previously approved
   // graph plan, and the operator's explicit paid-risk confirmation.
@@ -161,9 +165,18 @@ async function planGraphV3(
     }
   }
 
-  const prepared = preparedGraphInputs(config, release.units, release.archiveSha256, release.manifestDigest, normalizeV3Inputs(config, body.inputs));
+  // The operator's names replace the release's suggestions before any spec or
+  // graph exists; `planConfig` is the renamed copy used for planning (the
+  // session stays bound to the config as authorized).
+  const renamed = applyResourceNames(release.units, config, body.names);
+  if (!renamed.ok) return c.json({ error: "INVALID_RESOURCE_NAME", detail: renamed.detail }, 400);
+  const planConfig = renamed.config;
+  const prepared = preparedGraphInputs(planConfig, renamed.units, release.archiveSha256, release.manifestDigest, normalizeV3Inputs(config, body.inputs));
   if (!prepared.ok) return c.json({ error: "INVALID_RELEASE_PROOF", detail: prepared.detail }, 409);
   const specs = prepared.specs;
+  // Resources the config lets the user swap on upgrade (release names).
+  const switchable = markSwitchable(specs, release.units, config);
+  if (!switchable.ok) return c.json({ error: "invalid_config", detail: switchable.detail }, 400);
   // Operator-chosen custom domains join the unit's sealed domain entries.
   const chosen = domainEntriesFromChoices(body.domains, Object.fromEntries(Object.entries(specs).map(([unitId, spec]) => [unitId, spec.targetKind])), URL.canParse(publicOrigin) ? new URL(publicOrigin).hostname : undefined);
   if (!chosen.ok) return c.json({ error: "INVALID_DOMAIN_CHOICE", detail: chosen.detail }, 400);
@@ -175,7 +188,7 @@ async function planGraphV3(
   const installPolicies = (config.install?.policies ?? []).map((policy) => policy.kind);
   const graph = buildDeployGraph({
     accountId,
-    units: config.units?.map((unit) => ({ ...unit, services: specs[unit.id]?.wrangler.services })),
+    units: planConfig.units?.map((unit) => ({ ...unit, services: specs[unit.id]?.wrangler.services })),
     specs,
     ...(release.combinedUnitRootDigest ? { bundleDigest: release.combinedUnitRootDigest } : {}),
   });
@@ -337,7 +350,7 @@ async function planGraphV3(
     dependencies: graph.dependencies.map(({ dependent, dependency }) => ({ dependent, dependency })),
     expectedPerUnitReferences: references as Record<string, unknown>,
     approvedDiffsWithActionIds: graphPlan.units.flatMap((unit) => unit.diffs.map((diff) => ({ unitId: unit.unitId, actionId: graphActionId({ unitId: unit.unitId, resource: diff.resource, action: diff.action, ...(diff.name ? { name: diff.name } : {}) }), resource: diff.resource, action: diff.action, ...(diff.name ? { name: diff.name } : {}) }))),
-    perUnitCanonicalSpecs: { ...specs, ...resourceOnlyDispatchSpecs(config, release.manifestDigest, normalizeV3Inputs(config, body.inputs)) } as unknown as Record<string, unknown>,
+    perUnitCanonicalSpecs: { ...specs, ...resourceOnlyDispatchSpecs(planConfig, release.manifestDigest, normalizeV3Inputs(config, body.inputs)) } as unknown as Record<string, unknown>,
     perUnitWranglerAndBundleProofs: prepared.proofs,
     capabilityClosure: { declared: effectiveCapabilities(config), resolved: resolvedCapabilities },
     costPosture: graphPlan.cost as unknown as Record<string, unknown>, approvedMode: body.mode === "upgrade" ? "upgrade" : "install",

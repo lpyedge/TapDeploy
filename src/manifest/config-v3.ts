@@ -186,6 +186,8 @@ export interface ConfigV3 {
   inputs?: ConfigV3Input[];
   units?: ConfigV3Unit[];
   install?: ConfigV3Install;
+  /** Resources (`<kind>:<release name>`) the user may swap on upgrade; others stay bound. */
+  upgrade?: { switchable?: string[] };
   authorization?: ConfigV3Authorization;
 }
 

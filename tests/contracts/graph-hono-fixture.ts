@@ -34,7 +34,7 @@ export async function graphHonoFixture(config: ConfigV3, files: Record<string, U
   const session = await createSession(key, { ttlMs: 120_000, publicOrigin: origin }, {
     accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId,
     configHash: await computeConfigV3Id(config),
-    sourcePolicy: { ...config.source, allowLocalZip: config.source.allowLocalZip ?? true, appId: config.app.id, units: (config.units ?? []).map(({ id, kind, wrangler }) => ({ id, kind, ...(wrangler ? { wrangler } : {}) })) },
+    sourcePolicy: { ...config.source, allowLocalZip: config.source.allowLocalZip ?? true, appId: config.app.id, units: (config.units ?? []).map(({ id, kind, wrangler, resources }) => ({ id, kind, ...(wrangler ? { wrangler } : {}), ...(resources ? { resources: resources.map((resource) => ({ kind: resource.kind, name: resource.name })) } : {}) })), ...(config.upgrade?.switchable?.length ? { switchable: [...config.upgrade.switchable] } : {}) },
   });
   const app = createApp(env);
   const trace: Array<{ method: string; path: string }> = [];

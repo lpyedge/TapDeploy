@@ -2885,3 +2885,104 @@ it("every step of a multi-unit install stays within the Workers subrequest budge
   expect(f.trace.slice(before).some(call => call.path.includes("/workers/scripts/") || call.path.includes("/vectorize/"))).toBe(false);
   for (const [stepName, count] of Object.entries(calls)) expect(count, stepName).toBeLessThan(50);
 });
+
+// Operator-chosen names: install renames the release's suggestions everywhere
+// (including a resource created by one unit and bound by another); the live
+// Worker reports what it binds; an upgrade must keep those names.
+it("installs under operator-chosen names, reads them back from the Worker, and keeps them on upgrade", async () => {
+  const config: ConfigV3 = { ...baseConfig(["workers", "r2", "vectorize"]), units: [
+    { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 32, metric: "cosine" }] },
+    { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc", dependsOn: ["data"] },
+  ] };
+  const f = await graphHonoFixture(config, {
+    "main/wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker.mjs", compatibility_date: "2026-10-17", workers_dev: false,
+      vectorize: [{ binding: "VECTORS", index_name: "docs" }], r2_buckets: [{ binding: "MEDIA", bucket_name: "media" }] })),
+    "main/worker.mjs": enc.encode("export default { fetch() { return new Response('ok'); } };"),
+  }, "node");
+  const summary = await (await f.prepare()).json() as { releaseSummary: { resources: Array<{ key: string; bindings: unknown[] }> } };
+  expect(summary.releaseSummary.resources.map((item) => item.key)).toEqual(["vectorize:docs", "r2:media"]);
+
+  const names = { "vectorize:docs": "my-docs", "r2:media": "my-media" };
+  expect((await f.plan({ names: { "r2:media": "Bad Name" } })).status).toBe(400);
+  const planned = await (await f.plan({ names })).json() as typeof f.plannedBody;
+  expect(planned.graphPlan.blocked, JSON.stringify(planned.graphPlan.guards)).toBe(false);
+  const diffs = planned.graphPlan.units.flatMap((unit) => unit.diffs.map((diff) => `${unit.unitId}:${diff.resource}:${diff.action}:${diff.name}`));
+  expect(diffs).toEqual(expect.arrayContaining(["data:vectorize:create:my-docs", "main:r2:create:my-media", "main:vectorize:skip:my-docs"]));
+  const step = f.makeStep(planned);
+  const receipts: unknown[] = [];
+  const run = async (unit: string, resource: string, action: string, name: string, phase: string, args: Record<string, unknown> = {}) => {
+    const res = await step(unit, resource, action, name, phase, { receipts: [...receipts], ...args });
+    expect(res.status, `${unit} ${phase}: ${await res.clone().text()}`).toBe(200);
+    const body = await res.json() as { phaseReceipt?: unknown; result?: Record<string, unknown> };
+    if (body.phaseReceipt !== undefined) receipts.push(body.phaseReceipt);
+    return body;
+  };
+  await run("data", "vectorize", "create", "my-docs", "create-vectorize-indexes");
+  await run("main", "r2", "create", "my-media", "create-r2-buckets");
+  const created = await run("main", "worker", "create", "api", "create-worker");
+  await run("main", "deployment", "create", "api", "activate", { versionId: created.result?.versionId });
+  expect(f.vectorizeIndexes.map((index) => index.name)).toEqual(["my-docs"]);
+  expect(f.buckets.map((bucket) => bucket.name)).toEqual(["my-media"]);
+
+  const inventory = await (await f.json("/api/cloudflare/inventory", { accountId: f.accountId, kinds: ["r2", "vectorize"], worker: "api" })).json() as { names: Record<string, string[]>; bindings: unknown[] };
+  expect(inventory.bindings).toEqual(expect.arrayContaining([{ binding: "MEDIA", kind: "r2", name: "my-media" }, { binding: "VECTORS", kind: "vectorize", name: "my-docs" }]));
+
+  // Upgrading with the release's names would rebind the Worker: refused.
+  const stale = await (await f.plan({ mode: "upgrade" })).json() as typeof f.plannedBody;
+  expect(stale.graphPlan.blocked).toBe(true);
+  const kept = await (await f.plan({ mode: "upgrade", names })).json() as typeof f.plannedBody;
+  expect(kept.graphPlan.blocked, JSON.stringify(kept.graphPlan.guards)).toBe(false);
+  expect(kept.graphPlan.units.flatMap((unit) => unit.diffs.filter((diff) => diff.resource === "r2" || diff.resource === "vectorize").map((diff) => `${diff.action}:${diff.name}`))).toEqual(expect.arrayContaining(["preserve:my-media", "preserve:my-docs"]));
+});
+
+// `upgrade.switchable`: the config lets the user swap a cache-like resource on
+// upgrade, while every other resource the Worker binds stays bound.
+it("lets an upgrade swap only the resources the config marks switchable", async () => {
+  const files = {
+    "main/wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker.mjs", compatibility_date: "2026-10-17", workers_dev: false,
+      vectorize: [{ binding: "VECTORS", index_name: "docs" }], r2_buckets: [{ binding: "MEDIA", bucket_name: "media" }] })),
+    "main/worker.mjs": enc.encode("export default { fetch() { return new Response('ok'); } };"),
+  };
+  const configWith = (switchable: string[]): ConfigV3 => ({ ...baseConfig(["workers", "r2", "vectorize"]), upgrade: { switchable }, units: [
+    { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 32, metric: "cosine" }] },
+    { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc", dependsOn: ["data"] },
+  ] });
+
+  const unknown = await graphHonoFixture(configWith(["r2:other"]), files, "node");
+  await unknown.prepare();
+  const refused = await unknown.plan({});
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({ detail: 'upgrade.switchable lists "r2:other", which is not a resource of this release' });
+
+  const f = await graphHonoFixture(configWith(["r2:media"]), files, "node");
+  const summary = await (await f.prepare()).json() as { releaseSummary: { resources: Array<{ key: string; switchable?: true }> } };
+  expect(summary.releaseSummary.resources).toEqual([expect.not.objectContaining({ switchable: true }), expect.objectContaining({ key: "r2:media", switchable: true })]);
+  const planned = await (await f.plan({})).json() as typeof f.plannedBody;
+  const step = f.makeStep(planned);
+  const receipts: unknown[] = [];
+  const run = async (unit: string, resource: string, action: string, name: string, phase: string, args: Record<string, unknown> = {}) => {
+    const res = await step(unit, resource, action, name, phase, { receipts: [...receipts], ...args });
+    expect(res.status, `${unit} ${phase}: ${await res.clone().text()}`).toBe(200);
+    const body = await res.json() as { phaseReceipt?: unknown; result?: Record<string, unknown> };
+    if (body.phaseReceipt !== undefined) receipts.push(body.phaseReceipt);
+    return body;
+  };
+  await run("data", "vectorize", "create", "docs", "create-vectorize-indexes");
+  await run("main", "r2", "create", "media", "create-r2-buckets");
+  const created = await run("main", "worker", "create", "api", "create-worker");
+  await run("main", "deployment", "create", "api", "activate", { versionId: created.result?.versionId });
+
+  // The switchable bucket may change; the Worker moves to a new one.
+  const swapped = await (await f.plan({ mode: "upgrade", names: { "r2:media": "new-media" } })).json() as typeof f.plannedBody;
+  expect(swapped.graphPlan.blocked, JSON.stringify(swapped.graphPlan.guards)).toBe(false);
+  expect(swapped.graphPlan.units.flatMap((unit) => unit.diffs.map((diff) => `${diff.resource}:${diff.action}:${diff.name}`))).toEqual(expect.arrayContaining(["r2:create:new-media"]));
+  const upgradeStep = f.makeStep(swapped);
+  const newBucket = await upgradeStep("main", "r2", "create", "new-media", "create-r2-buckets");
+  expect(newBucket.status, await newBucket.clone().text()).toBe(200);
+  const version = await upgradeStep("main", "worker", "update", "api", "create-version", { receipts: [(await newBucket.json() as { phaseReceipt: unknown }).phaseReceipt] });
+  expect(version.status, await version.clone().text()).toBe(200);
+  expect(f.buckets.map((bucket) => bucket.name)).toEqual(["media", "new-media"]);
+  // The index is not switchable: changing it is still refused.
+  const rebound = await (await f.plan({ mode: "upgrade", names: { "vectorize:docs": "other-docs" } })).json() as typeof f.plannedBody;
+  expect(rebound.graphPlan.blocked).toBe(true);
+});
