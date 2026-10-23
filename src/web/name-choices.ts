@@ -1,7 +1,7 @@
 // Configure-step names for the release's resources and Pages projects.
 //
 // Install: each name is editable and starts at the release's suggestion; an
-// existing name is reused. Upgrade: a resource the config marks switchable stays
+// existing name is reused. Upgrade: a resource the config marks `onUpgrade: "change"` stays
 // editable, starting at what the Worker binds today; any other resource the
 // Worker binds is locked; the rest are picked from the account's existing names.
 // The server re-validates every name and refuses a silent rebind.
@@ -32,7 +32,7 @@ export function nameRows(
   return resources.map((item) => {
     const options = inventory?.names[item.kind] ?? [];
     const bound = mode === "upgrade" ? inventory?.bindings?.find((live) => live.kind === item.kind && item.bindings.some((binding) => binding.binding === live.binding)) : undefined;
-    if (mode === "install" || item.switchable) {
+    if (mode === "install" || item.changeOnUpgrade) {
       const value = values[item.key] ?? bound?.name ?? item.name;
       return {
         key: item.key, kind: item.kind, releaseName: item.name, mode: "input", value, options,

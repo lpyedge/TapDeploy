@@ -18,7 +18,6 @@ const workerNameInput: ConfigV3["inputs"] = [
     key: "workerName",
     type: "string",
     label: "Worker name",
-    requiredWhen: "install",
     validation: { minLength: 3, maxLength: 63, pattern: "^[a-z0-9-]+$" },
   },
 ];
@@ -72,7 +71,7 @@ describe("preparedGraphInputs workerName override", () => {
   });
 
   it("refuses values outside the safe baseline even without declared validation", () => {
-    const loose: ConfigV3["inputs"] = [{ key: "workerName", type: "string", label: "Worker name", requiredWhen: "both" }];
+    const loose: ConfigV3["inputs"] = [{ key: "workerName", type: "string", label: "Worker name" }];
     const out = preparedGraphInputs(baseConfig(loose), [unit()], "a".repeat(64), "m".repeat(64), { workerName: "UPPER" });
     expect(out.ok).toBe(false);
     if (out.ok) return;

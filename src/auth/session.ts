@@ -13,7 +13,7 @@ export interface SessionPayload {
   nonce: string;
   accountId?: string;
   source: string;
-  sourcePolicy?: { defaultUrl?: string; allowLocalZip: boolean; expectedSha256?: string; appId: string; units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string }> }>; switchable?: string[] };
+  sourcePolicy?: { defaultUrl?: string; allowLocalZip: boolean; expectedSha256?: string; appId: string; units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string; upgradeKeep: boolean }> }> };
   // the canonical SHA-256 of the config this one-shot OAuth was bound to
   //. A session that was created against a different/null config cannot be
   // reused for another config's deploy without re-authorization.

@@ -46,9 +46,61 @@ D1 database (unless bound by id), queue and Vectorize index of the release, a
 release's names are suggestions. The mapping is applied to the prepared units
 and the config before any spec or graph exists. On upgrade the Configure step
 sends the names the target Worker binds today (read from its settings) and the
-plan's rebind guard refuses any other, except for the resources the config
-lists in `upgrade.switchable`: their bindings are marked `switchable` and may
-move to another (or a new) resource. Service references never change.
+plan's rebind guard refuses any other, except for resources whose config
+entry says `upgradeKeep: false`: their bindings are marked `changeOnUpgrade`
+and may move to another (or a new) resource. Service references never change.
+
+Config shape: the JSON is the author-facing form; the planner works on
+`plannedUnits(config)` (`src/manifest/config-v3.ts`): the Workers and Pages
+units as declared (one implicit Worker at the ZIP root when `units` is omitted
+and `resources` is set) plus one internal resource-only unit, id `resources`,
+built from `resources`. Ordering between a Worker and a resource is derived
+from the binding, so no dependency is declared.
+
+Config inputs (`src/manifest/input-validation.ts`, shared by browser and
+server): install asks for every input (`required` defaults true); upgrade asks
+for the ones not marked `upgradeKeep`, and an empty value there keeps the
+deployed one. The plan request is refused (`INVALID_INPUT`) for a value that is
+missing at install, not asked on upgrade, or breaks the declared type and
+`validation`. Non-secret inputs are merged into the Worker's `vars` when the
+specs are built, so the version upload and the postcheck treat them like
+release variables; a key the release already sets is refused. On upgrade
+`replaceSecrets` lists the secrets the user chose to change: their policy
+becomes `replace`, the plan shows `secret: update`, and the new value rides in
+the version upload instead of an inherit directive.
+
+Result card: a verified public URL is the large link; without one it lists the
+created identities and says why; a Cloudflare dashboard link is **always**
+present. The dashboard link is derived from the approved plan's effective
+Worker or Pages project name for any action (create, update, preserve) and falls
+back to the account home. URLs are never invented. Every step has one primary
+button whose enablement comes from the state machine plus input validation; the
+stepper follows the machine stage.
+
+Worker name override: any valid name (`^[a-z0-9-]{1,63}$`, plus the declared
+input's own validation when the config declares one) for a release with exactly
+one Worker (a Worker plus Pages counts as one). With zero or several Workers the
+release names are kept. Resource and Pages project names (`names` in the plan
+request, `src/core/planning/resource-names.ts`): at install every R2 bucket,
+D1 database (unless bound by id), queue and Vectorize index of the release, a
+`resources` unit's KV namespace, and every Pages project, may be renamed; the
+release's names are suggestions. The mapping is applied to the prepared units
+and the config before any spec or graph exists. On upgrade the Configure step
+sends the names the target Worker binds today (read from its settings) and the
+plan's rebind guard refuses any other, except for resources whose config
+entry says `onUpgrade: "change"`: their bindings are marked `changeOnUpgrade`
+and may move to another (or a new) resource. Service references never change.
+
+Config inputs (`src/manifest/input-validation.ts`, shared by browser and
+server): `requiredWhen` decides the mode an input is asked in, and the plan
+request is refused (`INVALID_INPUT`) for a value that is missing, not asked in
+that mode or breaks the declared type and `validation`. Non-secret inputs are
+merged into the Worker's `vars` when the specs are built, so the version
+upload and the postcheck treat them like release variables; a key the release
+already sets is refused. On upgrade `replaceSecrets` lists the prompt secrets
+the user chose to change: their policy becomes `replace`, the plan shows
+`secret: update`, and the new value rides in the version upload instead of an
+inherit directive.
 
 ## 3. Sealed-graph protocol (do not weaken)
 

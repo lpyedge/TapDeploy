@@ -3,6 +3,7 @@ import { zipSync } from "fflate";
 import { createApp, type TapDeployEnv } from "../../src/api/app.js";
 import { deriveSealKey, openSeal, type SealedEnvelope } from "../../src/auth/keys.js";
 import { createSession, sessionCookieName } from "../../src/auth/session.js";
+import { sourcePolicyUnits } from "../../src/auth/oauth-tx.js";
 import { computeConfigV3Id, type ConfigV3 } from "../../src/manifest/config-v3.js";
 import type { VerifiedReleaseContext } from "../../src/core/planning/graph-execution-context.js";
 import type { GraphDeployPlan } from "../../src/core/planning/plan.js";
@@ -34,7 +35,7 @@ export async function graphHonoFixture(config: ConfigV3, files: Record<string, U
   const session = await createSession(key, { ttlMs: 120_000, publicOrigin: origin }, {
     accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId,
     configHash: await computeConfigV3Id(config),
-    sourcePolicy: { ...config.source, allowLocalZip: config.source.allowLocalZip ?? true, appId: config.app.id, units: (config.units ?? []).map(({ id, kind, wrangler, resources }) => ({ id, kind, ...(wrangler ? { wrangler } : {}), ...(resources ? { resources: resources.map((resource) => ({ kind: resource.kind, name: resource.name })) } : {}) })), ...(config.upgrade?.switchable?.length ? { switchable: [...config.upgrade.switchable] } : {}) },
+    sourcePolicy: { ...config.source, allowLocalZip: config.source.allowLocalZip ?? true, appId: config.app.id, units: sourcePolicyUnits(config) },
   });
   const app = createApp(env);
   const trace: Array<{ method: string; path: string }> = [];

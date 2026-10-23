@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { applyResourceNames, markSwitchable, releaseResourceNames } from "../../src/core/planning/resource-names.js";
+import { applyResourceNames, markChangeableOnUpgrade, releaseResourceNames } from "../../src/core/planning/resource-names.js";
 import type { DeploySpec } from "../../src/core/deploy-spec.js";
-import type { ConfigV3 } from "../../src/manifest/config-v3.js";
+import { plannedUnits, type ConfigV3 } from "../../src/manifest/config-v3.js";
 
 const config = {
   schemaVersion: 3, app: { id: "a/b", name: "B" }, source: { allowLocalZip: true }, capabilities: ["workers", "pages", "r2", "d1", "queues", "vectorize"],
   units: [
-    { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 32, metric: "cosine" }] },
     { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc" },
     { id: "site", kind: "pages", wrangler: "site/wrangler.jsonc" },
   ],
+  resources: [{ kind: "vectorize", name: "docs", dimensions: 32, metric: "cosine" }],
 } as ConfigV3;
+const planned = (value: ConfigV3) => ({ units: plannedUnits(value) });
 const units = [
-  { unitId: "data", canonicalWrangler: {} },
+  { unitId: "resources", canonicalWrangler: {} },
   { unitId: "main", canonicalWrangler: { kind: "worker", name: "api",
     r2Buckets: [{ binding: "MEDIA", bucketName: "media" }],
     d1Databases: [{ binding: "DB", databaseName: "db" }, { binding: "OLD", databaseName: "fixed", databaseId: "id-1" }],
@@ -23,7 +24,7 @@ const units = [
 
 describe("releaseResourceNames", () => {
   it("lists every renamable name once, with the Worker bindings that use it", () => {
-    expect(releaseResourceNames(units, config)).toEqual([
+    expect(releaseResourceNames(units, planned(config))).toEqual([
       { key: "vectorize:docs", kind: "vectorize", name: "docs", bindings: [{ unitId: "main", binding: "VECTORS" }] },
       { key: "r2:media", kind: "r2", name: "media", bindings: [{ unitId: "main", binding: "MEDIA" }] },
       { key: "d1:db", kind: "d1", name: "db", bindings: [{ unitId: "main", binding: "DB" }] },
@@ -43,7 +44,7 @@ describe("applyResourceNames", () => {
     expect(main.queueConsumers![0]!.queue).toBe("my-jobs");
     expect(main.r2Buckets![0]!.bucketName).toBe("media");
     expect((result.units.find((unit) => unit.unitId === "site")!.canonicalWrangler as { name: string }).name).toBe("my-site");
-    expect(result.config.units![0]!.resources![0]!.name).toBe("my-docs");
+    expect(result.config.resources![0]!.name).toBe("my-docs");
     expect((units[1]!.canonicalWrangler as Record<string, Array<Record<string, unknown>>>).vectorize![0]!.indexName).toBe("docs");
   });
 
@@ -56,22 +57,25 @@ describe("applyResourceNames", () => {
   });
 });
 
-describe("markSwitchable", () => {
+describe("markChangeableOnUpgrade", () => {
   const specs = () => ({ main: { cloudflare: { r2: [{ binding: "MEDIA", bucketName: "media" }], d1: [{ binding: "DB", databaseName: "db" }] } } }) as unknown as Record<string, DeploySpec>;
+  const withMedia = (extra: Record<string, unknown>) => ({ ...config, resources: [...config.resources!, { kind: "r2", name: "media", ...extra }] }) as ConfigV3;
 
-  it("marks the bindings of the resources the config lists, and only those", () => {
-    const listed = { ...config, upgrade: { switchable: ["r2:media"] } } as ConfigV3;
-    expect(releaseResourceNames(units, listed).find((item) => item.key === "r2:media")?.switchable).toBe(true);
+  it("marks the bindings of a resource whose config entry says upgradeKeep false, and only those", () => {
+    const changeable = withMedia({ upgradeKeep: false });
+    expect(releaseResourceNames(units, planned(changeable)).find((item) => item.key === "r2:media")?.changeOnUpgrade).toBe(true);
+    expect(releaseResourceNames(units, planned(changeable)).find((item) => item.key === "d1:db")?.changeOnUpgrade).toBeUndefined();
     const marked = specs();
-    expect(markSwitchable(marked, units, listed)).toEqual({ ok: true });
-    expect(marked.main!.cloudflare.r2![0]!.switchable).toBe(true);
-    expect(marked.main!.cloudflare.d1![0]!.switchable).toBeUndefined();
+    markChangeableOnUpgrade(marked, units, planned(changeable));
+    expect(marked.main!.cloudflare.r2![0]!.changeOnUpgrade).toBe(true);
+    expect(marked.main!.cloudflare.d1![0]!.changeOnUpgrade).toBeUndefined();
   });
 
-  it("refuses a key that is not a resource of this release", () => {
-    for (const key of ["r2:other", "pages:site"]) {
-      const result = markSwitchable(specs(), units, { ...config, upgrade: { switchable: [key] } } as ConfigV3);
-      expect(result).toEqual({ ok: false, detail: `upgrade.switchable lists "${key}", which is not a resource of this release` });
+  it("marks nothing for the default (keep), for upgradeKeep true, or when the config does not mention the resource", () => {
+    for (const changeable of [withMedia({}), withMedia({ upgradeKeep: true }), config]) {
+      const marked = specs();
+      markChangeableOnUpgrade(marked, units, planned(changeable));
+      expect(marked.main!.cloudflare.r2![0]!.changeOnUpgrade).toBeUndefined();
     }
   });
 });

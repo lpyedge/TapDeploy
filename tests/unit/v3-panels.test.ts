@@ -5,19 +5,19 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { GraphPlan } from "../../src/web/api.js";
-import { V3ConfigurePanel, declaredConfigInputs, inputError } from "../../src/web/V3ConfigurePanel.js";
+import { V3ConfigurePanel, changeableSecrets, declaredConfigInputs, inputError } from "../../src/web/V3ConfigurePanel.js";
 import { V3ReleasePanel } from "../../src/web/V3ReleasePanel.js";
-import { secretPromptsFor } from "../../src/web/V3DeployPanel.js";
+import { secretProblem, secretPromptsFor } from "../../src/web/V3DeployPanel.js";
 
 const noop = () => undefined;
 
 describe("declaredConfigInputs / inputError", () => {
   const config = JSON.stringify({
     inputs: [
-      { key: "workerName", type: "string", label: "Worker name", requiredWhen: "install", validation: { minLength: 3, pattern: "^[a-z0-9-]+$" } },
-      { key: "region", type: "select", requiredWhen: "install", options: [{ label: "EU", value: "eu" }, { value: "us" }] },
-      { key: "nickname", type: "string", requiredWhen: "never" },
-      { key: "API_KEY", type: "secret", secretPolicy: "prompt" },
+      { key: "workerName", type: "string", label: "Worker name", validation: { minLength: 3, pattern: "^[a-z0-9-]+$" } },
+      { key: "region", type: "select", options: [{ label: "EU", value: "eu" }, { value: "us" }, "asia"] },
+      { key: "nickname", type: "string", required: false, upgradeKeep: true },
+      { key: "API_KEY", type: "secret" },
       { type: "string" },
     ],
   });
@@ -25,8 +25,9 @@ describe("declaredConfigInputs / inputError", () => {
   it("lists non-secret declared inputs with defaults and keeps options", () => {
     const inputs = declaredConfigInputs(config);
     expect(inputs.map((input) => input.key)).toEqual(["workerName", "region", "nickname"]);
-    expect(inputs[1]).toMatchObject({ label: "region", required: true, options: [{ label: "EU", value: "eu" }, { label: "us", value: "us" }] });
-    expect(inputs[2]).toMatchObject({ required: false });
+    expect(inputs[1]).toMatchObject({ label: "region", options: [{ label: "EU", value: "eu" }, { label: "us", value: "us" }, { label: "asia", value: "asia" }] });
+    expect(inputs[1]).not.toHaveProperty("required");
+    expect(inputs[2]).toMatchObject({ required: false, upgradeKeep: true });
   });
 
   it("returns no inputs for invalid or input-less config text", () => {
@@ -34,24 +35,35 @@ describe("declaredConfigInputs / inputError", () => {
     expect(declaredConfigInputs("{}")).toEqual([]);
   });
 
-  it("validates required, length, pattern and the worker-name shape", () => {
-    const def = { required: true, validation: { minLength: 3, maxLength: 8, pattern: "[a-z]+" } };
-    expect(inputError("x", "", def)).toBe("required");
-    expect(inputError("x", "", { required: false })).toBeNull();
-    expect(inputError("x", "ab", def)).toBe("at least 3 characters");
-    expect(inputError("x", "abcdefghi", def)).toBe("at most 8 characters");
-    expect(inputError("x", "ab1d", def)).toBe("invalid format");
-    expect(inputError("x", "abcd", { required: true, validation: { pattern: "(" } })).toBe("invalid declared pattern");
-    expect(inputError("workerName", "Bad Name", { required: true })).toBe("lowercase letters, digits and dashes, max 63");
-    expect(inputError("workerName", "good-name", { required: true })).toBeNull();
+  it("lists the secrets an upgrade may replace: the ones the user enters that upgrade still asks for", () => {
+    const secrets = JSON.stringify({ inputs: [
+      { key: "ADMIN_PASSWORD", type: "secret", label: "Admin password" },
+      { key: "FIRST_ONLY", type: "secret", upgradeKeep: true },
+      { key: "SALT", type: "secret", generate: true },
+    ] });
+    expect(changeableSecrets(secrets).map((input) => input.key)).toEqual(["ADMIN_PASSWORD"]);
+  });
+
+  it("validates required (per mode), length, pattern and the worker-name shape", () => {
+    const def = { key: "x", type: "string" as const, label: "x", validation: { minLength: 3, maxLength: 8, pattern: "[a-z]+" } };
+    expect(inputError(def, "install", "")).toBe("required");
+    expect(inputError(def, "upgrade", "")).toBeNull();
+    expect(inputError({ ...def, required: false }, "install", "")).toBeNull();
+    expect(inputError(def, "install", "ab")).toBe("at least 3 characters");
+    expect(inputError(def, "install", "abcdefghi")).toBe("at most 8 characters");
+    expect(inputError(def, "install", "ab1d")).toBe("invalid format");
+    expect(inputError({ ...def, validation: { pattern: "(" } }, "install", "abcd")).toBe("invalid declared pattern");
+    const name = { key: "workerName", type: "string" as const, label: "Worker name" };
+    expect(inputError(name, "install", "Bad Name")).toBe("lowercase letters, digits and dashes, max 63");
+    expect(inputError(name, "install", "good-name")).toBeNull();
   });
 });
 
 describe("secretPromptsFor", () => {
   const config = JSON.stringify({
     inputs: [
-      { key: "TOKEN", type: "secret", secretPolicy: "prompt", label: "API token" },
-      { key: "SALT", type: "secret", secretPolicy: "generate-once" },
+      { key: "TOKEN", type: "secret", label: "API token" },
+      { key: "SALT", type: "secret", generate: true },
       { key: "PLAIN", type: "string" },
     ],
   });
@@ -68,13 +80,24 @@ describe("secretPromptsFor", () => {
       { resource: "secret", action: "preserve", name: "OLD" },
       { resource: "worker", action: "create", name: "api" },
     ]));
-    expect(prompts).toEqual([{ name: "TOKEN", label: "API token" }]);
+    expect(prompts.map((prompt) => [prompt.name, prompt.label, prompt.replacing])).toEqual([["TOKEN", "API token", false]]);
   });
 
   it("an undeclared created secret defaults to prompt; no plan means no prompts", () => {
-    expect(secretPromptsFor(config, plan([{ resource: "secret", action: "create", name: "EXTRA" }]))).toEqual([{ name: "EXTRA", label: "EXTRA" }]);
+    const names = (prompts: ReturnType<typeof secretPromptsFor>) => prompts.map((prompt) => [prompt.name, prompt.label]);
+    expect(names(secretPromptsFor(config, plan([{ resource: "secret", action: "create", name: "EXTRA" }])))).toEqual([["EXTRA", "EXTRA"]]);
     expect(secretPromptsFor(config, null)).toEqual([]);
-    expect(secretPromptsFor("not json", plan([{ resource: "secret", action: "create", name: "X" }]))).toEqual([{ name: "X", label: "X" }]);
+    expect(names(secretPromptsFor("not json", plan([{ resource: "secret", action: "create", name: "X" }])))).toEqual([["X", "X"]]);
+  });
+
+  it("an update (a secret the user chose to change on upgrade) is prompted as a replacement and validated", () => {
+    const rules = JSON.stringify({ inputs: [{ key: "ADMIN_PASSWORD", type: "secret", label: "Admin password", required: false, validation: { minLength: 8, pattern: "adm_.+" } }] });
+    const [prompt] = secretPromptsFor(rules, plan([{ resource: "secret", action: "update", name: "ADMIN_PASSWORD" }]));
+    expect(prompt).toMatchObject({ name: "ADMIN_PASSWORD", replacing: true });
+    expect(secretProblem(prompt!, "")).toBeNull();
+    expect(secretProblem(prompt!, "adm_1")).toBe("at least 8 characters");
+    expect(secretProblem(prompt!, "other-password")).toBe("invalid format");
+    expect(secretProblem(prompt!, "adm_secret1")).toBeNull();
   });
 });
 
@@ -102,7 +125,7 @@ describe("panel markup from props alone", () => {
     renderToStaticMarkup(createElement(V3ConfigurePanel, {
       sourceLabel: "release.zip", releaseUnits: [{ unitId: "main", kind: "worker", name: "api" }], workerUnitCount: 1,
       showModeToggle: true, modeIntent: "install", onModeIntent: noop, renameAllowed: true, workerNameDef: undefined,
-      visibleInputs: [], inputValues: { workerName: "api" }, onInputValue: noop, upgradeTargets: null,
+      visibleInputs: [], inputValues: { workerName: "api" }, onInputValue: noop, secretsToChange: [], replacedSecrets: [], onReplaceSecret: noop, upgradeTargets: null,
       upgradeTargetsLoading: false, upgradeTargetsError: null, onSwitchToUpgrade: noop, continueDisabled: false, onBack: noop, onContinue: noop, ...overrides,
     }));
 

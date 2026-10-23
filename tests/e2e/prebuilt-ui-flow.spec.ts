@@ -298,7 +298,7 @@ test.describe("prebuilt UI flow", () => {
       app: { id: "example/renamed", name: "Renamed" },
       source: { allowLocalZip: true },
       capabilities: ["workers"],
-      inputs: [{ key: "workerName", type: "string", label: "Worker name", requiredWhen: "install", validation: { minLength: 3, maxLength: 63, pattern: "^[a-z0-9-]+$" } }],
+      inputs: [{ key: "workerName", type: "string", label: "Worker name", validation: { minLength: 3, maxLength: 63, pattern: "^[a-z0-9-]+$" } }],
     });
     await page.goto("/");
     await pasteV3Config(page, config);
@@ -481,6 +481,81 @@ test.describe("prebuilt UI flow", () => {
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("inputs follow required / upgradeKeep per mode, validate by type, and an upgrade can change a secret", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/deploy/plan");
+    await page.route("**/api/deploy/plan", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      mocks.planBodies.push(body);
+      const plan = graphPlanBody();
+      if (Array.isArray(body.replaceSecrets)) plan.graphPlan.units[0]!.diffs.push({ resource: "secret", action: "update", name: "ADMIN_PASSWORD" });
+      return json(route, plan);
+    });
+    await page.unroute("**/api/cloudflare/targets");
+    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api-live" }], pages: [] }));
+    const config = JSON.stringify({
+      schemaVersion: 3,
+      app: { id: "example/inputs", name: "Inputs" },
+      source: { allowLocalZip: true },
+      capabilities: ["workers", "r2"],
+      inputs: [
+        { key: "REGION", type: "select", label: "Region", upgradeKeep: true, options: [{ label: "Europe", value: "eu" }, "us"] },
+        { key: "RETENTION_DAYS", type: "integer", label: "Retention days", validation: { minimum: 1, maximum: 30 } },
+        { key: "TAGS", type: "multiselect", label: "Tags", required: false, options: [{ label: "Alpha", value: "a" }, "b"] },
+        { key: "EXPIRES", type: "date", label: "Expires", required: false },
+        { key: "ADMIN_PASSWORD", type: "secret", label: "Admin password", required: false, validation: { minLength: 8 } },
+      ],
+    });
+    await page.goto("/");
+    await pasteV3Config(page, config);
+    await page.getByTestId("v3-source-file-mode").check();
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-configure")).toBeVisible();
+    // Install asks for everything but offers no secret change; a required one blocks until valid.
+    await expect(page.getByTestId("v3-secrets-change")).toHaveCount(0);
+    await expect(page.getByTestId("v3-input-EXPIRES")).toHaveAttribute("type", "date");
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-input-REGION").selectOption("eu");
+    await page.getByTestId("v3-input-RETENTION_DAYS").fill("99");
+    await expect(page.getByTestId("v3-input-RETENTION_DAYS-error")).toHaveText("at most 30");
+    await page.getByTestId("v3-input-RETENTION_DAYS").fill("7");
+    await page.getByTestId("v3-input-TAGS-a").check();
+    await page.getByTestId("v3-input-TAGS-b").check();
+    await page.getByTestId("v3-input-EXPIRES").fill("2027-02-28");
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-plan-review")).toBeVisible();
+    expect((mocks.planBodies[0] as Record<string, unknown>).inputs).toEqual({ workerName: "api", REGION: "eu", RETENTION_DAYS: "7", TAGS: "a,b", EXPIRES: "2027-02-28" });
+    expect((mocks.planBodies[0] as Record<string, unknown>).replaceSecrets).toBeUndefined();
+    // Upgrade: the install-only input is gone, empty optional ones keep the current value, and a secret can be chosen for change.
+    await page.getByTestId("v3-back-to-configure").click();
+    await page.getByTestId("v3-mode-upgrade").check();
+    await page.getByTestId("v3-upgrade-target").selectOption("api-live");
+    await expect(page.getByTestId("v3-input-REGION")).toHaveCount(0);
+    await expect(page.getByTestId("v3-input-TAGS")).toContainText("Alpha");
+    await expect(page.getByTestId("v3-secrets-change")).toBeVisible();
+    await page.getByTestId("v3-input-RETENTION_DAYS").fill("14");
+    await page.getByTestId("v3-secret-change-ADMIN_PASSWORD").check();
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-plan-review")).toBeVisible();
+    const upgradeBody = mocks.planBodies.at(-1) as Record<string, unknown>;
+    expect(upgradeBody.mode).toBe("upgrade");
+    expect(upgradeBody.replaceSecrets).toEqual(["ADMIN_PASSWORD"]);
+    expect(upgradeBody.inputs).toMatchObject({ RETENTION_DAYS: "14", workerName: "api-live" });
+    expect(upgradeBody.inputs).not.toHaveProperty("REGION");
+    // The new value is asked on the review step and follows the declared rules.
+    await expect(page.getByTestId("v3-secret-prompts")).toContainText("New Admin password");
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
+    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("short");
+    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD-error")).toHaveText("at least 8 characters");
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
+    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("long-enough-password");
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeEnabled();
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
   test("upgrade picks an existing worker from the account dropdown", async ({ page }) => {
     const mocks = newMocks();
     await mockV3Api(page, mocks);
@@ -509,7 +584,7 @@ test.describe("prebuilt UI flow", () => {
   });
 
   // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
-  test("install names each resource (release suggestion first); upgrade keeps what the Worker binds unless switchable", async ({ page }) => {
+  test("install names each resource (release suggestion first); upgrade keeps what the Worker binds unless onUpgrade is change", async ({ page }) => {
     const mocks = newMocks();
     await mockV3Api(page, mocks);
     await page.unroute("**/api/deploy/prepare");
@@ -521,7 +596,7 @@ test.describe("prebuilt UI flow", () => {
           units: [{ unitId: "main", kind: "worker", name: "api" }],
           resources: [
             { key: "r2:media", kind: "r2", name: "media", bindings: [{ unitId: "main", binding: "MEDIA" }] },
-            { key: "r2:cache", kind: "r2", name: "cache", bindings: [{ unitId: "main", binding: "CACHE" }], switchable: true },
+            { key: "r2:cache", kind: "r2", name: "cache", bindings: [{ unitId: "main", binding: "CACHE" }], changeOnUpgrade: true },
           ],
         },
       }),
@@ -548,7 +623,7 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     expect((mocks.planBodies.at(-1) as Record<string, unknown>).names).toEqual({ "r2:media": "photos" });
     // Upgrade: the Worker's binding decides, shown read-only; a resource the
-    // config marks switchable stays editable, starting at today's binding.
+    // config marks onUpgrade change stays editable, starting at today's binding.
     await page.getByTestId("v3-back-to-configure").click();
     await page.getByTestId("v3-mode-upgrade").check();
     await page.getByTestId("v3-upgrade-target").selectOption("api");
@@ -680,7 +755,8 @@ test.describe("prebuilt UI flow", () => {
       app: { id: "example/cache", name: "Cache" },
       source: { allowLocalZip: true },
       capabilities: ["r2", "kv"],
-      units: [{ id: "resources", kind: "resources" }],
+      units: [],
+      resources: [{ kind: "r2", name: "cache-data" }, { kind: "kv", name: "cache-kv" }],
     });
     await mockBase(page, mocks);
     await page.route("**/api/deploy/prepare", (route) =>

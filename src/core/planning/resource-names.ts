@@ -3,12 +3,12 @@
 // The release's names are the publisher's suggestions. At install the operator
 // may rename each one; on upgrade the Configure step sends the names the live
 // Worker is bound to today, and the plan's rebind guard refuses anything else
-// unless the config lists the resource in `upgrade.switchable`.
+// unless the resource's config entry says `upgradeKeep: false`.
 // Names are keyed `<kind>:<release name>` (`pages:<unit id>` for a Pages
 // project) and applied once, to the prepared units and the config, before any
 // spec or graph is built, so every later stage uses the chosen name.
 
-import type { ConfigV3 } from "../../manifest/config-v3.js";
+import { plannedUnits, type ConfigV3 } from "../../manifest/config-v3.js";
 import type { DeploySpec } from "../deploy-spec.js";
 
 export type RenamableKind = "r2" | "d1" | "kv" | "queue" | "vectorize" | "pages";
@@ -19,8 +19,8 @@ export interface ReleaseResourceName {
   name: string;
   /** Worker bindings that use it, to read the live name back on upgrade. */
   bindings: Array<{ unitId: string; binding: string }>;
-  /** The config lets the user swap it on upgrade (`upgrade.switchable`). */
-  switchable?: true;
+  /** The config entry says `upgradeKeep: false`: the user may bind another one on upgrade. */
+  changeOnUpgrade?: true;
 }
 
 interface UnitLike {
@@ -37,25 +37,23 @@ function entries(wrangler: Record_, field: string): Record_[] {
   return Array.isArray(value) ? value.filter((entry): entry is Record_ => entry !== null && typeof entry === "object") : [];
 }
 
-/** The parts of a config that listing the renamable names needs. */
-export type ConfigUnits = {
-  units?: ReadonlyArray<{ kind: string; resources?: ReadonlyArray<{ kind: string; name: string }> }>;
-  upgrade?: { switchable?: readonly string[] };
-};
+/** The units part of a config: what listing the renamable names needs. */
+export type ConfigUnits = { units?: ReadonlyArray<{ kind: string; resources?: ReadonlyArray<{ kind: string; name: string; upgradeKeep?: boolean }> }> };
 
 /** The renamable names of a release, in a stable order (config units first, then units by id). */
 export function releaseResourceNames(units: readonly UnitLike[], config: ConfigUnits): ReleaseResourceName[] {
   const byKey = new Map<string, ReleaseResourceName>();
-  const add = (kind: RenamableKind, name: unknown, binding?: { unitId: string; binding: unknown }) => {
+  const add = (kind: RenamableKind, name: unknown, binding?: { unitId: string; binding: unknown }, changeOnUpgrade?: boolean) => {
     if (typeof name !== "string" || !name) return;
     const key = `${kind}:${name}`;
     const item = byKey.get(key) ?? { key, kind, name, bindings: [] };
+    if (changeOnUpgrade) item.changeOnUpgrade = true;
     if (binding && typeof binding.binding === "string") item.bindings.push({ unitId: binding.unitId, binding: binding.binding });
     byKey.set(key, item);
   };
   for (const unit of config.units ?? []) {
     if (unit.kind !== "resources") continue;
-    for (const resource of unit.resources ?? []) add(resource.kind as RenamableKind, resource.name);
+    for (const resource of unit.resources ?? []) add(resource.kind as RenamableKind, resource.name, undefined, resource.upgradeKeep === false);
   }
   for (const unit of [...units].sort((a, b) => String(a.unitId).localeCompare(String(b.unitId)))) {
     const unitId = String(unit.unitId);
@@ -72,10 +70,6 @@ export function releaseResourceNames(units: readonly UnitLike[], config: ConfigU
     for (const entry of entries(wrangler, "queueConsumers")) add("queue", entry.queue);
     for (const entry of entries(wrangler, "vectorize")) add("vectorize", entry.indexName, { unitId, binding: entry.binding });
   }
-  for (const key of config.upgrade?.switchable ?? []) {
-    const item = byKey.get(key);
-    if (item && item.kind !== "pages") item.switchable = true;
-  }
   return [...byKey.values()];
 }
 
@@ -91,7 +85,7 @@ export function applyResourceNames<U extends UnitLike>(
 ): { ok: true; units: U[]; config: ConfigV3 } | { ok: false; detail: string } {
   if (raw === undefined) return { ok: true, units: [...units], config };
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, detail: "names must be an object" };
-  const known = new Map(releaseResourceNames(units, config).map((item) => [item.key, item]));
+  const known = new Map(releaseResourceNames(units, { units: plannedUnits(config) }).map((item) => [item.key, item]));
   const chosen = new Map<string, string>();
   for (const [key, value] of Object.entries(raw as Record_)) {
     const item = known.get(key);
@@ -130,37 +124,25 @@ export function applyResourceNames<U extends UnitLike>(
   });
   const renamedConfig: ConfigV3 = {
     ...config,
-    ...(config.units
-      ? { units: config.units.map((unit) => (unit.kind === "resources" ? { ...unit, resources: (unit.resources ?? []).map((resource) => ({ ...resource, name: rename(resource.kind, resource.name) as string })) } : unit)) }
-      : {}),
+    ...(config.resources ? { resources: config.resources.map((resource) => ({ ...resource, name: rename(resource.kind, resource.name) as string })) } : {}),
   };
   return { ok: true, units: renamedUnits, config: renamedConfig };
 }
 
-const SWITCHABLE_FAMILY = { r2: "r2", d1: "d1", kv: "kv", queue: "queues", vectorize: "vectorize" } as const;
+const BINDING_FAMILY = { r2: "r2", d1: "d1", kv: "kv", queue: "queues", vectorize: "vectorize" } as const;
 
 /**
- * Mark the Worker bindings of the resources the config lets the user swap on
- * upgrade (`upgrade.switchable`, keyed by the release's names), so the plan's
- * rebind guard allows a different resource for them. Every listed key must
- * name a resource of this release.
+ * Mark the Worker bindings of the resources whose config entry says
+ * `upgradeKeep: false`, so the plan's rebind guard lets an upgrade bind
+ * another resource there. Unmarked bindings stay bound to what the Worker
+ * uses today.
  */
-export function markSwitchable(
-  specs: Record<string, DeploySpec>,
-  units: readonly UnitLike[],
-  config: ConfigV3,
-): { ok: true } | { ok: false; detail: string } {
-  const listed = config.upgrade?.switchable ?? [];
-  if (listed.length === 0) return { ok: true };
-  const known = new Map(releaseResourceNames(units, config).map((item) => [item.key, item]));
-  for (const key of listed) {
-    const item = known.get(key);
-    if (!item?.switchable || item.kind === "pages") return { ok: false, detail: `upgrade.switchable lists "${key}", which is not a resource of this release` };
-    const family = SWITCHABLE_FAMILY[item.kind];
+export function markChangeableOnUpgrade(specs: Record<string, DeploySpec>, units: readonly UnitLike[], config: ConfigUnits): void {
+  for (const item of releaseResourceNames(units, config)) {
+    if (!item.changeOnUpgrade || item.kind === "pages") continue;
     for (const use of item.bindings) {
-      const entries = specs[use.unitId]?.cloudflare[family] as Array<{ binding?: string; switchable?: true }> | undefined;
-      for (const entry of entries ?? []) if (entry.binding === use.binding) entry.switchable = true;
+      const entries = specs[use.unitId]?.cloudflare[BINDING_FAMILY[item.kind]] as Array<{ binding?: string; changeOnUpgrade?: true }> | undefined;
+      for (const entry of entries ?? []) if (entry.binding === use.binding) entry.changeOnUpgrade = true;
     }
   }
-  return { ok: true };
 }

@@ -45,7 +45,7 @@ describe("prepareOAuthTxRequest", () => {
   });
 
   it("a resource-only config implies no custom-domain scopes", async () => {
-    const tx = await prepareOAuthTxRequest(config(["r2"], [{ id: "data", kind: "resources" }]), seed);
+    const tx = await prepareOAuthTxRequest({ ...config(["r2"], []), resources: [{ kind: "r2", name: "data" }] }, seed);
     expect(tx.scopes).toEqual(["workers-r2.write"]);
   });
 

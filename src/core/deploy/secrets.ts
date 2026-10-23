@@ -22,6 +22,7 @@ export type SecretActionKind = "create" | "preserve" | "fail";
 export type SecretActionReason =
   | "install-create"
   | "exists-preserve"
+  | "replace-value"
   | "missing-value"
   | "preserve-only-absent";
 
@@ -45,6 +46,14 @@ export function resolveSecretActions(
   const existing = new Set(snapshot.secretNames);
   const actions: SecretAction[] = [];
   for (const [name, policy] of Object.entries(spec.cloudflare.secrets)) {
+    // The user asked to change this secret: it needs a new value even though it exists.
+    if (policy === "replace") {
+      const value = providedValues[name];
+      actions.push(typeof value === "string" && value.length > 0
+        ? { name, policy, action: "create", reason: "replace-value" }
+        : { name, policy, action: "fail", reason: "missing-value" });
+      continue;
+    }
     if (existing.has(name)) {
       actions.push({ name, policy, action: "preserve", reason: "exists-preserve" });
       continue;
@@ -171,7 +180,9 @@ export function prepareSecretBindings(ctx: DeployStepContext, provided: unknown,
       createBindings.push(binding);
     }
   }
-  return { ok: true, bindings: [...existing.map(name => ({ type: "inherit", name, version_id: active })), ...createBindings] };
+  // A replaced secret is bound with its new value instead of inherited.
+  const replaced = new Set(createBindings.map(binding => binding.name));
+  return { ok: true, bindings: [...existing.filter(name => !replaced.has(name)).map(name => ({ type: "inherit", name, version_id: active })), ...createBindings] };
 }
 
 // Attach the declared secrets that do not yet exist. Never overwrites an

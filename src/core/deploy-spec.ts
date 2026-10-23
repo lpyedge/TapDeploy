@@ -7,7 +7,9 @@ export function isPrimitiveInputValue(v: unknown): v is PrimitiveInputValue {
 export type SecretPolicy =
   | "generate-once"
   | "prompt-on-install"
-  | "preserve-only";
+  | "preserve-only"
+  // Upgrade: the user supplies a new value that replaces the existing secret.
+  | "replace";
 
 export interface ReleaseFile {
   path: string;
@@ -44,8 +46,8 @@ export interface R2BindingSpec {
   binding: string;
   bucketName: string;
   createIfMissing: boolean;
-  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
-  switchable?: true;
+  // The config lets the user bind another resource on upgrade (`upgradeKeep: false`).
+  changeOnUpgrade?: true;
 }
 
 // D1 database binding spec resolved from a manifest declaration + input.
@@ -58,8 +60,8 @@ export interface D1BindingSpec {
   binding: string;
   databaseName: string;
   createIfMissing: boolean;
-  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
-  switchable?: true;
+  // The config lets the user bind another resource on upgrade (`upgradeKeep: false`).
+  changeOnUpgrade?: true;
   databaseId?: string;
 }
 
@@ -74,8 +76,8 @@ export interface KvBindingSpec {
   binding: string;
   namespaceName: string;
   createIfMissing: boolean;
-  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
-  switchable?: true;
+  // The config lets the user bind another resource on upgrade (`upgradeKeep: false`).
+  changeOnUpgrade?: true;
   namespaceId?: string;
 }
 
@@ -103,8 +105,8 @@ export interface QueueBindingSpec {
   binding?: string;
   queueName: string;
   createIfMissing: boolean;
-  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
-  switchable?: true;
+  // The config lets the user bind another resource on upgrade (`upgradeKeep: false`).
+  changeOnUpgrade?: true;
   role?: QueueRole;
   consumer?: QueueConsumerSpec;
 }
@@ -146,8 +148,8 @@ export interface VectorizeBindingSpec {
   binding: string;
   indexName: string;
   createIfMissing: boolean;
-  // The config lets the user swap this resource on upgrade (`upgrade.switchable`).
-  switchable?: true;
+  // The config lets the user bind another resource on upgrade (`upgradeKeep: false`).
+  changeOnUpgrade?: true;
   config?: VectorizeIndexInputConfig;
 }
 

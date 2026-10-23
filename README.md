@@ -8,13 +8,54 @@ the browser.** English | [繁體中文](README.zh-TW.md)
 
 A publisher shares a link. The user opens it, signs in to Cloudflare once,
 reviews exactly what will be created, and confirms. TapDeploy deploys the
-prebuilt Workers and Pages release, with its storage and bindings, into the
-user's account, optionally on the user's own domain. The user needs only a
-browser and a Cloudflare account.
+publisher's prebuilt Workers and Pages release, with its storage and bindings,
+into the user's own account, on the user's own domain if they want one.
 
 > **Status: not release-ready.** Tests and CI pass and the main features have
 > run against a real account; hosting TapDeploy on Cloudflare Workers is being
 > verified. A public demo instance is planned.
+
+## Why TapDeploy
+
+**1. Only a Cloudflare account is needed.** The person deploying needs no
+GitHub account, no Node.js, no `wrangler`, no terminal and no repository to
+fork. They open a link, sign in to Cloudflare once, and confirm. The publisher
+ships prebuilt files, so nothing is built on anyone's machine or on a server.
+
+**2. One config turns into a guided, validated form.** The publisher describes
+the install in a small JSON file, and TapDeploy shows it as a single Configure
+step that the user cannot get wrong:
+
+- **Typed, validated inputs:** text, number, date, single or multiple choice,
+  secrets; patterns, ranges and allowed values checked in the browser and again
+  on the server; each one required or optional, and either asked again on
+  upgrade or kept (an upgrade can change a secret such as an admin password).
+  Every value arrives in the Worker as an environment variable.
+- **Resources named and governed in one place:** R2, D1, KV, Queues and
+  Vectorize with a suggested name the user may change, and a rule per resource
+  for upgrades: keep it (a database) or let the user swap it (a cache).
+- **Domains and services together:** a custom domain per Worker or Pages site,
+  their names, and the account's Hyperdrive configuration, all chosen in the
+  same form, then planned and applied in one go. Every step is read back from
+  Cloudflare before the next; nothing is rolled back or deleted behind your
+  back.
+
+```json
+{
+  "schemaVersion": 3,
+  "app": { "id": "you/notes", "name": "Notes" },
+  "source": { "defaultUrl": "https://github.com/you/notes/releases/latest/download/notes.zip" },
+  "capabilities": ["workers", "r2", "d1"],
+  "resources": [
+    { "kind": "d1", "name": "notes-db" },
+    { "kind": "r2", "name": "notes-cache", "upgradeKeep": false }
+  ],
+  "inputs": [
+    { "key": "REGION", "type": "select", "label": "Region", "options": ["eu", "us"] },
+    { "key": "ADMIN_PASSWORD", "type": "secret", "label": "Admin password", "validation": { "minLength": 12 } }
+  ]
+}
+```
 
 ## What it deploys
 
@@ -35,11 +76,11 @@ browser and a Cloudflare account.
    permissions; the token never reaches the page's JavaScript.
 3. **Pick the release ZIP** (the published URL or a local file). The server
    verifies every byte; nothing is compiled.
-4. **Configure:** new install or upgrade; on install, the name of every Worker,
-   Pages site and resource (the release's names are suggestions); on upgrade,
-   the resources in use today are kept unless the app allows changing them. An
-   optional domain per Worker or Pages site, and the Hyperdrive configuration if
-   the app uses one.
+4. **Configure:** new install or upgrade, then the form the config describes:
+   its inputs, the name of every Worker, Pages site and resource (the
+   publisher's names are suggestions), and an optional domain per Worker or
+   Pages site. On upgrade the resources in use today are kept unless the config
+   lets the user swap them.
 5. **Review and confirm.** The plan lists everything that will be created or
    changed and any billing risk. Every step is read back from Cloudflare before
    the next; nothing is rolled back or deleted behind your back.
@@ -63,13 +104,23 @@ Guide: [docs/self-hosting.md](docs/self-hosting.md).
 
 ## Publish an app
 
-1. Build with your own toolchain (a Worker: `npx wrangler deploy --dry-run --outdir build`).
-2. Zip the output with one final `wrangler.jsonc` per Worker or Pages site.
-3. Write a `tapdeploy.config.json` listing the units and capabilities.
-4. Publish the ZIP (e.g. a GitHub release) and share
+1. **Build** with your own toolchain (a Worker: `npx wrangler deploy --dry-run --outdir build`; a site: your framework's build).
+2. **Lay out** one directory per Worker or Pages site, each with a final
+   `wrangler.jsonc` (`main` pointing at the built file) next to its files, and
+   zip it. One Worker can sit at the ZIP root:
+
+   ```text
+   notes.zip
+   ├── wrangler.jsonc     # name, main: worker/main.mjs, bindings
+   └── worker/main.mjs    # built output
+   ```
+3. **Describe** the install in `tapdeploy.config.json`: resources, inputs, units
+   and capabilities (the example above).
+4. **Publish** the ZIP (e.g. a GitHub release) and share
    `https://<instance>/?config=<config URL>`, for example as a README button.
 
-Guide with a worked example and the full reference: [docs/publishing.md](docs/publishing.md).
+Guide with directory layouts for every case, a CI workflow that builds the ZIP,
+and the full config reference: [docs/publishing.md](docs/publishing.md).
 
 ## Develop
 

@@ -111,7 +111,7 @@ describe("HTTP units imply custom-domain scopes", () => {
   const base = { schemaVersion: 3, app: { id: "a/b", name: "B" }, source: { allowLocalZip: true } } as const;
   it("adds Zone Read + DNS Write for Worker and Pages configs only", () => {
     const workerConfig = { ...base, capabilities: ["workers"], units: [{ id: "w", kind: "worker", wrangler: "wrangler.jsonc" }] } as ConfigV3;
-    const resourceConfig = { ...base, capabilities: ["r2"], units: [{ id: "r", kind: "resources" }] } as ConfigV3;
+    const resourceConfig = { ...base, capabilities: ["r2"], units: [], resources: [{ kind: "r2", name: "data" }] } as ConfigV3;
     const implicitPages = { ...base, capabilities: ["pages"] } as ConfigV3;
     expect(configHasHttpUnits(workerConfig)).toBe(true);
     expect(configHasHttpUnits(implicitPages)).toBe(true);

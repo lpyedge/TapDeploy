@@ -12,6 +12,10 @@
     "capabilities"
   ],
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional: this schema's URL, for editor completion and validation."
+    },
     "schemaVersion": {
       "const": 3
     },
@@ -107,6 +111,91 @@
         ]
       }
     },
+    "units": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "wrangler"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/unitId"
+          },
+          "kind": {
+            "enum": [
+              "worker",
+              "pages"
+            ]
+          },
+          "wrangler": {
+            "$ref": "#/$defs/wranglerPath"
+          },
+          "dependsOn": {
+            "$ref": "#/$defs/dependsOn",
+            "description": "Units deployed first. Resources always come first; this is only needed for an order TapDeploy cannot derive from service bindings."
+          }
+        }
+      },
+      "description": "Workers and Pages sites to deploy. Omit for one Worker or Pages site whose wrangler.jsonc is at the ZIP root (with `resources`: one Worker). An empty list means the release only creates `resources`."
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 16,
+      "description": "Account resources the app uses, created before any Worker or Pages site is deployed. Name them here to control them: Workers bind them by name through their wrangler.jsonc.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "name"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "r2",
+              "kv",
+              "d1",
+              "queue",
+              "vectorize"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "The suggested name; the user may rename it at install."
+          },
+          "create": {
+            "type": "boolean",
+            "description": "Create it when missing. Default true; false requires it to exist already."
+          },
+          "upgradeKeep": {
+            "type": "boolean",
+            "description": "Upgrade keeps the Worker bound to what it uses today. Default true; false lets the user bind another one (for replaceable data such as a cache, not a database)."
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1536,
+            "description": "Vectorize only: vector size, required to create the index."
+          },
+          "metric": {
+            "enum": [
+              "cosine",
+              "euclidean",
+              "dot-product"
+            ],
+            "description": "Vectorize only: distance metric, required to create the index."
+          }
+        }
+      }
+    },
     "inputs": {
       "type": "array",
       "maxItems": 32,
@@ -116,15 +205,15 @@
         "required": [
           "key",
           "type",
-          "label",
-          "requiredWhen"
+          "label"
         ],
         "properties": {
           "key": {
             "type": "string",
             "minLength": 1,
             "maxLength": 64,
-            "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]*$",
+            "description": "Name of the Worker variable (a secret: the secret binding) the value is bound to. `workerName` is reserved: it names the Worker."
           },
           "type": {
             "enum": [
@@ -133,8 +222,10 @@
               "integer",
               "number",
               "boolean",
+              "date",
               "secret",
-              "select"
+              "select",
+              "multiselect"
             ]
           },
           "label": {
@@ -150,45 +241,44 @@
             "type": "string",
             "maxLength": 200
           },
-          "requiredWhen": {
-            "enum": [
-              "install",
-              "upgrade",
-              "both",
-              "never"
-            ]
-          },
-          "secretPolicy": {
-            "enum": [
-              "prompt",
-              "generate-once"
-            ]
-          },
           "options": {
             "type": "array",
             "maxItems": 64,
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "label",
-                "value"
-              ],
-              "properties": {
-                "label": {
+              "oneOf": [
+                {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 100
                 },
-                "value": {
-                  "type": [
-                    "string",
-                    "number",
-                    "boolean"
-                  ]
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "label",
+                    "value"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "value": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    }
+                  }
                 }
-              }
-            }
+              ]
+            },
+            "description": "Choices of a select / multiselect: plain values, or { label, value } objects."
           },
           "validation": {
             "type": "object",
@@ -225,6 +315,18 @@
                 }
               }
             }
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Must be filled at install. Default true. On upgrade an empty value always keeps what is deployed."
+          },
+          "upgradeKeep": {
+            "type": "boolean",
+            "description": "Do not ask again on upgrade: the deployed value stays. Default false (upgrade shows the field; empty keeps the value)."
+          },
+          "generate": {
+            "type": "boolean",
+            "description": "Secret only: TapDeploy generates a random value once and the user never enters it. Default false."
           }
         },
         "allOf": [
@@ -232,7 +334,10 @@
             "if": {
               "properties": {
                 "type": {
-                  "const": "select"
+                  "enum": [
+                    "select",
+                    "multiselect"
+                  ]
                 }
               },
               "required": [
@@ -251,10 +356,10 @@
           {
             "if": {
               "properties": {
-                "secretPolicy": true
+                "generate": true
               },
               "required": [
-                "secretPolicy"
+                "generate"
               ]
             },
             "then": {
@@ -266,112 +371,6 @@
               "required": [
                 "type"
               ]
-            }
-          }
-        ]
-      }
-    },
-    "units": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 8,
-      "items": {
-        "oneOf": [
-          {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "kind",
-              "wrangler"
-            ],
-            "properties": {
-              "id": {
-                "$ref": "#/$defs/unitId"
-              },
-              "kind": {
-                "enum": [
-                  "worker",
-                  "pages"
-                ]
-              },
-              "wrangler": {
-                "$ref": "#/$defs/wranglerPath"
-              },
-              "dependsOn": {
-                "$ref": "#/$defs/dependsOn"
-              }
-            }
-          },
-          {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "kind",
-              "resources"
-            ],
-            "properties": {
-              "id": {
-                "$ref": "#/$defs/unitId"
-              },
-              "kind": {
-                "const": "resources"
-              },
-              "resources": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 16,
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "kind",
-                    "name",
-                    "mode"
-                  ],
-                  "properties": {
-                    "kind": {
-                      "enum": [
-                        "r2",
-                        "kv",
-                        "d1",
-                        "queue",
-                        "vectorize"
-                      ]
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 63,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
-                    },
-                    "mode": {
-                      "enum": [
-                        "ensure",
-                        "bind-existing"
-                      ]
-                    },
-                    "dimensions": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 1536,
-                      "description": "Vectorize only: vector dimensions, required to create the index (mode ensure)."
-                    },
-                    "metric": {
-                      "enum": [
-                        "cosine",
-                        "euclidean",
-                        "dot-product"
-                      ],
-                      "description": "Vectorize only: distance metric, required to create the index (mode ensure)."
-                    }
-                  }
-                }
-              },
-              "dependsOn": {
-                "$ref": "#/$defs/dependsOn"
-              }
             }
           }
         ]
@@ -438,35 +437,6 @@
               }
             }
           }
-        }
-      }
-    },
-    "upgrade": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "What the user may change when upgrading an installed app. Resources not listed stay bound to what the installed Worker uses today.",
-      "properties": {
-        "switchable": {
-          "type": "array",
-          "maxItems": 64,
-          "uniqueItems": true,
-          "description": "Resources the user may swap on upgrade, as <kind>:<name as in the release> (e.g. r2:cache). Use for caches and other replaceable data; leave persistent data such as D1 databases out.",
-          "items": {
-            "type": "string",
-            "pattern": "^(r2|d1|kv|queue|vectorize):[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
-          }
-        }
-      }
-    },
-    "authorization": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "mode"
-      ],
-      "properties": {
-        "mode": {
-          "const": "one-shot-bounded-max"
         }
       }
     }

@@ -20,12 +20,13 @@ import {
 } from "../../cloudflare/client/index.js";
 import { snapshotGraphTargets } from "../../core/planning/snapshot.js";
 import { domainEntriesFromChoices } from "../../core/deploy/custom-domains.js";
-import { applyResourceNames, markSwitchable } from "../../core/planning/resource-names.js";
+import { applyResourceNames, markChangeableOnUpgrade } from "../../core/planning/resource-names.js";
 import { buildGraphDeployPlan, graphPlanReferences } from "../../core/planning/plan.js";
 import { buildDeployGraph } from "../../core/planning/deploy-graph.js";
 import type { ExpectedTarget } from "../../core/planning/types.js";
 import type { DeployBundle } from "../../release/deploy-bundle.js";
-import { effectiveCapabilities, type ConfigV3 } from "../../manifest/config-v3.js";
+import { effectiveCapabilities, plannedUnits, type ConfigV3 } from "../../manifest/config-v3.js";
+import { inputAskedIn, inputProblem, inputRequiredIn, type InputMode } from "../../manifest/input-validation.js";
 import { loadKey } from "./auth.js";
 import {
   authorizeGraphIntent,
@@ -55,6 +56,9 @@ interface DeployPlanBody {
   // Operator-chosen names for the release's resources and Pages projects:
   // `{ "<kind>:<release name>" | "pages:<unitId>": name }` (resource-names.ts).
   names?: unknown;
+  // Upgrade only: names of declared secret inputs the operator replaces; their
+  // new values are supplied with the deploy steps, never at plan time.
+  replaceSecrets?: unknown;
   // The verified bundle proof + digest binding the
   // exact ZIP content, the per-unit drift reference of a previously approved
   // graph plan, and the operator's explicit paid-risk confirmation.
@@ -147,7 +151,7 @@ async function planGraphV3(
     })() : "",
   }, payload.expiresAt);
   if (!release) return c.json({ error: "INVALID_RELEASE_PROOF" }, 409);
-  const declaredUnitIds = (config.units ?? []).map((unit) => unit.id).sort();
+  const declaredUnitIds = (plannedUnits(config) ?? []).map((unit) => unit.id).sort();
   const preparedUnitIds = release.units.map((unit) => typeof unit.unitId === "string" ? unit.unitId : "").sort();
   if (declaredUnitIds.length > 0 && (declaredUnitIds.length !== preparedUnitIds.length || declaredUnitIds.some((id, index) => id !== preparedUnitIds[index]))) {
     return c.json({ error: "RELEASE_UNIT_MISMATCH" }, 409);
@@ -171,12 +175,15 @@ async function planGraphV3(
   const renamed = applyResourceNames(release.units, config, body.names);
   if (!renamed.ok) return c.json({ error: "INVALID_RESOURCE_NAME", detail: renamed.detail }, 400);
   const planConfig = renamed.config;
-  const prepared = preparedGraphInputs(planConfig, renamed.units, release.archiveSha256, release.manifestDigest, normalizeV3Inputs(config, body.inputs));
+  const mode: InputMode = body.mode === "upgrade" ? "upgrade" : "install";
+  const inputs = normalizeV3Inputs(config, body.inputs, mode);
+  if (!inputs.ok) return c.json({ error: "INVALID_INPUT", detail: inputs.detail }, 400);
+  const replaced = replacedSecrets(config, body.replaceSecrets, mode);
+  if (!replaced.ok) return c.json({ error: "INVALID_INPUT", detail: replaced.detail }, 400);
+  const prepared = preparedGraphInputs(planConfig, renamed.units, release.archiveSha256, release.manifestDigest, inputs.inputs, replaced.names);
   if (!prepared.ok) return c.json({ error: "INVALID_RELEASE_PROOF", detail: prepared.detail }, 409);
   const specs = prepared.specs;
-  // Resources the config lets the user swap on upgrade (release names).
-  const switchable = markSwitchable(specs, release.units, config);
-  if (!switchable.ok) return c.json({ error: "invalid_config", detail: switchable.detail }, 400);
+  markChangeableOnUpgrade(specs, release.units, { units: plannedUnits(config) });
   // Operator-chosen custom domains join the unit's sealed domain entries.
   const chosen = domainEntriesFromChoices(body.domains, Object.fromEntries(Object.entries(specs).map(([unitId, spec]) => [unitId, spec.targetKind])), URL.canParse(publicOrigin) ? new URL(publicOrigin).hostname : undefined);
   if (!chosen.ok) return c.json({ error: "INVALID_DOMAIN_CHOICE", detail: chosen.detail }, 400);
@@ -188,7 +195,7 @@ async function planGraphV3(
   const installPolicies = (config.install?.policies ?? []).map((policy) => policy.kind);
   const graph = buildDeployGraph({
     accountId,
-    units: planConfig.units?.map((unit) => ({ ...unit, services: specs[unit.id]?.wrangler.services })),
+    units: plannedUnits(planConfig)?.map((unit) => ({ ...unit, services: specs[unit.id]?.wrangler.services })),
     specs,
     ...(release.combinedUnitRootDigest ? { bundleDigest: release.combinedUnitRootDigest } : {}),
   });
@@ -274,7 +281,6 @@ async function planGraphV3(
   // The operator's New / Upgrade choice is checked against the live account
   // before anything is planned: New never updates an existing Worker and
   // Upgrade never creates one.
-  const mode = body.mode === "upgrade" ? "upgrade" : "install";
   const modeConflicts = graph.units.filter((unit) => unit.kind === "worker").flatMap((unit) => {
     const exists = snapshots[unit.id]?.workerExists;
     const name = specs[unit.id]?.cloudflare.workerName ?? unit.name;
@@ -350,7 +356,7 @@ async function planGraphV3(
     dependencies: graph.dependencies.map(({ dependent, dependency }) => ({ dependent, dependency })),
     expectedPerUnitReferences: references as Record<string, unknown>,
     approvedDiffsWithActionIds: graphPlan.units.flatMap((unit) => unit.diffs.map((diff) => ({ unitId: unit.unitId, actionId: graphActionId({ unitId: unit.unitId, resource: diff.resource, action: diff.action, ...(diff.name ? { name: diff.name } : {}) }), resource: diff.resource, action: diff.action, ...(diff.name ? { name: diff.name } : {}) }))),
-    perUnitCanonicalSpecs: { ...specs, ...resourceOnlyDispatchSpecs(planConfig, release.manifestDigest, normalizeV3Inputs(config, body.inputs)) } as unknown as Record<string, unknown>,
+    perUnitCanonicalSpecs: { ...specs, ...resourceOnlyDispatchSpecs(planConfig, release.manifestDigest, inputs.inputs) } as unknown as Record<string, unknown>,
     perUnitWranglerAndBundleProofs: prepared.proofs,
     capabilityClosure: { declared: effectiveCapabilities(config), resolved: resolvedCapabilities },
     costPosture: graphPlan.cost as unknown as Record<string, unknown>, approvedMode: body.mode === "upgrade" ? "upgrade" : "install",
@@ -390,7 +396,7 @@ async function planGraphV3(
 }
 
 function resourceOnlyDispatchSpecs(config: ConfigV3, manifestDigest: string, inputs: Record<string, PrimitiveInputValue>): Record<string, DeploySpec> {
-  return Object.fromEntries((config.units ?? []).filter((unit) => unit.kind === "resources").map((unit) => [unit.id, {
+  return Object.fromEntries((plannedUnits(config) ?? []).filter((unit) => unit.kind === "resources").map((unit) => [unit.id, {
     schemaVersion: 1, project: { id: config.app.id, version: manifestDigest.slice(0, 16) }, assets: [], inputs,
     cloudflare: {
       workerName: "",
@@ -446,13 +452,51 @@ type PreparedUnit = {
   bundleDigest: string;
 };
 
-function normalizeV3Inputs(config: ConfigV3, raw: Record<string, unknown> | undefined): Record<string, PrimitiveInputValue> {
-  const allowed = new Set((config.inputs ?? []).filter((input) => input.type !== "secret").map((input) => input.key));
-  // Operator-renamable Worker identity (see preparedGraphInputs): always
-  // allowed through so install can set the name even when the config declares
-  // no workerName input. Server-side validation still applies.
-  allowed.add("workerName");
-  return Object.fromEntries(Object.entries(normalizeInputs(raw)).filter(([key]) => allowed.has(key)));
+/**
+ * The declared non-secret inputs the operator supplied, checked against the
+ * mode and the config's rules. `workerName` is the operator-renamable Worker
+ * identity (see preparedGraphInputs): always allowed through, validated there.
+ * An input the mode does not ask for is refused rather than dropped, so a
+ * stale form cannot overwrite a value the publisher keeps on upgrade.
+ */
+function normalizeV3Inputs(config: ConfigV3, raw: Record<string, unknown> | undefined, mode: InputMode): { ok: true; inputs: Record<string, PrimitiveInputValue> } | { ok: false; detail: string } {
+  const supplied = normalizeInputs(raw);
+  const declared = (config.inputs ?? []).filter((input) => input.type !== "secret" && input.key !== "workerName");
+  const inputs: Record<string, PrimitiveInputValue> = {};
+  if (supplied.workerName !== undefined) inputs.workerName = supplied.workerName;
+  for (const input of declared) {
+    const value = supplied[input.key];
+    if (value === undefined) {
+      if (inputRequiredIn(input, mode)) return { ok: false, detail: `inputs.${input.key} is required` };
+      continue;
+    }
+    if (!inputAskedIn(input, mode)) return { ok: false, detail: `inputs.${input.key} is not asked on ${mode}` };
+    const problem = inputProblem(input, mode, String(value));
+    if (problem) return { ok: false, detail: `inputs.${input.key}: ${problem}` };
+    inputs[input.key] = value;
+  }
+  return { ok: true, inputs };
+}
+
+/** The declared secret inputs the operator replaces on upgrade: prompt-policy secrets that upgrade asks for. */
+function replacedSecrets(config: ConfigV3, raw: unknown, mode: InputMode): { ok: true; names: Set<string> } | { ok: false; detail: string } {
+  if (raw === undefined) return { ok: true, names: new Set() };
+  if (!Array.isArray(raw) || raw.some((name) => typeof name !== "string")) return { ok: false, detail: "replaceSecrets must be a list of names" };
+  if (mode !== "upgrade") return { ok: false, detail: "replaceSecrets applies to an upgrade only" };
+  const changeable = new Set((config.inputs ?? []).filter((input) => input.type === "secret" && !input.generate && inputAskedIn(input, "upgrade")).map((input) => input.key));
+  for (const name of raw as string[]) if (!changeable.has(name)) return { ok: false, detail: `replaceSecrets: "${name}" is not a secret this app lets you change on upgrade` };
+  return { ok: true, names: new Set(raw as string[]) };
+}
+
+/** Declared non-secret inputs become Worker plain-text variables named by their key (`workerName` stays the Worker's name). */
+function inputVars(config: ConfigV3, inputs: Record<string, PrimitiveInputValue>): Record<string, string | number | boolean> {
+  const vars: Record<string, string | number | boolean> = {};
+  for (const input of config.inputs ?? []) {
+    const value = inputs[input.key];
+    if (input.type === "secret" || input.key === "workerName" || value === undefined) continue;
+    vars[input.key] = input.type === "integer" || input.type === "number" ? Number(value) : input.type === "boolean" ? value === true || value === "true" : String(value);
+  }
+  return vars;
 }
 
 export function preparedGraphInputs(
@@ -461,9 +505,10 @@ export function preparedGraphInputs(
   archiveSha256: string,
   manifestDigest: string,
   inputs: Record<string, PrimitiveInputValue>,
+  replaceSecrets: ReadonlySet<string> = new Set(),
 ): { ok: true; specs: Record<string, DeploySpec>; bundles: Record<string, DeployBundle>; proofs: Record<string, unknown> } | { ok: false; detail: string } {
   const units = rawUnits as PreparedUnit[];
-  const declared = config.units ?? [];
+  const declared = plannedUnits(config) ?? [];
   const byId = new Map(units.map((unit) => [unit.unitId, unit]));
   const specs: Record<string, DeploySpec> = {};
   const bundles: Record<string, DeployBundle> = {};
@@ -476,7 +521,7 @@ export function preparedGraphInputs(
   const secretPolicies: Record<string, SecretPolicy> = {};
   for (const input of config.inputs ?? []) {
     if (input.type === "secret" && typeof input.key === "string" && input.key.length > 0) {
-      secretPolicies[input.key] = input.secretPolicy === "generate-once" ? "generate-once" : "prompt-on-install";
+      secretPolicies[input.key] = input.generate ? "generate-once" : replaceSecrets.has(input.key) ? "replace" : "prompt-on-install";
     }
   }
   // Operator-renamable Worker identity. The release wrangler name is only a
@@ -486,6 +531,7 @@ export function preparedGraphInputs(
   // without one only the Cloudflare-safe baseline applies. Validation is
   // server-side and fail-closed; multi-executable releases keep release names
   // (a flat input cannot address one unit of several).
+  const variables = inputVars(config, inputs);
   const workerNameDecl = (config.inputs ?? []).find((input) => input.type !== "secret" && input.key === "workerName");
   const rawWorkerName = inputs.workerName;
   let workerNameOverride: string | undefined;
@@ -712,6 +758,12 @@ export function preparedGraphInputs(
         ...(workflow.metadata.script_name !== undefined ? { script_name: workflow.metadata.script_name } : {}),
       });
     }
+    // Declared inputs ride into a Worker as variables; a name the release
+    // already sets would silently override the publisher's value.
+    const releaseVars = (wrangler.vars ?? {}) as Record<string, unknown>;
+    const clash = kind === "worker" ? Object.keys(variables).find((key) => Object.hasOwn(releaseVars, key)) : undefined;
+    if (clash) return { ok: false, detail: `input "${clash}" collides with a variable the release already sets in unit ${unitId}` };
+    const unitVars = kind === "worker" && Object.keys(variables).length > 0 ? { ...releaseVars, ...variables } : wrangler.vars;
     specs[unitId] = {
       schemaVersion: 1,
       project: { id: config.app.id, version: manifestDigest.slice(0, 16) },
@@ -761,7 +813,7 @@ export function preparedGraphInputs(
         r2_buckets: array("r2Buckets").map((entry) => ({ binding: entry.binding as string, bucket_name: entry.bucketName as string })),
         d1_databases: array("d1Databases").map((entry) => ({ binding: entry.binding as string, database_name: entry.databaseName as string })),
         kv_namespaces: array("kvNamespaces").map((entry) => ({ binding: entry.binding as string, id: entry.namespaceId as string })),
-        crons: wrangler.crons as string[], vars: wrangler.vars as Record<string, string | number | boolean>,
+        crons: wrangler.crons as string[], vars: unitVars as Record<string, string | number | boolean>,
         ...(ratelimits.length > 0 ? { ratelimits } : {}),
         ...(queueSpecs.length > 0 ? { queues: queueSpecs.map((queue) => ({ ...(queue.binding !== undefined ? { binding: queue.binding } : {}), queue_name: queue.queueName, ...(queue.role !== undefined ? { role: queue.role } : {}) })) } : {}),
         ...(workflowEcho.length > 0 ? { workflows: workflowEcho } : {}),

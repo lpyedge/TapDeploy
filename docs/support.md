@@ -31,7 +31,7 @@ a real account. Hosting TapDeploy itself on Workers is being verified.
   the user chose to unbind. Existing resources are reused, never replaced.
 - **Names.** At install the user may rename every resource and Pages project
   (the release's names are suggestions); an upgrade keeps the resources the
-  Worker is bound to, except those the config lists in `upgrade.switchable`.
+  Worker is bound to, except those the config marks `upgradeKeep: false`.
 - **TapDeploy never creates** Hyperdrive configurations, Secrets Stores or
   store secrets: they hold the user's own credentials.
 

@@ -56,7 +56,7 @@ export function attachDeployPrepareRoutes(app: Hono<AppEnv>, env: TapDeployEnv):
     });
     // The names the operator may change at install (and that upgrade reads
     // back from the live Worker's bindings).
-    const resources = releaseResourceNames(perUnit.units ?? [], { units: policy.units, upgrade: { switchable: policy.switchable } });
+    const resources = releaseResourceNames(perUnit.units ?? [], policy);
     return c.json({ releaseProof: proof, releaseSummary: { archiveSha256: result.manifest.archiveSha256, manifestDigest: result.manifest.manifestDigest, entryCount: result.manifest.entryCount, units: unitSummary, resources } });
   });
 }

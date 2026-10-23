@@ -6,9 +6,36 @@
 **在瀏覽器中一鍵把預先建置好的應用部署到你自己的 Cloudflare 帳戶。**
 [English](README.md) | 繁體中文
 
-發布者分享一個連結；使用者打開連結、登入 Cloudflare 一次、檢視將要建立的內容，然後確認。TapDeploy 會把預先建置好的 Workers 與 Pages release，連同儲存與 binding，部署到使用者自己的帳戶，並可綁定使用者自己的網域。使用者只需要瀏覽器和 Cloudflare 帳戶。
+發布者分享一個連結；使用者打開連結、登入 Cloudflare 一次、檢視將要建立的內容，然後確認。TapDeploy 會把發布者預先建置好的 Workers 與 Pages release，連同儲存與 binding，部署到使用者自己的帳戶，使用者想要的話也可以綁定自己的網域。
 
 > **狀態：尚未達到正式發布標準。** 測試與 CI 全部通過，主要功能已在真實帳戶上跑過；TapDeploy 自身託管在 Cloudflare Workers 上的驗證進行中。公開 demo 實例規劃中。
+
+## 為什麼用 TapDeploy
+
+**1. 只要有 Cloudflare 帳戶就能部署。** 部署的人不需要 GitHub 帳戶、Node.js、`wrangler`、終端機，也不用 fork 任何 repo。打開連結、登入 Cloudflare 一次、按確認就完成。發布者交付的是預先建置好的檔案，所以不會在任何人的電腦或伺服器上編譯。
+
+**2. 一份設定檔變成一個有引導、有驗證的表單。** 發布者用一個小小的 JSON 描述安裝內容，TapDeploy 把它呈現成單一的 Configure 步驟，使用者不會填錯：
+
+- **有型別、有驗證的輸入：** 文字、數字、日期、單選、多選、secret；格式、範圍、允許值在瀏覽器與伺服器各檢查一次；每一項可設為必填或選填，升級時可以再問一次或直接沿用（升級時可更換 secret，例如管理員密碼）。每個值都會以環境變數的形式進到 Worker。
+- **資源命名與規則集中在一處：** R2、D1、KV、Queues、Vectorize 都有建議名稱，使用者可以修改；每個資源各自設定升級規則：沿用（資料庫）或讓使用者更換（快取）。
+- **網域與服務一次搞定：** 每個 Worker 或 Pages 網站的自訂網域、各自的名稱、帳戶的 Hyperdrive 設定，都在同一個表單裡選好，然後一次規劃、一次套用。每一步都先向 Cloudflare 讀回確認才進行下一步，不會在背後回滾或刪除任何東西。
+
+```json
+{
+  "schemaVersion": 3,
+  "app": { "id": "you/notes", "name": "Notes" },
+  "source": { "defaultUrl": "https://github.com/you/notes/releases/latest/download/notes.zip" },
+  "capabilities": ["workers", "r2", "d1"],
+  "resources": [
+    { "kind": "d1", "name": "notes-db" },
+    { "kind": "r2", "name": "notes-cache", "upgradeKeep": false }
+  ],
+  "inputs": [
+    { "key": "REGION", "type": "select", "label": "Region", "options": ["eu", "us"] },
+    { "key": "ADMIN_PASSWORD", "type": "secret", "label": "Admin password", "validation": { "minLength": 12 } }
+  ]
+}
+```
 
 ## 可部署的內容
 
@@ -22,7 +49,7 @@
 1. **打開連結** `https://<實例>/?config=<設定檔網址>`；設定檔說明應用、release ZIP 與需要的 Cloudflare 權限。
 2. **登入 Cloudflare 一次。** 授權頁只列出這些權限；token 永遠不會進到頁面的 JavaScript。
 3. **選擇 release ZIP**（公開網址或本機檔案）。由伺服器驗證每一個位元組，不做任何編譯。
-4. **設定：** 全新安裝或升級；全新安裝時可設定每個 Worker、Pages 網站與資源的名稱（release 裡的名稱只是建議），升級時沿用目前使用中的資源（應用允許更換的除外）。每個 Worker 或 Pages 網站可選擇綁定網域，應用使用 Hyperdrive 時選擇你的設定。
+4. **設定：** 全新安裝或升級，然後是設定檔描述的表單：它的輸入欄位、每個 Worker、Pages 網站與資源的名稱（發布者的名稱只是建議），以及每個 Worker 或 Pages 網站可選的網域。升級時沿用目前使用中的資源，除非設定檔允許使用者更換。
 5. **檢視並確認。** 計畫列出所有將建立或變更的內容與可能的費用；每一步都會先向 Cloudflare 讀回確認才進行下一步，不會在背後回滾或刪除任何東西。
 
 ## 自行架設實例
@@ -38,12 +65,18 @@
 
 ## 發布應用
 
-1. 用你自己的工具鏈建置（Worker：`npx wrangler deploy --dry-run --outdir build`）。
-2. 把輸出打包成 ZIP，每個 Worker 或 Pages 網站各帶一個最終版的 `wrangler.jsonc`。
-3. 撰寫 `tapdeploy.config.json`，列出各 unit 與需要的能力（capabilities）。
-4. 發布 ZIP（例如 GitHub release），分享 `https://<實例>/?config=<設定檔網址>`，例如做成 README 按鈕。
+1. **建置：** 用你自己的工具鏈（Worker：`npx wrangler deploy --dry-run --outdir build`；網站：框架自己的 build）。
+2. **整理目錄：** 每個 Worker 或 Pages 網站一個目錄，各帶一個最終版的 `wrangler.jsonc`（`main` 指向建置後的檔案）與它用到的檔案，再打包成 ZIP。單一 Worker 可以直接放在 ZIP 根目錄：
 
-含完整範例與參考的指南：[docs/publishing.md](docs/publishing.md)。
+   ```text
+   notes.zip
+   ├── wrangler.jsonc     # name、main: worker/main.mjs、bindings
+   └── worker/main.mjs    # 建置輸出
+   ```
+3. **描述安裝內容：** 在 `tapdeploy.config.json` 寫下資源、輸入欄位、unit 與能力（capabilities），範例見上方。
+4. **發布：** 發布 ZIP（例如 GitHub release），分享 `https://<實例>/?config=<設定檔網址>`，例如做成 README 按鈕。
+
+指南含各種情況的目錄範例、自動打包 ZIP 的 CI workflow 與完整設定檔參考：[docs/publishing.md](docs/publishing.md)。
 
 ## 開發
 

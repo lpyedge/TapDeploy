@@ -2,7 +2,7 @@
 //
 // The standalone public TapDeploy v3 config is the minimal author contract for the
 // prebuilt-ZIP flow: schemaVersion/app/source/capabilities are required, and
-// inputs/units/install are opt-in. It must never express scripts/hooks/commands,
+// units/resources/inputs/install are opt-in. It must never express scripts/hooks/commands,
 // raw OAuth scopes or arbitrary endpoints, and it must stay strictly separate
 // from the v2 shapes (no fallback). This suite freezes the contract shape used
 // by later tasks (parser/scope binding, UI).
@@ -21,6 +21,7 @@ import {
   canonicalizeConfigV3,
   computeConfigV3Id,
   parseConfigV3Text,
+  plannedUnits,
   validateConfigV3,
   validateConfigV3Entry,
   type ConfigV3,
@@ -53,16 +54,16 @@ describe("tapdeploy.config.v3 schema contract", () => {
     expect(config.capabilities).toEqual(["workers"]);
     // The minimal config never re-declares Worker/R2 details.
     expect("targets" in (config as unknown as Record<string, unknown>)).toBe(false);
-    expect("resources" in (config as unknown as Record<string, unknown>)).toBe(false);
+    expect(config.resources).toBeUndefined();
+    expect(plannedUnits(config)).toBeUndefined();
   });
 
   it("accepts the resource-only example (no Worker, no Pages)", () => {
     const config = expectValid(loadFixture("resource-only"));
-    const unit = config.units![0]!;
-    expect(unit.kind).toBe("resources");
-    expect(unit.wrangler).toBeUndefined();
-    expect(unit.resources!.map((r) => `${r.kind}:${r.name}`)).toEqual(["r2:example-data", "kv:example-cache"]);
+    expect(config.units).toEqual([]);
+    expect(config.resources!.map((r) => `${r.kind}:${r.name}`)).toEqual(["r2:example-data", "kv:example-cache"]);
     expect(config.capabilities).toEqual(["r2", "kv"]);
+    expect(plannedUnits(config)!.map((unit) => [unit.id, unit.kind])).toEqual([["resources", "resources"]]);
   });
 
   it("accepts the multi-unit example with dependsOn DAG", () => {
@@ -90,20 +91,48 @@ describe("tapdeploy.config.v3 schema contract", () => {
     expect(config.inputs![1]!.options).toHaveLength(2);
   });
 
-  it("accepts a fixed one-shot authorization block and rejects any other mode", () => {
-    const base = loadFixture("minimal");
-    expect(expectValid({ ...base, authorization: { mode: "one-shot-bounded-max" } }).authorization!.mode).toBe(
-      "one-shot-bounded-max",
-    );
-    const bad = validateConfigV3({ ...base, authorization: { mode: "incremental" } });
-    expect(bad.ok).toBe(false);
+  it("accepts a $schema pointer for editors", () => {
+    expectValid({ ...loadFixture("minimal"), $schema: "https://raw.githubusercontent.com/lpyedge/TapDeploy/main/schemas/tapdeploy.config.v3.schema.json" });
   });
 
-  it("accepts upgrade.switchable resource keys and rejects anything else", () => {
+  it("no longer has an authorization block", () => {
+    expect(validateConfigV3({ ...loadFixture("minimal"), authorization: { mode: "one-shot-bounded-max" } }).ok).toBe(false);
+  });
+
+  it("accepts resources with upgradeKeep / create flags and inputs with required / upgradeKeep / generate", () => {
     const base = loadFixture("minimal");
-    expect(expectValid({ ...base, upgrade: { switchable: ["r2:cache", "queue:jobs"] } }).upgrade!.switchable).toEqual(["r2:cache", "queue:jobs"]);
-    for (const switchable of [["pages:site"], ["r2:"], ["r2:a", "r2:a"]]) expect(validateConfigV3({ ...base, upgrade: { switchable } }).ok).toBe(false);
-    expect(validateConfigV3({ ...base, upgrade: { other: true } }).ok).toBe(false);
+    const config = expectValid({ ...base, resources: [{ kind: "r2", name: "cache", upgradeKeep: false }, { kind: "d1", name: "main-db", create: false }], inputs: [
+      { key: "EXPIRES", type: "date", label: "Expires", required: false },
+      { key: "REGIONS", type: "multiselect", label: "Regions", upgradeKeep: true, options: ["eu", 3, { label: "US", value: "us" }] },
+      { key: "SALT", type: "secret", label: "Salt", generate: true },
+    ] });
+    expect(config.resources![0]!.upgradeKeep).toBe(false);
+    expect(config.inputs![1]!.options).toHaveLength(3);
+    for (const bad of [
+      { resources: [{ kind: "r2", name: "cache", upgradeKeep: "no" }] },
+      { resources: [{ kind: "r2", name: "cache", mode: "ensure" }] },
+      { inputs: [{ key: "REGIONS", type: "multiselect", label: "Regions" }] },
+      { inputs: [{ key: "A", type: "string", label: "A", generate: true }] },
+      { inputs: [{ key: "A", type: "string", label: "A", requiredWhen: "both" }] },
+    ]) expect(validateConfigV3({ ...base, ...bad }).ok, JSON.stringify(bad)).toBe(false);
+  });
+
+  it("plans resources as one unit, a resources-only release as units: [], and refuses mistakes", () => {
+    const base = loadFixture("minimal");
+    const withResources = expectValid({ ...base, resources: [{ kind: "vectorize", name: "docs", dimensions: 8, metric: "cosine", upgradeKeep: false }, { kind: "kv", name: "cache", create: false }] });
+    expect(plannedUnits(withResources)).toEqual([
+      { id: "resources", kind: "resources", resources: [
+        { kind: "vectorize", name: "docs", mode: "ensure", dimensions: 8, metric: "cosine", upgradeKeep: false },
+        { kind: "kv", name: "cache", mode: "bind-existing", upgradeKeep: true },
+      ] },
+      { id: "main", kind: "worker", wrangler: "wrangler.jsonc" },
+    ]);
+    const issues = (extra: Record<string, unknown>) => assertConfigV3Safe({ ...base, ...extra } as unknown as ConfigV3).map((issue) => issue.detail);
+    expect(issues({ units: [] })).toEqual(["an empty units list needs resources to create"]);
+    expect(issues({ resources: [{ kind: "r2", name: "a" }, { kind: "r2", name: "a" }] })).toEqual(["duplicate resources"]);
+    expect(issues({ resources: [{ kind: "vectorize", name: "docs" }] })).toEqual(['vectorize index "docs" needs dimensions and metric to be created (or set create to false)']);
+    expect(issues({ resources: [{ kind: "r2", name: "a", dimensions: 3 }] })).toEqual(['dimensions/metric apply only to vectorize resources ("a")']);
+    expect(issues({ units: [{ id: "resources", kind: "worker", wrangler: "w.jsonc" }] })).toEqual(['unit id "resources" is reserved for the config\'s resources']);
   });
 
   it("keeps the schema capability enum in sync with the code-owned vocabulary", () => {
@@ -214,7 +243,7 @@ describe("tapdeploy.config.v3 schema contract", () => {
     expect(validateConfigV3(unit("/abs/wrangler.jsonc")).ok).toBe(false);
     expect(validateConfigV3(unit("units/../x/wrangler.jsonc")).ok).toBe(false);
     expect(validateConfigV3(unit("units/app/wrangler.toml")).ok).toBe(false);
-    expect(validateConfigV3({ ...base, units: [] }).ok).toBe(false);
+    expect(validateConfigV3Entry({ ...base, units: [] }).ok).toBe(false);
     expect(validateConfigV3({ ...base, install: { policies: [] } }).ok).toBe(false);
   });
 
@@ -243,7 +272,7 @@ describe("tapdeploy.config.v3 schema contract", () => {
     const base = loadFixture("minimal");
     const selectInput = (extra: Record<string, unknown>) => ({
       ...base,
-      inputs: [{ key: "region", type: "select", label: "Region", requiredWhen: "both", ...extra }],
+      inputs: [{ key: "region", type: "select", label: "Region", ...extra }],
     });
     expect(validateConfigV3(selectInput({})).ok).toBe(false);
     expect(validateConfigV3(selectInput({ options: [{ label: "Auto", value: "auto" }] })).ok).toBe(true);

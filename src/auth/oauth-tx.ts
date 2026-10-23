@@ -14,7 +14,7 @@
 // call, no secrets, no DB.
 
 import type { ConfigV3, V3Capability } from "../manifest/config-v3.js";
-import { computeConfigV3Id, effectiveCapabilities } from "../manifest/config-v3.js";
+import { computeConfigV3Id, effectiveCapabilities, plannedUnits } from "../manifest/config-v3.js";
 import { planScopesForConfigV3 } from "./scope-planner.js";
 
 /**
@@ -37,11 +37,19 @@ export interface OAuthTxRequest {
   // Nonsecret app identity + source policy bound into the session.
   appId: string;
   source: { defaultUrl?: string; allowLocalZip: boolean; expectedSha256?: string };
-  units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string }> }>;
-  // Resources the user may swap on upgrade (`upgrade.switchable`).
-  switchable?: string[];
+  units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string; upgradeKeep: boolean }> }>;
   // The modes covered by this single OAuth (install AND upgrade).
   modes: Array<"install" | "upgrade">;
+}
+
+/** The units the session's source policy carries: what the release must contain. */
+export function sourcePolicyUnits(config: ConfigV3): OAuthTxRequest["units"] {
+  return (plannedUnits(config) ?? []).map((unit) => ({
+    id: unit.id,
+    kind: unit.kind,
+    ...(unit.wrangler ? { wrangler: unit.wrangler } : {}),
+    ...(unit.resources ? { resources: unit.resources.map((resource) => ({ kind: resource.kind, name: resource.name, upgradeKeep: resource.upgradeKeep })) } : {}),
+  }));
 }
 
 /**
@@ -79,13 +87,7 @@ export async function prepareOAuthTxRequest(
         ? { expectedSha256: config.source.expectedSha256 }
         : {}),
     },
-    units: (config.units ?? []).map((unit) => ({
-      id: unit.id,
-      kind: unit.kind,
-      ...(unit.wrangler ? { wrangler: unit.wrangler } : {}),
-      ...(unit.resources ? { resources: unit.resources.map((resource) => ({ kind: resource.kind, name: resource.name })) } : {}),
-    })),
-    ...(config.upgrade?.switchable?.length ? { switchable: [...config.upgrade.switchable] } : {}),
+    units: sourcePolicyUnits(config),
     modes: ["install", "upgrade"],
   };
 }

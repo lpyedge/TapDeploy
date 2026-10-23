@@ -209,7 +209,7 @@ export interface ReleaseResourceName {
   kind: string;
   name: string;
   bindings: Array<{ unitId: string; binding: string }>;
-  switchable?: true;
+  changeOnUpgrade?: true;
 }
 
 export interface InventoryEnvelope {
@@ -313,6 +313,8 @@ export interface GraphPlanRequest {
   bindings?: Record<string, { hyperdrive: Record<string, string> }>;
   // Operator-chosen names, keyed like ReleaseResourceName.key.
   names?: Record<string, string>;
+  // Upgrade: declared secrets to replace (their new values come with the deploy).
+  replaceSecrets?: string[];
   paidRiskConfirmed?: boolean;
 }
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/api/app.js";
 import { deriveSealKey, openSeal, type SealedEnvelope } from "../../src/auth/keys.js";
 import { createSession, sessionCookieName } from "../../src/auth/session.js";
+import { sourcePolicyUnits } from "../../src/auth/oauth-tx.js";
 import { computeConfigV3Id, type ConfigV3 } from "../../src/manifest/config-v3.js";
 import { graphActionId } from "../../src/core/planning/digest.js";
 import { zipSync } from "fflate";
@@ -16,7 +17,7 @@ const workflowCode = "import { WorkflowEntrypoint } from \"cloudflare:workers\";
 const baseConfig = (capabilities: ConfigV3["capabilities"]): ConfigV3 => ({ schemaVersion: 3, app: { id: "example/graph", name: "Graph" }, source: { allowLocalZip: true }, capabilities });
 
 it.each(["node", "workers"] as const)("executes resource-only R2 and KV with account-only reads (%s binding)", async runtime => {
-  const config: ConfigV3 = { ...baseConfig(["r2", "kv"]), units: [{ id: "resources", kind: "resources", resources: [{ kind: "r2", name: "media", mode: "ensure" }, { kind: "kv", name: "cache", mode: "ensure" }] }] };
+  const config: ConfigV3 = { ...baseConfig(["r2", "kv"]), units: [], resources: [{ kind: "r2", name: "media" }, { kind: "kv", name: "cache" }] };
   const f = await graphHonoFixture(config, { "README.md": enc.encode("resource release") }, runtime);
   expect(f.plannedBody.graphPlan.blocked).toBe(false);
   for (const [resource, name, phase] of [["r2", "media", "create-r2-buckets"], ["kv", "cache", "create-kv-namespaces"]]) {
@@ -263,7 +264,7 @@ it("refuses a Workflow release whose capability is not declared before any provi
 it("config secret inputs bind to Worker units only; a Pages unit in the same release plans without them", async () => {
   const config: ConfigV3 = {
     ...baseConfig(["workers", "pages"]),
-    inputs: [{ key: "API_TOKEN", type: "secret", label: "API token", requiredWhen: "install", secretPolicy: "prompt" }],
+    inputs: [{ key: "API_TOKEN", type: "secret", label: "API token" }],
     units: [{ id: "api", kind: "worker", wrangler: "api/wrangler.jsonc" }, { id: "site", kind: "pages", wrangler: "site/wrangler.jsonc" }],
   };
   const f = await graphHonoFixture(config, {
@@ -678,6 +679,7 @@ describe("worker secret input and inheritance (graph API)", () => {
     runtime: "node" | "workers",
     inputs: Array<Record<string, unknown>>,
     wranglerExtra: Record<string, unknown> = {},
+    installBody: Record<string, unknown> = {},
   ) {
     const V3_CONFIG = {
       schemaVersion: 3,
@@ -787,7 +789,7 @@ describe("worker secret input and inheritance (graph API)", () => {
     expect(prepared.status, JSON.stringify(preparedBody)).toBe(200);
     const planned = await app.request("/api/deploy/plan", {
       method: "POST", headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ accountId: ACCOUNT, releaseProof: preparedBody.releaseProof, config: { text: JSON.stringify(V3_CONFIG) }, paidRiskConfirmed: true, mode: "install" }),
+      body: JSON.stringify({ accountId: ACCOUNT, releaseProof: preparedBody.releaseProof, config: { text: JSON.stringify(V3_CONFIG) }, paidRiskConfirmed: true, mode: "install", ...installBody }),
     });
     const body = await planned.json() as {
       graphPlan: { blocked: boolean; digest: string; units: Array<{ unitId: string; kind: string; diffs: Array<{ resource: string; action: string; name?: string }> }> };
@@ -804,19 +806,17 @@ describe("worker secret input and inheritance (graph API)", () => {
         }),
       });
     };
-    const replan = async () => {
-      const replanned = await app.request("/api/deploy/plan", {
-        method: "POST", headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify({ accountId: ACCOUNT, releaseProof: preparedBody.releaseProof, config: { text: JSON.stringify(V3_CONFIG) }, paidRiskConfirmed: true, mode: "upgrade" }),
-      });
-      return (await replanned.json()) as typeof body & { error?: string };
-    };
+    const planUpgrade = (extra: Record<string, unknown> = {}) => app.request("/api/deploy/plan", {
+      method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ accountId: ACCOUNT, releaseProof: preparedBody.releaseProof, config: { text: JSON.stringify(V3_CONFIG) }, paidRiskConfirmed: true, mode: "upgrade", ...extra }),
+    });
+    const replan = async (extra: Record<string, unknown> = {}) => (await (await planUpgrade(extra)).json()) as typeof body & { error?: string; detail?: string };
     const writes = () => calls.filter((call) => call.method !== "GET");
-    return { app, headers, calls, writes, workers, uploads, body, step: makeStep(body), makeStep, replan, planStatus };
+    return { app, headers, calls, writes, workers, uploads, body, step: makeStep(body), makeStep, replan, planUpgrade, planStatus };
   }
 
   const secretInput = (extra: Record<string, unknown> = {}) => ({
-    key: "TOKEN", type: "secret", label: "Worker token", requiredWhen: "install", ...extra,
+    key: "TOKEN", type: "secret", label: "Worker token", ...extra,
   });
 
   it.each(["node", "workers"] as const)("binds a fresh prompt-on-install secret to the Worker version (%s)", async (runtime) => {
@@ -841,7 +841,7 @@ describe("worker secret input and inheritance (graph API)", () => {
   });
 
   it.each(["node", "workers"] as const)("generates generate-once server-side without browser values (%s)", async (runtime) => {
-    const t = await setupSecrets(runtime, [secretInput({ secretPolicy: "generate-once" })]);
+    const t = await setupSecrets(runtime, [secretInput({ generate: true })]);
     expect(t.planStatus).toBe(200);
     expect(t.body.graphPlan.blocked, JSON.stringify(t.body.graphPlan)).toBe(false);
     const created = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64") });
@@ -885,6 +885,117 @@ describe("worker secret input and inheritance (graph API)", () => {
     expect(JSON.stringify(v2?.bindings ?? []).includes(V3_SECRET)).toBe(false);
   });
 
+  async function installAndActivate(t: Awaited<ReturnType<typeof setupSecrets>>) {
+    const created = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64"), secrets: { TOKEN: V3_SECRET } });
+    expect(created.status, await created.clone().text()).toBe(200);
+    const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
+    const activated = await t.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] });
+    expect(activated.status).toBe(200);
+    return createdBody.result.versionId;
+  }
+
+  it.each(["node", "workers"] as const)("an upgrade replaces a secret the user chose to change, with the new value (%s)", async (runtime) => {
+    const t = await setupSecrets(runtime, [secretInput({ required: false })]);
+    await installAndActivate(t);
+    const upgrade = await t.replan({ replaceSecrets: ["TOKEN"] });
+    expect(upgrade.graphPlan.blocked, JSON.stringify(upgrade.graphPlan)).toBe(false);
+    expect(upgrade.graphPlan.units.find((u) => u.unitId === "main")!.diffs.filter((d) => d.resource === "secret")).toEqual([{ resource: "secret", action: "update", name: "TOKEN" }]);
+    const ustep = t.makeStep(upgrade);
+    const missing = await ustep("main", "worker", "update", "api", "create-version", { scriptB64: Buffer.from(code).toString("base64") });
+    expect(missing.status).toBe(409);
+    const upgraded = await ustep("main", "worker", "update", "api", "create-version", { scriptB64: Buffer.from(code).toString("base64"), secrets: { TOKEN: "new-token-value" } });
+    expect(upgraded.status, await upgraded.clone().text()).toBe(200);
+    // The only secret is replaced, so nothing is inherited: the upload carries the new value itself.
+    expect(t.workers.get("api")!.versions[0]!.bindings.filter((binding) => binding.name === "TOKEN")).toEqual([{ type: "secret_text", name: "TOKEN", text: "new-token-value" }]);
+    expect(JSON.stringify(await upgraded.json())).not.toContain("new-token-value");
+    // Not choosing it keeps the live secret: no prompt, an inherit directive.
+    const kept = await t.replan();
+    expect(kept.graphPlan.units.find((u) => u.unitId === "main")!.diffs.filter((d) => d.resource === "secret")).toEqual([{ resource: "secret", action: "preserve", name: "TOKEN" }]);
+  });
+
+  it("replacing one secret still inherits the others from the active version", async () => {
+    const t = await setupSecrets("node", [secretInput({ required: false }), secretInput({ key: "OTHER", label: "Other", required: false })]);
+    const created = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64"), secrets: { TOKEN: V3_SECRET, OTHER: "other-value" } });
+    expect(created.status, await created.clone().text()).toBe(200);
+    const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
+    expect((await t.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] })).status).toBe(200);
+    const upgrade = await t.replan({ replaceSecrets: ["TOKEN"] });
+    expect(upgrade.graphPlan.units.find((u) => u.unitId === "main")!.diffs.filter((d) => d.resource === "secret")).toEqual([
+      { resource: "secret", action: "update", name: "TOKEN" },
+      { resource: "secret", action: "preserve", name: "OTHER" },
+    ]);
+    const upgraded = await t.makeStep(upgrade)("main", "worker", "update", "api", "create-version", { scriptB64: Buffer.from(code).toString("base64"), secrets: { TOKEN: "new-token-value" } });
+    expect(upgraded.status, await upgraded.clone().text()).toBe(200);
+    const upload = t.uploads[t.uploads.length - 1]!;
+    expect(upload.bindings.filter((binding) => binding.name === "TOKEN")).toEqual([{ type: "secret_text", name: "TOKEN", text: "new-token-value" }]);
+    expect(upload.bindings.filter((binding) => binding.name === "OTHER")).toEqual([{ type: "inherit", name: "OTHER", version_id: createdBody.result.versionId }]);
+  });
+
+  it.each([
+    ["an install-only secret", [secretInput({ upgradeKeep: true })], ["TOKEN"]],
+    ["a generate-once secret", [secretInput({ generate: true })], ["TOKEN"]],
+    ["an undeclared name", [secretInput({ required: false })], ["OTHER"]],
+  ] as const)("refuses to replace %s on upgrade, before any provider read", async (_label, inputs, replaceSecrets) => {
+    const t = await setupSecrets("node", [...inputs]);
+    const callsBefore = t.calls.length;
+    const refused = await t.planUpgrade({ replaceSecrets });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ error: "INVALID_INPUT" });
+    expect(t.calls).toHaveLength(callsBefore);
+  });
+
+  it("refuses replaceSecrets on an install", async () => {
+    const t = await setupSecrets("node", [secretInput({ required: false })], {}, { replaceSecrets: ["TOKEN"] });
+    expect(t.planStatus).toBe(400);
+  });
+
+  const varInputs = [
+    { key: "REGION", type: "select", label: "Region", upgradeKeep: true, options: [{ label: "Europe", value: "eu" }, "us"] },
+    { key: "RETENTION_DAYS", type: "integer", label: "Retention", validation: { minimum: 1, maximum: 30 } },
+    { key: "TAGS", type: "multiselect", label: "Tags", required: false, options: [{ label: "A", value: "a" }, "b"] },
+    { key: "EXPIRES", type: "date", label: "Expires", required: false },
+  ];
+
+  it("non-secret inputs become plain-text Worker variables, and an upgrade changes them", async () => {
+    const t = await setupSecrets("node", varInputs, {}, { inputs: { REGION: "eu", RETENTION_DAYS: "7", TAGS: "a,b", EXPIRES: "2027-02-28" } });
+    expect(t.planStatus, JSON.stringify(t.body)).toBe(200);
+    const created = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64") });
+    expect(created.status, await created.clone().text()).toBe(200);
+    const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
+    expect((await t.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] })).status).toBe(200);
+    const bindings = t.workers.get("api")!.versions[0]!.bindings;
+    expect(bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "plain_text", name: "REGION", text: "eu" }),
+      expect.objectContaining({ type: "plain_text", name: "RETENTION_DAYS", text: "7" }),
+      expect.objectContaining({ type: "plain_text", name: "TAGS", text: "a,b" }),
+      expect.objectContaining({ type: "plain_text", name: "EXPIRES", text: "2027-02-28" }),
+    ]));
+    // Upgrade: REGION (upgradeKeep) is kept and not asked; an empty value keeps what is deployed, a given one must still be valid.
+    expect((await t.planUpgrade({ inputs: { RETENTION_DAYS: "14" } })).status).toBe(200);
+    expect((await t.planUpgrade({ inputs: {} })).status).toBe(200);
+    expect((await t.planUpgrade({ inputs: { RETENTION_DAYS: "99" } })).status).toBe(400);
+    expect(await (await t.planUpgrade({ inputs: { REGION: "us", RETENTION_DAYS: "14" } })).json()).toMatchObject({ error: "INVALID_INPUT", detail: "inputs.REGION is not asked on upgrade" });
+  });
+
+  it.each([
+    ["a missing required input", { REGION: "eu" }, "inputs.RETENTION_DAYS is required"],
+    ["a number out of range", { REGION: "eu", RETENTION_DAYS: "99" }, "inputs.RETENTION_DAYS: at most 30"],
+    ["a non-integer", { REGION: "eu", RETENTION_DAYS: "1.5" }, "inputs.RETENTION_DAYS: a whole number"],
+    ["an option that is not listed", { REGION: "asia", RETENTION_DAYS: "7" }, "inputs.REGION: one of the listed options"],
+    ["a multiselect with an unlisted choice", { REGION: "eu", RETENTION_DAYS: "7", TAGS: "a,z" }, "inputs.TAGS: only the listed options"],
+    ["an impossible date", { REGION: "eu", RETENTION_DAYS: "7", EXPIRES: "2027-02-30" }, "inputs.EXPIRES: a date as YYYY-MM-DD"],
+  ])("refuses %s at plan time", async (_label, inputs, detail) => {
+    const t = await setupSecrets("node", varInputs, {}, { inputs });
+    expect(t.planStatus).toBe(400);
+    expect(t.body).toMatchObject({ error: "INVALID_INPUT", detail });
+  });
+
+  it("refuses an input that would override a variable the release sets", async () => {
+    const t = await setupSecrets("node", varInputs, { vars: { REGION: "fixed" } }, { inputs: { REGION: "eu", RETENTION_DAYS: "7" } });
+    expect(t.planStatus).toBe(409);
+    expect(t.body).toMatchObject({ detail: 'input "REGION" collides with a variable the release already sets in unit main' });
+  });
+
   it.each(["node", "workers"] as const)("rejects undeclared secret names before any provider write (%s)", async (runtime) => {
     const t = await setupSecrets(runtime, [secretInput()]);
     expect(t.planStatus).toBe(200);
@@ -905,10 +1016,10 @@ describe("worker secret input and inheritance (graph API)", () => {
     expect(t.writes()).toHaveLength(writesBefore);
   });
 
-  it("rejects secretPolicy on non-secret inputs and invalid binding names before any provider read", async () => {    const badPolicy = await setupSecrets("node", [{ key: "PLAIN", type: "string", label: "Plain", requiredWhen: "install", secretPolicy: "generate-once" }]);
+  it("rejects generate on non-secret inputs and invalid binding names before any provider read", async () => {    const badPolicy = await setupSecrets("node", [{ key: "PLAIN", type: "string", label: "Plain", generate: true }]);
     expect(badPolicy.planStatus).toBe(400);
     expect(badPolicy.calls).toEqual([]);
-    const badName = await setupSecrets("node", [{ key: "bad-name!", type: "secret", label: "Bad", requiredWhen: "install" }]);
+    const badName = await setupSecrets("node", [{ key: "bad-name!", type: "secret", label: "Bad" }]);
     expect(badName.planStatus).toBe(400);
     expect(badName.calls).toEqual([]);
   });
@@ -1038,10 +1149,8 @@ it("prepares raw ZIP bytes and creates a server-derived V3 graph plan", async ()
     app: { id: "example/api", name: "API" },
     source: { allowLocalZip: true },
     capabilities: ["workers", "r2"],
-    units: [
-      { id: "api", kind: "worker" as const, wrangler: "wrangler.jsonc" },
-      { id: "resources", kind: "resources" as const, resources: [{ kind: "r2" as const, name: "media", mode: "ensure" as const }] },
-    ],
+    units: [{ id: "api", kind: "worker" as const, wrangler: "wrangler.jsonc" }],
+    resources: [{ kind: "r2" as const, name: "media" }],
   };
   const configText = JSON.stringify(config);
   const env = { RUNTIME: "node", PUBLIC_ORIGIN: origin, OAUTH_CLIENT_ID: "x", OAUTH_CLIENT_SECRET: "x" } as const;
@@ -1049,7 +1158,7 @@ it("prepares raw ZIP bytes and creates a server-derived V3 graph plan", async ()
   const session = await createSession(key, { ttlMs: 60_000, publicOrigin: origin }, {
     accessToken: "token", tokenType: "Bearer", scope: [], source: "v3", accountId,
     configHash: await computeConfigV3Id(config),
-    sourcePolicy: { allowLocalZip: true, appId: config.app.id, units: [{ id: "api", kind: "worker", wrangler: "wrangler.jsonc" }, { id: "resources", kind: "resources" }] },
+    sourcePolicy: { allowLocalZip: true, appId: config.app.id, units: sourcePolicyUnits(config) },
   });
   const app = createApp(env);
   let r2Created = false;
@@ -1177,7 +1286,7 @@ function configWith(policy: unknown) {
   return {
     ...V3_CONFIG_BASE,
     inputs: [
-      { key: "UNUSED", type: "text", label: "Unused", requiredWhen: "never" as const },
+      { key: "UNUSED", type: "text", label: "Unused", required: false },
     ],
     units: [{ id: "main", kind: "worker" as const, wrangler: "wrangler.jsonc" }],
     install: { policies: [policy] },
@@ -2054,13 +2163,9 @@ describe("workflow carrier graph (graph API)", () => {
 
   it("orders a carrier Workflow behind a dependency resource unit's receipts", async () => {
     const f = await graphHonoFixture(
-      { ...baseConfig(["workers", "workflows", "r2"]), units: [
-        { id: "media", kind: "resources", resources: [{ kind: "r2", name: "assets-media", mode: "ensure" }] },
-        { id: "api", kind: "worker", wrangler: "wrangler.jsonc", dependsOn: ["media"] },
-      ] },
+      { ...baseConfig(["workers", "workflows", "r2"]), units: [{ id: "api", kind: "worker", wrangler: "wrangler.jsonc" }], resources: [{ kind: "r2", name: "assets-media" }] },
       {
-        "media/README.md": enc.encode("resource unit"),
-        "wrangler.jsonc": enc.encode(wfWrangler({ r2_buckets: [] })),
+        "wrangler.jsonc": enc.encode(wfWrangler({ r2_buckets: [{ binding: "MEDIA", bucket_name: "assets-media" }] })),
         "worker/main.mjs": enc.encode(wfCode),
       },
     );
@@ -2070,7 +2175,7 @@ describe("workflow carrier graph (graph API)", () => {
     expect((await f.step("api", "workflow", "create", "wf", "apply-workflows")).status).toBe(409);
     expect((await f.step("api", "worker", "create", "wf-carrier", "create-worker")).status).toBe(409);
     expect(f.writes()).toEqual([]);
-    const bucket = await f.step("media", "r2", "create", "assets-media", "create-r2-buckets");
+    const bucket = await f.step("resources", "r2", "create", "assets-media", "create-r2-buckets");
     expect(bucket.status, await bucket.clone().text()).toBe(200);
     const bucketReceipt = (await bucket.json() as { phaseReceipt: unknown }).phaseReceipt;
     const created = await f.step("api", "worker", "create", "wf-carrier", "create-worker", { receipts: [bucketReceipt] });
@@ -2824,15 +2929,13 @@ describe("platform bindings (graph API)", () => {
   it("creates a Vectorize index declared by a resources unit with its dimensions and metric, then binds it", async () => {
     const withIndex: ConfigV3 = {
       ...baseConfig(["workers", "vectorize"]),
-      units: [
-        { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 384, metric: "dot-product" }] },
-        { id: "main", kind: "worker", wrangler: "wrangler.jsonc", dependsOn: ["data"] },
-      ],
+      units: [{ id: "main", kind: "worker", wrangler: "wrangler.jsonc" }],
+      resources: [{ kind: "vectorize", name: "docs", dimensions: 384, metric: "dot-product" }],
     };
     const f = await graphHonoFixture(withIndex, { "wrangler.jsonc": wrangler({ ai: undefined, browser: undefined, hyperdrive: undefined, secrets_store_secrets: undefined }), "worker/main.mjs": enc.encode(code) }, "node");
     expect(f.plannedBody.graphPlan.blocked, JSON.stringify(f.plannedBody)).toBe(false);
-    expect(f.plannedBody.graphPlan.units.find((unit) => unit.unitId === "data")!.diffs).toContainEqual(expect.objectContaining({ resource: "vectorize", action: "create", name: "docs" }));
-    const index = await f.step("data", "vectorize", "create", "docs", "create-vectorize-indexes");
+    expect(f.plannedBody.graphPlan.units.find((unit) => unit.unitId === "resources")!.diffs).toContainEqual(expect.objectContaining({ resource: "vectorize", action: "create", name: "docs" }));
+    const index = await f.step("resources", "vectorize", "create", "docs", "create-vectorize-indexes");
     expect(index.status, await index.clone().text()).toBe(200);
     expect(f.vectorizeIndexes).toEqual([{ name: "docs", created_on: expect.any(String), config: { dimensions: 384, metric: "dot-product" } }]);
   });
@@ -2844,10 +2947,9 @@ describe("platform bindings (graph API)", () => {
 it("every step of a multi-unit install stays within the Workers subrequest budget, ignoring unrelated receipts", async () => {
   const { toPagesAssetPath } = await import("../../src/cloudflare/pages/manifest.js");
   const config: ConfigV3 = { ...baseConfig(["workers", "pages", "r2", "queues", "vectorize"]), units: [
-    { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 32, metric: "cosine" }] },
-    { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc", dependsOn: ["data"] },
+    { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc" },
     { id: "site", kind: "pages", wrangler: "site/wrangler.jsonc" },
-  ] };
+  ], resources: [{ kind: "vectorize", name: "docs", dimensions: 32, metric: "cosine" }] };
   const f = await graphHonoFixture(config, {
     "main/wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker.mjs", compatibility_date: "2026-10-17", workers_dev: false,
       vectorize: [{ binding: "VECTORS", index_name: "docs" }], r2_buckets: [{ binding: "MEDIA", bucket_name: "media" }], queues: { producers: [{ binding: "JOBS", queue: "jobs" }] } })),
@@ -2869,7 +2971,7 @@ it("every step of a multi-unit install stays within the Workers subrequest budge
     if (body.phaseReceipt !== undefined) receipts.push(body.phaseReceipt);
     return body;
   };
-  await run("data", "vectorize", "create", "docs", "create-vectorize-indexes");
+  await run("resources", "vectorize", "create", "docs", "create-vectorize-indexes");
   await run("main", "r2", "create", "media", "create-r2-buckets");
   await run("main", "queue", "create", "jobs", "create-queues");
   const created = await run("main", "worker", "create", "api", "create-worker");
@@ -2890,10 +2992,7 @@ it("every step of a multi-unit install stays within the Workers subrequest budge
 // (including a resource created by one unit and bound by another); the live
 // Worker reports what it binds; an upgrade must keep those names.
 it("installs under operator-chosen names, reads them back from the Worker, and keeps them on upgrade", async () => {
-  const config: ConfigV3 = { ...baseConfig(["workers", "r2", "vectorize"]), units: [
-    { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 32, metric: "cosine" }] },
-    { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc", dependsOn: ["data"] },
-  ] };
+  const config: ConfigV3 = { ...baseConfig(["workers", "r2", "vectorize"]), units: [{ id: "main", kind: "worker", wrangler: "main/wrangler.jsonc" }], resources: [{ kind: "vectorize", name: "docs", dimensions: 32, metric: "cosine" }] };
   const f = await graphHonoFixture(config, {
     "main/wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker.mjs", compatibility_date: "2026-10-17", workers_dev: false,
       vectorize: [{ binding: "VECTORS", index_name: "docs" }], r2_buckets: [{ binding: "MEDIA", bucket_name: "media" }] })),
@@ -2907,7 +3006,7 @@ it("installs under operator-chosen names, reads them back from the Worker, and k
   const planned = await (await f.plan({ names })).json() as typeof f.plannedBody;
   expect(planned.graphPlan.blocked, JSON.stringify(planned.graphPlan.guards)).toBe(false);
   const diffs = planned.graphPlan.units.flatMap((unit) => unit.diffs.map((diff) => `${unit.unitId}:${diff.resource}:${diff.action}:${diff.name}`));
-  expect(diffs).toEqual(expect.arrayContaining(["data:vectorize:create:my-docs", "main:r2:create:my-media", "main:vectorize:skip:my-docs"]));
+  expect(diffs).toEqual(expect.arrayContaining(["resources:vectorize:create:my-docs", "main:r2:create:my-media", "main:vectorize:skip:my-docs"]));
   const step = f.makeStep(planned);
   const receipts: unknown[] = [];
   const run = async (unit: string, resource: string, action: string, name: string, phase: string, args: Record<string, unknown> = {}) => {
@@ -2917,7 +3016,7 @@ it("installs under operator-chosen names, reads them back from the Worker, and k
     if (body.phaseReceipt !== undefined) receipts.push(body.phaseReceipt);
     return body;
   };
-  await run("data", "vectorize", "create", "my-docs", "create-vectorize-indexes");
+  await run("resources", "vectorize", "create", "my-docs", "create-vectorize-indexes");
   await run("main", "r2", "create", "my-media", "create-r2-buckets");
   const created = await run("main", "worker", "create", "api", "create-worker");
   await run("main", "deployment", "create", "api", "activate", { versionId: created.result?.versionId });
@@ -2935,28 +3034,25 @@ it("installs under operator-chosen names, reads them back from the Worker, and k
   expect(kept.graphPlan.units.flatMap((unit) => unit.diffs.filter((diff) => diff.resource === "r2" || diff.resource === "vectorize").map((diff) => `${diff.action}:${diff.name}`))).toEqual(expect.arrayContaining(["preserve:my-media", "preserve:my-docs"]));
 });
 
-// `upgrade.switchable`: the config lets the user swap a cache-like resource on
-// upgrade, while every other resource the Worker binds stays bound.
-it("lets an upgrade swap only the resources the config marks switchable", async () => {
+// `upgradeKeep: false` on a resource entry: the config lets the user bind
+// another bucket on upgrade, while a resource that keeps the default stays bound.
+it("lets an upgrade rebind only the resources whose config entry says upgradeKeep false", async () => {
   const files = {
     "main/wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker.mjs", compatibility_date: "2026-10-17", workers_dev: false,
       vectorize: [{ binding: "VECTORS", index_name: "docs" }], r2_buckets: [{ binding: "MEDIA", bucket_name: "media" }] })),
     "main/worker.mjs": enc.encode("export default { fetch() { return new Response('ok'); } };"),
   };
-  const configWith = (switchable: string[]): ConfigV3 => ({ ...baseConfig(["workers", "r2", "vectorize"]), upgrade: { switchable }, units: [
-    { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 32, metric: "cosine" }] },
-    { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc", dependsOn: ["data"] },
-  ] });
-
-  const unknown = await graphHonoFixture(configWith(["r2:other"]), files, "node");
-  await unknown.prepare();
-  const refused = await unknown.plan({});
-  expect(refused.status).toBe(400);
-  expect(await refused.json()).toMatchObject({ detail: 'upgrade.switchable lists "r2:other", which is not a resource of this release' });
-
-  const f = await graphHonoFixture(configWith(["r2:media"]), files, "node");
-  const summary = await (await f.prepare()).json() as { releaseSummary: { resources: Array<{ key: string; switchable?: true }> } };
-  expect(summary.releaseSummary.resources).toEqual([expect.not.objectContaining({ switchable: true }), expect.objectContaining({ key: "r2:media", switchable: true })]);
+  const config: ConfigV3 = { ...baseConfig(["workers", "r2", "vectorize"]), units: [{ id: "main", kind: "worker", wrangler: "main/wrangler.jsonc" }], resources: [
+    { kind: "vectorize", name: "docs", dimensions: 32, metric: "cosine" },
+    { kind: "r2", name: "media", upgradeKeep: false },
+  ] };
+  const f = await graphHonoFixture(config, files, "node");
+  const summary = await (await f.prepare()).json() as { releaseSummary: { resources: Array<{ key: string; changeOnUpgrade?: true }> } };
+  expect(summary.releaseSummary.resources).toEqual([
+    expect.objectContaining({ key: "vectorize:docs" }),
+    expect.objectContaining({ key: "r2:media", changeOnUpgrade: true }),
+  ]);
+  expect(summary.releaseSummary.resources[0]).not.toHaveProperty("changeOnUpgrade");
   const planned = await (await f.plan({})).json() as typeof f.plannedBody;
   const step = f.makeStep(planned);
   const receipts: unknown[] = [];
@@ -2967,22 +3063,21 @@ it("lets an upgrade swap only the resources the config marks switchable", async 
     if (body.phaseReceipt !== undefined) receipts.push(body.phaseReceipt);
     return body;
   };
-  await run("data", "vectorize", "create", "docs", "create-vectorize-indexes");
-  await run("main", "r2", "create", "media", "create-r2-buckets");
+  await run("resources", "vectorize", "create", "docs", "create-vectorize-indexes");
+  await run("resources", "r2", "create", "media", "create-r2-buckets");
   const created = await run("main", "worker", "create", "api", "create-worker");
   await run("main", "deployment", "create", "api", "activate", { versionId: created.result?.versionId });
 
-  // The switchable bucket may change; the Worker moves to a new one.
+  // The bucket may change; the Worker moves to a new one.
   const swapped = await (await f.plan({ mode: "upgrade", names: { "r2:media": "new-media" } })).json() as typeof f.plannedBody;
   expect(swapped.graphPlan.blocked, JSON.stringify(swapped.graphPlan.guards)).toBe(false);
-  expect(swapped.graphPlan.units.flatMap((unit) => unit.diffs.map((diff) => `${diff.resource}:${diff.action}:${diff.name}`))).toEqual(expect.arrayContaining(["r2:create:new-media"]));
   const upgradeStep = f.makeStep(swapped);
-  const newBucket = await upgradeStep("main", "r2", "create", "new-media", "create-r2-buckets");
+  const newBucket = await upgradeStep("resources", "r2", "create", "new-media", "create-r2-buckets");
   expect(newBucket.status, await newBucket.clone().text()).toBe(200);
   const version = await upgradeStep("main", "worker", "update", "api", "create-version", { receipts: [(await newBucket.json() as { phaseReceipt: unknown }).phaseReceipt] });
   expect(version.status, await version.clone().text()).toBe(200);
   expect(f.buckets.map((bucket) => bucket.name)).toEqual(["media", "new-media"]);
-  // The index is not switchable: changing it is still refused.
+  // The index keeps the default (upgradeKeep true): changing it is still refused.
   const rebound = await (await f.plan({ mode: "upgrade", names: { "vectorize:docs": "other-docs" } })).json() as typeof f.plannedBody;
   expect(rebound.graphPlan.blocked).toBe(true);
 });

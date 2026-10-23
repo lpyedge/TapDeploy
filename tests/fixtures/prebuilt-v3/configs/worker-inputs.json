@@ -15,7 +15,6 @@
       "key": "workerName",
       "type": "string",
       "label": "Worker name",
-      "requiredWhen": "install",
       "validation": {
         "minLength": 3,
         "maxLength": 63,
@@ -26,10 +25,15 @@
       "key": "region",
       "type": "select",
       "label": "Region",
-      "requiredWhen": "both",
       "options": [
-        { "label": "Automatic", "value": "auto" },
-        { "label": "Europe", "value": "eu" }
+        {
+          "label": "Automatic",
+          "value": "auto"
+        },
+        {
+          "label": "Europe",
+          "value": "eu"
+        }
       ]
     }
   ]

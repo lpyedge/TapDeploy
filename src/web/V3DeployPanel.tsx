@@ -3,34 +3,35 @@ import type { V3MachineSnapshot } from "./v3-flow-machine.js";
 import { GraphProgress, dashboardUrlForGraphPlan } from "./DeployProgress.js";
 import type { GraphStepStatus } from "./graph-deploy-runner.js";
 import { describeDiff, resourceLabel } from "./step-labels.js";
+import { declaredSecrets, type DeclaredInput } from "./V3ConfigurePanel.js";
+import { inputValueProblem } from "../manifest/input-validation.js";
 
 export interface SecretPrompt {
   name: string;
   label: string;
+  /** The declared input: its validation rules apply to the value. */
+  input: DeclaredInput;
+  /** An existing secret the user chose to change (upgrade), not a first-install value. */
+  replacing: boolean;
 }
 
-// first-install secret prompts. Derived from the approved plan diffs
-// (secret+create names) joined with the declared config input policies;
-// generate-once secrets are server-generated and never shown. The server
-// re-validates everything (unknown names refused, missing values block the
-// version upload); this UI is collection only and never persisted.
+// Secret prompts. Derived from the approved plan diffs (secret create / update
+// names) joined with the declared config inputs; generate-once secrets are
+// server-generated and never shown. The server re-validates what it can (unknown
+// names refused, missing values block the version upload); this UI is collection
+// only and never persisted, and applies the declared rules to the value.
 export function secretPromptsFor(configText: string, graphPlan: GraphPlan | null): SecretPrompt[] {
-  let declared: Record<string, { policy?: string; label?: string }> = {};
-  try {
-    const parsed = JSON.parse(configText) as { inputs?: Array<{ key?: unknown; type?: unknown; secretPolicy?: unknown; label?: unknown }> };
-    for (const input of parsed.inputs ?? []) {
-      if (typeof input?.key === "string" && input.type === "secret") {
-        declared[input.key] = {
-          ...(typeof input.secretPolicy === "string" ? { policy: input.secretPolicy } : {}),
-          ...(typeof input.label === "string" ? { label: input.label } : {}),
-        };
-      }
-    }
-  } catch {
-    declared = {};
-  }
-  const created = new Set((graphPlan?.units ?? []).flatMap((unit) => unit.diffs ?? []).filter((diff) => diff.resource === "secret" && diff.action === "create" && typeof diff.name === "string").map((diff) => diff.name as string));
-  return [...created].filter((name) => (declared[name]?.policy ?? "prompt") === "prompt").map((name) => ({ name, label: declared[name]?.label ?? name }));
+  const declared = new Map(declaredSecrets(configText).map((input) => [input.key, input]));
+  const wanted = new Map((graphPlan?.units ?? []).flatMap((unit) => unit.diffs ?? []).filter((diff) => diff.resource === "secret" && (diff.action === "create" || diff.action === "update") && typeof diff.name === "string").map((diff) => [diff.name as string, diff.action === "update"] as const));
+  return [...wanted].flatMap(([name, replacing]) => {
+    const input = declared.get(name) ?? { key: name, type: "secret" as const, label: name, required: false };
+    return !input.generate ? [{ name, label: input.label, input, replacing }] : [];
+  });
+}
+
+/** What is wrong with a secret's value, or null (an empty value is "not entered yet", reported separately). */
+export function secretProblem(prompt: SecretPrompt, value: string): string | null {
+  return value === "" ? null : inputValueProblem(prompt.input, value);
 }
 
 /**
@@ -192,20 +193,24 @@ export function V3DeployPanel({
           ))}
           {secretPromptNames.length > 0 && (
             <div className="option-card" data-testid="v3-secret-prompts">
-              <p className="m-0 font-medium text-slate-700">First-install secrets</p>
-              <p className="meta mt-1">Used once for this install and sent only with the Worker upload — never stored in this page.</p>
-              {secretPromptNames.map(({ name, label }) => (
-                <label className="field" key={name}>
-                  {label}
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={secretValues[name] ?? ""}
-                    onChange={(e) => onSecretValue(name, e.target.value)}
-                    data-testid={`v3-secret-${name}`}
-                  />
-                </label>
-              ))}
+              <p className="m-0 font-medium text-slate-700">{secretPromptNames.every((prompt) => prompt.replacing) ? "New secret values" : "Secrets"}</p>
+              <p className="meta mt-1">Used once for this {modeIntent === "upgrade" ? "upgrade" : "install"} and sent only with the Worker upload — never stored in this page.</p>
+              {secretPromptNames.map((prompt) => {
+                const problem = secretProblem(prompt, secretValues[prompt.name] ?? "");
+                return (
+                  <label className="field" key={prompt.name}>
+                    {prompt.replacing ? `New ${prompt.label}` : prompt.label}
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={secretValues[prompt.name] ?? ""}
+                      onChange={(e) => onSecretValue(prompt.name, e.target.value)}
+                      data-testid={`v3-secret-${prompt.name}`}
+                    />
+                    {problem && <span className="error" data-testid={`v3-secret-${prompt.name}-error`}>{problem}</span>}
+                  </label>
+                );
+              })}
               {!secretsReady && <p className="meta">Enter every secret above to enable deploy.</p>}
             </div>
           )}

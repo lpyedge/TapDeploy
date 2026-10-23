@@ -22,8 +22,9 @@
 - Never exposes the OAuth token to browser JavaScript (sealed HttpOnly
   cookie + CSRF; short-lived).
 - Never puts secrets in URLs, logs, evidence, plans, tokens, or ZIPs.
-  Prompt-on-install secrets live only in the step that needs them;
-  generate-once secrets are server-created; active secret values are never
+  Prompt secrets (first install, or a replacement the user chose on upgrade)
+  live only in the step that needs them;
+  generated secrets (`generate`) are server-created; active secret values are never
   read back, only their names/types.
 - Never auto-rolls back or deletes on failure. Partial progress is reported
   with sealed receipts; resumption only repeats unverified work.

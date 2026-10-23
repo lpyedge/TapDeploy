@@ -107,24 +107,28 @@ export type ConfigV3InputType =
   | "integer"
   | "number"
   | "boolean"
+  | "date"
   | "secret"
-  | "select";
+  | "select"
+  | "multiselect";
+
+/** A choice of a `select` / `multiselect`: a plain value, or a value with its own label. */
+export type ConfigV3InputOption = string | number | { label: string; value: string | number | boolean };
 
 export interface ConfigV3Input {
+  /** Also the name of the Worker variable (or secret) the value is bound to. */
   key: string;
   type: ConfigV3InputType;
   label: string;
   description?: string;
   placeholder?: string;
-  requiredWhen: "install" | "upgrade" | "both" | "never";
-  options?: Array<{ label: string; value: string | number | boolean }>;
-  /**
-   * only meaningful when `type` is `"secret"`. Declares how a missing
-   * secret is satisfied: `"prompt"` (default) collects a first-install value
-   * in the UI and never stores it; `"generate-once"` is generated server-side
-   * and never exposed. The key doubles as the Worker binding name.
-   */
-  secretPolicy?: "prompt" | "generate-once";
+  /** Must be filled at install. Default true. On upgrade an empty value always keeps what is deployed. */
+  required?: boolean;
+  /** Not asked again on upgrade: the deployed value stays. Default false. */
+  upgradeKeep?: boolean;
+  /** Secret only: TapDeploy generates a random value once and the user never enters it. Default false. */
+  generate?: boolean;
+  options?: ConfigV3InputOption[];
   validation?: {
     minLength?: number;
     maxLength?: number;
@@ -137,10 +141,14 @@ export interface ConfigV3Input {
 
 export type ConfigV3ResourceKind = "r2" | "kv" | "d1" | "queue" | "vectorize";
 
-export interface ConfigV3ResourceRef {
+/** An account resource the app uses, created before any Worker or Pages site is deployed. */
+export interface ConfigV3Resource {
   kind: ConfigV3ResourceKind;
   name: string;
-  mode: "ensure" | "bind-existing";
+  /** Create it when missing. Default true; false requires it to exist already. */
+  create?: boolean;
+  /** Upgrade keeps the Worker bound to what it uses today. Default true; false lets the user bind another one. */
+  upgradeKeep?: boolean;
   // Vectorize only: the index configuration used when the index is created.
   dimensions?: number;
   metric?: "cosine" | "euclidean" | "dot-product";
@@ -148,11 +156,9 @@ export interface ConfigV3ResourceRef {
 
 export interface ConfigV3Unit {
   id: string;
-  kind: "worker" | "pages" | "resources";
-  /** Present for worker/pages units: ZIP-relative path to the unit's final wrangler.jsonc. */
-  wrangler?: string;
-  /** Present for resources units. */
-  resources?: ConfigV3ResourceRef[];
+  kind: "worker" | "pages";
+  /** ZIP-relative path to the unit's final wrangler.jsonc. */
+  wrangler: string;
   dependsOn?: string[];
 }
 
@@ -174,10 +180,6 @@ export interface ConfigV3Install {
   policies: ConfigV3InstallPolicy[];
 }
 
-export interface ConfigV3Authorization {
-  mode: "one-shot-bounded-max";
-}
-
 export interface ConfigV3 {
   schemaVersion: 3;
   app: { id: string; name: string; description?: string };
@@ -185,10 +187,60 @@ export interface ConfigV3 {
   capabilities: V3Capability[];
   inputs?: ConfigV3Input[];
   units?: ConfigV3Unit[];
+  resources?: ConfigV3Resource[];
   install?: ConfigV3Install;
-  /** Resources (`<kind>:<release name>`) the user may swap on upgrade; others stay bound. */
-  upgrade?: { switchable?: string[] };
-  authorization?: ConfigV3Authorization;
+}
+
+// ---------------------------------------------------------------------------
+// Planner view of the units
+// ---------------------------------------------------------------------------
+
+/** Id of the planner unit that holds the config's `resources`; no declared unit may use it. */
+export const RESOURCES_UNIT_ID = "resources" as const;
+
+export interface PlannedResource {
+  kind: ConfigV3ResourceKind;
+  name: string;
+  mode: "ensure" | "bind-existing";
+  dimensions?: number;
+  metric?: "cosine" | "euclidean" | "dot-product";
+  upgradeKeep: boolean;
+}
+
+/** A unit as the planner sees it: a Worker or Pages site, or the one resource-only unit. */
+export interface PlannedUnit {
+  id: string;
+  kind: "worker" | "pages" | "resources";
+  wrangler?: string;
+  resources?: PlannedResource[];
+  dependsOn?: string[];
+}
+
+/**
+ * The units the planner works with, or undefined for the implicit single unit
+ * (no `units`, no `resources`). The config's `resources` become one resource-only
+ * unit; a Worker that binds one of them is ordered after it by the planner, so
+ * no dependency has to be declared. `resources` without `units` means one Worker
+ * at the ZIP root; an empty `units` list means the release only provisions resources.
+ */
+export function plannedUnits(config: Pick<ConfigV3, "units" | "resources">): PlannedUnit[] | undefined {
+  const resources = config.resources ?? [];
+  if (config.units === undefined && resources.length === 0) return undefined;
+  const declared: PlannedUnit[] = (config.units ?? [{ id: DEFAULT_V3_UNIT_ID, kind: "worker", wrangler: "wrangler.jsonc" }]).map((unit) => ({ ...unit }));
+  if (resources.length === 0) return declared;
+  const resourceUnit: PlannedUnit = {
+    id: RESOURCES_UNIT_ID,
+    kind: "resources",
+    resources: resources.map((resource) => ({
+      kind: resource.kind,
+      name: resource.name,
+      mode: resource.create === false ? "bind-existing" : "ensure",
+      ...(resource.dimensions !== undefined ? { dimensions: resource.dimensions } : {}),
+      ...(resource.metric !== undefined ? { metric: resource.metric } : {}),
+      upgradeKeep: resource.upgradeKeep !== false,
+    })),
+  };
+  return [resourceUnit, ...declared];
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +257,7 @@ const HTTP_DOMAIN_CAPABILITIES = ["zone", "dns"] as const satisfies readonly V3C
 
 /** True when the config deploys at least one HTTP-reachable unit (Worker or Pages). */
 export function configHasHttpUnits(config: Pick<ConfigV3, "units" | "capabilities">): boolean {
-  if (config.units && config.units.length > 0) return config.units.some((unit) => unit.kind === "worker" || unit.kind === "pages");
+  if (config.units) return config.units.length > 0;
   return config.capabilities.includes("workers") || config.capabilities.includes("pages");
 }
 
@@ -479,7 +531,10 @@ export function assertConfigV3Safe(config: ConfigV3): ConfigV3SafetyIssue[] {
     if (new Set(ids).size !== ids.length) {
       issues.push({ field: "units", detail: "unit ids must be unique" });
     }
-    const wranglerPaths = units.map((u) => u.wrangler).filter((p): p is string => typeof p === "string");
+    if (ids.includes(RESOURCES_UNIT_ID)) {
+      issues.push({ field: "units", detail: `unit id "${RESOURCES_UNIT_ID}" is reserved for the config's resources` });
+    }
+    const wranglerPaths = units.map((u) => u.wrangler);
     if (new Set(wranglerPaths).size !== wranglerPaths.length) {
       issues.push({ field: "units", detail: "unit wrangler paths must be unique" });
     }
@@ -487,22 +542,6 @@ export function assertConfigV3Safe(config: ConfigV3): ConfigV3SafetyIssue[] {
       for (const dep of unit.dependsOn ?? []) {
         if (!ids.includes(dep)) {
           issues.push({ field: `units.${unit.id}.dependsOn`, detail: `unknown unit id "${dep}"` });
-        }
-      }
-      if (unit.kind === "resources") {
-        const refs = unit.resources ?? [];
-        const pairs = refs.map((r) => `${r.kind}:${r.name}`);
-        if (new Set(pairs).size !== pairs.length) {
-          issues.push({ field: `units.${unit.id}.resources`, detail: "duplicate resource references in unit" });
-        }
-        for (const ref of refs) {
-          const vectorConfig = ref.dimensions !== undefined || ref.metric !== undefined;
-          if (ref.kind !== "vectorize" && vectorConfig) {
-            issues.push({ field: `units.${unit.id}.resources`, detail: `dimensions/metric apply only to vectorize resources ("${ref.name}")` });
-          }
-          if (ref.kind === "vectorize" && ref.mode === "ensure" && (ref.dimensions === undefined || ref.metric === undefined)) {
-            issues.push({ field: `units.${unit.id}.resources`, detail: `vectorize index "${ref.name}" needs dimensions and metric to be created (mode ensure)` });
-          }
         }
       }
     }
@@ -514,6 +553,25 @@ export function assertConfigV3Safe(config: ConfigV3): ConfigV3SafetyIssue[] {
       if (depth > units.length) {
         issues.push({ field: "units", detail: `dependency depth ${depth} exceeds unit count ${units.length}` });
       }
+    }
+  }
+
+  if (units && units.length === 0 && (config.resources ?? []).length === 0) {
+    issues.push({ field: "units", detail: "an empty units list needs resources to create" });
+  }
+
+  // Resources: unique, and a Vectorize index that TapDeploy creates needs its shape.
+  const resources = config.resources ?? [];
+  const pairs = resources.map((r) => `${r.kind}:${r.name}`);
+  if (new Set(pairs).size !== pairs.length) {
+    issues.push({ field: "resources", detail: "duplicate resources" });
+  }
+  for (const resource of resources) {
+    if (resource.kind !== "vectorize" && (resource.dimensions !== undefined || resource.metric !== undefined)) {
+      issues.push({ field: "resources", detail: `dimensions/metric apply only to vectorize resources ("${resource.name}")` });
+    }
+    if (resource.kind === "vectorize" && resource.create !== false && (resource.dimensions === undefined || resource.metric === undefined)) {
+      issues.push({ field: "resources", detail: `vectorize index "${resource.name}" needs dimensions and metric to be created (or set create to false)` });
     }
   }
 

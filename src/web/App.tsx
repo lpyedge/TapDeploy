@@ -32,8 +32,9 @@ import { fetchReleaseBytes, retainV3SourceBytes, type V3RetainedSource } from ".
 import { ConfigEntry } from "./ConfigEntry.js";
 import { AccountBar } from "./AccountBar.js";
 import { V3ReleasePanel } from "./V3ReleasePanel.js";
-import { V3DeployPanel, secretPromptsFor } from "./V3DeployPanel.js";
-import { V3ConfigurePanel, declaredConfigInputs, inputError } from "./V3ConfigurePanel.js";
+import { V3DeployPanel, secretProblem, secretPromptsFor } from "./V3DeployPanel.js";
+import { V3ConfigurePanel, changeableSecrets, declaredConfigInputs, inputError } from "./V3ConfigurePanel.js";
+import { inputAskedIn } from "../manifest/input-validation.js";
 import { V3DomainsPanel } from "./V3DomainsPanel.js";
 import { V3HyperdrivePanel } from "./V3HyperdrivePanel.js";
 import { V3NamesPanel } from "./V3NamesPanel.js";
@@ -382,6 +383,8 @@ function V3Flow(props: V3FlowProps) {
   // target Worker binds today).
   const [releaseResources, setReleaseResources] = useState<ReleaseResourceName[]>([]);
   const [nameValues, setNameValues] = useState<Record<string, string>>({});
+  // Upgrade: the declared secrets the user chose to replace.
+  const [replacedSecrets, setReplacedSecrets] = useState<string[]>([]);
   const [inventory, setInventory] = useState<InventoryEnvelope | null>(null);
   const [inventoryFor, setInventoryFor] = useState<string | null>(null);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
@@ -615,16 +618,17 @@ function V3Flow(props: V3FlowProps) {
     return () => { cancelled = true; };
   }, [snap.stage, props.csrf, props.accountId, releaseResources, inventoryKey, inventoryFor, inventoryWorker]);
   // Install names and upgrade picks mean different things: switching mode starts over.
-  useEffect(() => { setNameValues({}); }, [modeIntent]);
+  useEffect(() => { setNameValues({}); setReplacedSecrets([]); }, [modeIntent]);
   const names = nameRows(releaseResources, modeIntent, inventory, nameValues);
   const namesReady = names.every((row) => !row.error);
   const workerNameDef = declaredInputs.find((def) => def.key === "workerName");
-  const visibleInputs = declaredInputs.filter((def) => def.key !== "workerName");
-  const workerNameError = renameAllowed ? inputError("workerName", inputValues.workerName ?? "", { required: true, validation: workerNameDef?.validation }) : null;
+  const visibleInputs = declaredInputs.filter((def) => def.key !== "workerName" && inputAskedIn(def, modeIntent));
+  const secretsToChange = changeableSecrets(props.configText);
+  const workerNameError = renameAllowed ? inputError({ key: "workerName", type: "string", label: "Worker name", ...(workerNameDef?.validation ? { validation: workerNameDef.validation } : {}) }, "install", inputValues.workerName ?? "") : null;
   // New never updates a live Worker (the server refuses it too): an existing
   // name is flagged here with a switch to Upgrade instead of a late refusal.
   const nameTaken = modeIntent === "install" && renameAllowed && (upgradeTargets ?? []).some((target) => target.name === (inputValues.workerName ?? ""));
-  const inputsReady = workerNameError === null && visibleInputs.every((def) => inputError(def.key, inputValues[def.key] ?? "", def) === null);
+  const inputsReady = workerNameError === null && visibleInputs.every((def) => inputError(def, modeIntent, inputValues[def.key] ?? "") === null);
   const httpUnits: HttpUnit[] = snap.releaseUnits.flatMap((unit) => unit.kind === "worker" || unit.kind === "pages"
     ? [{ unitId: unit.unitId, kind: unit.kind, target: unit.kind === "worker" && renameAllowed && inputValues.workerName ? inputValues.workerName : names.find((row) => row.key === `pages:${unit.unitId}`)?.value || unit.name }]
     : []);
@@ -665,6 +669,7 @@ function V3Flow(props: V3FlowProps) {
         ...(() => { const domains = domainRequest(httpUnits, domainDrafts, domainFacts, recordsByZone); return domains ? { domains } : {}; })(),
         ...(hyperdriveUnits.length > 0 ? { bindings: Object.fromEntries(hyperdriveUnits.map((unit) => [unit.unitId, { hyperdrive: { ...(hyperdriveChoices[unit.unitId] ?? {}) } }])) } : {}),
         ...(() => { const chosen = requestNames(names); return chosen ? { names: chosen } : {}; })(),
+        ...(modeIntent === "upgrade" && replacedSecrets.length > 0 ? { replaceSecrets: replacedSecrets } : {}),
         paidRiskConfirmed,
       });
       if (envelope.error || !envelope.graphPlan) {
@@ -735,7 +740,7 @@ function V3Flow(props: V3FlowProps) {
   const paidRisk = graphPlan?.cost.requiresConfirmation === true || undefined;
   const blocked = graphPlan !== null && (graphPlan.blocked || !snap.executionContext || !snap.approval);
   const secretPromptNames = secretPromptsFor(props.configText, graphPlan);
-  const secretsReady = secretPromptNames.every(({ name }) => (secretValues[name] ?? "").length > 0);
+  const secretsReady = secretPromptNames.every((prompt) => (secretValues[prompt.name] ?? "").length > 0 && secretProblem(prompt, secretValues[prompt.name] ?? "") === null);
 
   return (
     <section className="panel" data-testid="v3-flow">
@@ -785,6 +790,12 @@ function V3Flow(props: V3FlowProps) {
           visibleInputs={visibleInputs}
           inputValues={inputValues}
           onInputValue={(key, value) => setInputValues((prev) => ({ ...prev, [key]: value }))}
+          secretsToChange={secretsToChange}
+          replacedSecrets={replacedSecrets}
+          onReplaceSecret={(key, replace) => {
+            setReplacedSecrets((prev) => (replace ? [...prev.filter((name) => name !== key), key] : prev.filter((name) => name !== key)));
+            if (!replace) setSecretValues((prev) => Object.fromEntries(Object.entries(prev).filter(([name]) => name !== key)));
+          }}
           upgradeTargets={upgradeTargets}
           onSwitchToUpgrade={() => setModeIntent("upgrade")}
           upgradeTargetsLoading={upgradeTargetsLoading}

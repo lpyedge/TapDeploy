@@ -1,69 +1,151 @@
 # Publishing an app for TapDeploy
 
-TapDeploy installs **prebuilt** releases. You compile with your own toolchain and
-publish a final ZIP; TapDeploy never builds, never runs npm, and never executes
-anything from the archive on its server. The server verifies the exact bytes,
-plans a sealed execution graph from them, and dispatches each approved action
-with provider readback. Anything the server cannot verify is refused before
-any provider write — not silently skipped.
+You ship three things: a **release ZIP** (your final build output), a small
+**`tapdeploy.config.json`**, and a **link**. Whoever opens the link needs only a
+Cloudflare account: no GitHub account, no local tools. TapDeploy never builds,
+never runs npm and never executes anything from your archive: the server
+verifies the exact bytes, plans every create/update/bind from them, shows the
+user the plan, and applies it step by step with read-back. Anything it cannot
+verify is refused before any write, not silently skipped.
 
-## Quick start: from a Wrangler project to a one-click link
+What your config decides is what the user is asked, in one guided form:
+which values they must or may enter (typed, validated), how your resources
+are named and whether an upgrade may swap them, and where their own domain
+goes. The sections below build up to it: [1. Build](#1-build-with-your-own-toolchain),
+[2. Lay out the ZIP](#2-lay-out-the-release-zip), [3. Write the config](#3-write-the-config),
+[4. Publish](#4-publish-and-share-the-link), [5. Test](#5-test-before-you-share).
 
-You need a project that already deploys with `wrangler deploy`, and the
-address of a TapDeploy instance (your own, see the
-[README](../README.md#run-your-own-instance); a public instance is planned).
-The example ships a TypeScript Worker plus a static Pages site.
+## 1. Build with your own toolchain
 
-### 1. Build with your own toolchain
+You need a project that already deploys with `wrangler deploy` (or a static
+site). Produce the **final** files, nothing that still needs a build:
 
 ```bash
-# Worker: bundle src/ into build/index.js without deploying anything
-npx wrangler deploy --dry-run --outdir build
+# Worker: bundle src/ into build/ without deploying anything
+npx wrangler deploy --dry-run --outdir build      # → build/index.js (+ .wasm, if any)
 
-# Pages site: your framework's production build, e.g. into site/dist
-npm run build --prefix site
+# Pages site: your framework's production build
+npm run build --prefix site                       # → site/dist
 ```
 
-### 2. Lay out the release ZIP
+Any toolchain works (`esbuild`, `rollup`, `vite build`, TinyGo/Rust → Wasm with
+a small JS glue module); only the emitted ESM `.js`/`.mjs` and `.wasm` bytes
+matter. TapDeploy checks the format, not whether the output runs on Workers.
 
-One directory per unit, each with a `wrangler.jsonc` that holds the **final**
-values (`main` points at the built file, not at `src/index.ts`):
+## 2. Lay out the release ZIP
+
+Each Worker or Pages site is a **unit**: a directory holding its own
+`wrangler.jsonc` with final values (`main` points at the built file, never at
+`src/index.ts`) next to the files it references. Paths may not leave a unit's
+directory.
+
+**One Worker** (the simplest case): everything at the ZIP root, no `units` in the
+config.
 
 ```text
-release/
-├── units/api/wrangler.jsonc   # { "name": "my-app-api", "main": "index.js", "compatibility_date": "2026-10-01", ... bindings }
-├── units/api/index.js         # copied from build/ (the source map is optional)
-├── units/site/wrangler.jsonc  # { "name": "my-app-site", "compatibility_date": "2026-10-01", "pages_build_output_dir": "public" }
-└── units/site/public/…        # copied from site/dist
+release.zip
+├── wrangler.jsonc        # { "name": "notes", "main": "worker/main.mjs", "compatibility_date": "2026-10-01", "r2_buckets": [...] }
+├── worker/main.mjs       # from build/
+├── worker/engine.wasm    # optional binary module(s)
+└── public/…              # optional static assets, "assets": { "directory": "public" }
 ```
+
+**One Pages site:** the same, with `"pages_build_output_dir": "public"` in place of
+`main`/`assets`, and the site files under `public/`.
+
+**Several units:** one directory per unit, each declared under `units` in the
+config. Workers call each other through `services` bindings; TapDeploy orders
+the deploy.
+
+```text
+release.zip
+├── units/api/wrangler.jsonc    # { "name": "notes-api", "main": "index.js", "compatibility_date": "2026-10-01", ...bindings }
+├── units/api/index.js
+├── units/site/wrangler.jsonc   # { "name": "notes-site", "compatibility_date": "2026-10-01", "pages_build_output_dir": "public" }
+└── units/site/public/…
+```
+
+**Resources only:** a release that just creates storage has no `wrangler.jsonc` and
+no units (`"units": []` plus `resources`); the ZIP may hold a README.
 
 ```bash
-(cd release && zip -r ../my-app.zip .)
+mkdir -p release/units/api release/units/site/public
+cp build/index.js release/units/api/ && cp units/api/wrangler.jsonc release/units/api/
+cp -r site/dist/. release/units/site/public/ && cp units/site/wrangler.jsonc release/units/site/
+(cd release && zip -r ../notes.zip .)
+unzip -l notes.zip          # only final output: no .ts, node_modules or .env
 ```
 
-A single Worker or a single Pages site can skip `units/`: put its
-`wrangler.jsonc` at the ZIP root and leave `units` out of the config.
+Rules for every `wrangler.jsonc` (details under [Release ZIP reference](#release-zip-reference)):
+final effective values only (no templating), ESM `main`, `compatibility_date`, and
+only the binding families TapDeploy supports ([support.md](support.md)).
+Unknown or deployment-affecting fields are refused rather than ignored.
 
-### 3. Write `tapdeploy.config.json`
+## 3. Write the config
 
-```json
+A complete example with a Worker, a Pages site, a resource and typed inputs:
+
+```jsonc
 {
   "schemaVersion": 3,
-  "app": { "id": "you/my-app", "name": "My App" },
+  "app": { "id": "you/notes", "name": "Notes" },
   "source": {
-    "defaultUrl": "https://github.com/you/my-app/releases/latest/download/my-app.zip",
-    "allowLocalZip": true
+    "defaultUrl": "https://github.com/you/notes/releases/latest/download/notes.zip"
   },
-  "capabilities": ["workers", "pages", "d1"],
+  "capabilities": ["workers", "pages", "r2", "d1"],
+
   "units": [
-    { "id": "api", "kind": "worker", "wrangler": "units/api/wrangler.jsonc" },
-    { "id": "site", "kind": "pages", "wrangler": "units/site/wrangler.jsonc" }
+    { "id": "api",  "kind": "worker", "wrangler": "units/api/wrangler.jsonc" },
+    { "id": "site", "kind": "pages",  "wrangler": "units/site/wrangler.jsonc" }
+  ],
+
+  "resources": [
+    { "kind": "d1", "name": "notes-db" },                          // persistent: upgrade keeps it
+    { "kind": "r2", "name": "notes-cache", "upgradeKeep": false }  // replaceable: upgrade may swap it
+  ],
+
+  "inputs": [
+    { "key": "ADMIN_EMAIL", "type": "string", "label": "Admin e-mail",
+      "validation": { "pattern": "[^@\\s]+@[^@\\s]+" } },
+    { "key": "REGION", "type": "select", "label": "Region", "upgradeKeep": true,
+      "options": ["eu", "us", { "label": "Asia-Pacific", "value": "apac" }] },
+    { "key": "RETENTION_DAYS", "type": "integer", "label": "Keep notes for (days)", "required": false,
+      "validation": { "minimum": 1, "maximum": 365 } },
+    { "key": "ADMIN_PASSWORD", "type": "secret", "label": "Admin password",
+      "validation": { "minLength": 12 } }
   ]
 }
 ```
 
-`capabilities` must cover every family the Wrangler configs use, otherwise
-the plan fails with `DEVELOPER_SCOPE_UNDERDECLARED`:
+The user sees: the Worker name (editable, prefilled), your inputs as typed
+fields that cannot be submitted invalid, the resource names (editable at
+install, prefilled with yours), an optional custom domain per Worker or Pages
+site, and a review of everything before anything is written.
+
+### Reading it: defaults first
+
+Almost every key is optional. Booleans are named so the default is the common
+case and you only write the exception:
+
+| Key | Where | Default | Meaning |
+|---|---|---|---|
+| `upgradeKeep` | resource | `true` | `true`: an upgrade keeps the Worker bound to what it uses today (shown read-only). `false`: the user may bind another one. Use `false` for caches, never for a database. |
+| `create` | resource | `true` | `true`: create it when missing. `false`: it must already exist. |
+| `required` | input | `true` | Must be filled at install. On upgrade an empty value always keeps what is deployed. |
+| `upgradeKeep` | input | `false` | `true`: not asked again on upgrade, the deployed value stays. `false`: upgrade shows the field; empty keeps, a value replaces. |
+| `generate` | secret input | `false` | `true`: TapDeploy generates a random value once; the user never enters it. |
+| `allowLocalZip` | source | `true` | Let the user pick a local ZIP instead of `defaultUrl`. `false` requires `defaultUrl` and `expectedSha256`. |
+
+### Top level
+
+- `schemaVersion` is `3`. `app.id` is the immutable project identity (stamped
+  into versions, Pages ownership markers and receipts): keep it stable.
+- `source`: `defaultUrl` (https), `allowLocalZip`, `expectedSha256` (pins the
+  exact ZIP).
+- `capabilities` are symbolic and must cover every family your Wrangler configs use,
+  otherwise the plan fails with `DEVELOPER_SCOPE_UNDERDECLARED`. They map to OAuth
+  scopes in code; a config can never author a raw scope. `zone` and `dns` are implied
+  by any Worker or Pages unit, so custom domains need no declaration.
 
 | In `wrangler.jsonc` | Capability |
 |---|---|
@@ -74,15 +156,82 @@ the plan fails with `DEVELOPER_SCOPE_UNDERDECLARED`:
 | `workflows`, `durable_objects` | `workflows`, `durable-objects` |
 | zone `routes` | `routes`, `zone` |
 
-You never list `zone` and `dns` for custom domains: any Worker or Pages unit
-implies them, so the installing user can bind their own domain. Full field
-reference: [Config reference](#config-reference) below and the JSON Schema
-[`schemas/tapdeploy.config.v3.schema.json`](../schemas/tapdeploy.config.v3.schema.json).
+### `units`
 
-### 4. Publish and share the link
+Omit for one Worker or Pages site at the ZIP root. Each entry: `id`, `kind`
+(`worker` or `pages`), `wrangler` (path to its `wrangler.jsonc`), optional
+`dependsOn` (only for an order TapDeploy cannot derive from bindings). With
+`resources` and no `units` you get one Worker at the root; `"units": []` means
+resources only.
 
-1. Attach `my-app.zip` to a GitHub release (or any HTTPS host). GitHub release
-   downloads go through the instance's relay, so they need no CORS.
+### `resources`
+
+Account resources (`r2`, `d1`, `kv`, `queue`, `vectorize`) your app uses.
+TapDeploy creates them before any Worker is deployed; your `wrangler.jsonc`
+binds them by name. A `vectorize` entry needs `dimensions` and `metric` to be created.
+Listing a resource here is what lets you control it: a name the user may
+change at install, `create`, and `upgradeKeep`. A resource that only appears in
+a `wrangler.jsonc` is created by its Worker and always kept on upgrade; list it
+here under the same name to give it these options. Resource and Pages project
+names are suggestions: the user may rename them at install, so refer to
+resources through bindings in your code, never by name. A `kv_namespaces`
+binding in `wrangler.jsonc` names an existing namespace by `id` and is never
+renamed; use a `resources` entry for a KV that TapDeploy creates.
+Hyperdrive is always the user's own pick, and custom domains can always change.
+
+### `inputs`
+
+Values the user fills in, each validated in the browser and again by the server.
+
+- `key` becomes a Worker variable of that name (a `secret` becomes a secret
+  binding, entered in the browser and never stored). A key your `wrangler.jsonc`
+  already sets under `vars` is refused. `workerName` is the one reserved key: it
+  names the Worker (add it only to constrain the name with `validation`).
+- `type`: `string`, `text`, `integer`, `number`, `boolean`, `date`
+  (`YYYY-MM-DD`), `select`, `multiselect` (both need `options`; a multiselect
+  arrives comma-joined) or `secret`.
+- `options`: plain values or `{ "label", "value" }` objects.
+- `validation`: `minLength`, `maxLength`, `pattern` (a regular expression that must
+  match the whole value), `minimum`, `maximum`, `values`.
+- `label`, `description`, `placeholder` are what the user reads.
+- On upgrade a secret you did not mark `upgradeKeep` or `generate` gets a
+  "Change" checkbox; the new value is entered on the review step.
+
+### `install.policies`
+
+Only `private-r2-owner-bootstrap/v1`: a one-time owner bootstrap for apps that
+keep their owner account in a private R2 bucket.
+
+Full field reference: the JSON Schema
+[`schemas/tapdeploy.config.v3.schema.json`](../schemas/tapdeploy.config.v3.schema.json)
+(it also gives editors completion if you add `"$schema"`).
+
+## 4. Publish and share the link
+
+1. Attach `notes.zip` to a GitHub release (or any HTTPS host). GitHub release
+   downloads go through the instance's relay, so they need no CORS. Build and
+   attach it from CI so every tag publishes a release:
+
+   ```yaml
+   # .github/workflows/release.yml
+   on: { push: { tags: ["v*"] } }
+   permissions: { contents: write }
+   jobs:
+     release:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-node@v4
+           with: { node-version: 24 }
+         - run: npm ci
+         - run: npx wrangler deploy --dry-run --outdir build
+         - run: |
+             mkdir -p release/units/api && cp build/index.js release/units/api/ && cp units/api/wrangler.jsonc release/units/api/
+             (cd release && zip -r ../notes.zip .)
+         - run: gh release create "$GITHUB_REF_NAME" notes.zip --generate-notes
+           env: { GH_TOKEN: "${{ github.token }}" }
+   ```
+
 2. Commit `tapdeploy.config.json` and use its `raw.githubusercontent.com`
    address: the browser fetches the config directly, so its host must send
    CORS headers (raw.githubusercontent.com does).
@@ -90,59 +239,14 @@ reference: [Config reference](#config-reference) below and the JSON Schema
    as a README button:
 
 ```markdown
-[![Deploy with TapDeploy](https://img.shields.io/badge/Deploy%20with-TapDeploy-f38020)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fmy-app%2Fmain%2Ftapdeploy.config.json)
+[![Deploy with TapDeploy](https://img.shields.io/badge/Deploy%20with-TapDeploy-f38020)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
 ```
 
-### 5. Test before you share
+## 5. Test before you share
 
-Open the link, sign in, choose **Local ZIP** and pick your ZIP: you get the
-full plan (what will be created, refusals, cost notes) before anything is
-written. The same bytes from the URL are the same release.
-
-## Config reference
-
-```jsonc
-{
-  "schemaVersion": 3,
-  "app": { "id": "example/notes", "name": "Notes" },
-  "source": {
-    "defaultUrl": "https://example.org/notes-release.zip",
-    "allowLocalZip": true,
-    "expectedSha256": "…optional 64-hex…"
-  },
-  "capabilities": ["workers", "r2"],
-  "units": [{ "id": "api", "kind": "worker", "wrangler": "units/api/wrangler.jsonc" }]
-}
-```
-
-- `app.id` is the immutable project identity (stamped into versions, Pages
-  ownership markers and receipts). Keep it stable across releases.
-- Resource names in your `wrangler.jsonc` files and `resources` units, and
-  Pages project names, are suggestions: the user may rename them at install,
-  and an upgrade keeps whatever the installed Worker is bound to. Refer to
-  resources through bindings in your code, never by name. A KV binding in
-  `wrangler.jsonc` names an existing namespace by `id` and is never renamed.
-- `upgrade.switchable` (optional): resources the user may swap on upgrade,
-  as `<kind>:<name>` with the release's name, e.g. `["r2:cache"]`. Use it for
-  disposable data such as caches; leave persistent data such as a D1 database
-  out, so an upgrade stays bound to it. Custom domains can always change on
-  upgrade.
-- `capabilities` are symbolic (table in the quick start); they map to OAuth
-  scopes in code, and a config can never author a raw scope.
-- `units` (optional): omitted means one implicit unit (`main`) whose
-  `wrangler.jsonc` sits at the ZIP root. `kind` is `worker`, `pages` or
-  `resources`; a `resources` unit has no `wrangler` key and lists
-  `resources` (`r2`, `d1`, `kv`, `queue`, `vectorize`, each with
-  `mode: "ensure"` to create it when missing or `"bind-existing"`;
-  `vectorize` needs `dimensions` and `metric` to be created). `dependsOn`
-  orders units.
-- `inputs` (optional): nonsecret values the user fills in (including
-  `select` options) and `secret` inputs collected in the browser, never stored.
-- `install.policies` (optional): only `private-r2-owner-bootstrap/v1`, a
-  one-time owner bootstrap for apps that keep their owner account in a
-  private R2 bucket.
-- `source.expectedSha256` pins the exact ZIP; `allowLocalZip: false` requires
-  that pin.
+Open the link, sign in, choose **Local ZIP** and pick your ZIP: you get the full
+plan (what will be created, refusals, cost notes) before anything is written. The
+same bytes from the URL are the same release.
 
 ## Release ZIP reference
 
@@ -169,26 +273,7 @@ refused rather than ignored (`UNKNOWN_WRANGLER_FIELD`,
 - Pages: `pages_build_output_dir` instead of `main`/`assets`.
 - `routes[].custom_domain: true` is refused: the installing user chooses
   their own domain in the Configure step.
-
-### Layouts
-
-**Single unit:** one `wrangler.jsonc` at the ZIP root (unit id `main`).
-
-```text
-release.zip
-├── wrangler.jsonc        # name, main: worker/main.mjs, bindings, vars
-├── worker/main.mjs       # built ESM entry
-├── worker/engine.wasm    # optional binary module(s)
-└── public/…              # optional static assets (assets.directory)
-```
-
-**Multiple units:** one directory per unit, each with its own
-`wrangler.jsonc`, declared in `units[]`. Paths may never cross unit
-boundaries (`CROSS_UNIT_PATH`). Workers call each other through `services`
-bindings; the graph orders the deploy.
-
-**Resource-only:** all units are `kind: "resources"` and the ZIP has no
-`wrangler.jsonc`.
+- Paths may never cross unit boundaries (`CROSS_UNIT_PATH`).
 
 ### Modules and assets
 
@@ -205,8 +290,8 @@ bindings; the graph orders the deploy.
 ### Secrets are never shipped
 
 `.env`, `.env.*`, `.dev.vars*` and key-like files are refused (`SECRET_FILE`).
-Secrets are entered by the user at install time (prompt-on-install) or
-generated server-side (generate-once).
+Secrets are entered by the user in the browser (at install, or when they choose
+to change one on upgrade) or generated server-side (`"generate": true`).
 
 ## Toolchains
 

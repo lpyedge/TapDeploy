@@ -11,22 +11,15 @@
     "r2",
     "kv"
   ],
-  "units": [
+  "units": [],
+  "resources": [
     {
-      "id": "storage",
-      "kind": "resources",
-      "resources": [
-        {
-          "kind": "r2",
-          "name": "example-data",
-          "mode": "ensure"
-        },
-        {
-          "kind": "kv",
-          "name": "example-cache",
-          "mode": "ensure"
-        }
-      ]
+      "kind": "r2",
+      "name": "example-data"
+    },
+    {
+      "kind": "kv",
+      "name": "example-cache"
     }
   ]
 }

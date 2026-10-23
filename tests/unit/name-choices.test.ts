@@ -29,11 +29,11 @@ describe("nameRows", () => {
     expect(requestNames(rows)).toEqual({ "d1:db": "live-db" });
   });
 
-  it("upgrade: a switchable resource stays editable, starting at what the Worker binds today", () => {
-    const switchable = resources.map((item) => (item.key === "d1:db" ? { ...item, switchable: true as const } : item));
-    const rows = nameRows(switchable, "upgrade", inventory, {});
+  it("upgrade: a resource marked onUpgrade change stays editable, starting at what the Worker binds today", () => {
+    const changeable = resources.map((item) => (item.key === "d1:db" ? { ...item, changeOnUpgrade: true as const } : item));
+    const rows = nameRows(changeable, "upgrade", inventory, {});
     expect([rows[0]!.mode, rows[0]!.value, rows[0]!.exists]).toEqual(["input", "live-db", true]);
-    const renamed = nameRows(switchable, "upgrade", inventory, { "d1:db": "new-db" });
+    const renamed = nameRows(changeable, "upgrade", inventory, { "d1:db": "new-db" });
     expect([renamed[0]!.value, renamed[0]!.exists, Boolean(renamed[0]!.error)]).toEqual(["new-db", false, false]);
     expect(requestNames(renamed)).toEqual({ "d1:db": "new-db" });
   });
