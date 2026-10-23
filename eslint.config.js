@@ -13,6 +13,7 @@ export default tseslint.config(
       "playwright-report",
       "temp",
       "test-results",
+      "src/manifest/config-v3-validator.generated.js",
     ],
   },
   js.configs.recommended,

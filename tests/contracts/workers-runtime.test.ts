@@ -114,7 +114,7 @@ describe("workers runtime package", () => {
   it("validates locally with Wrangler (dry-run) exposing only the ASSETS binding", () => {
     const run = spawnSync(
       "npx",
-      ["wrangler", "deploy", "--dry-run", "--outdir", path.join(root, "dist/workers/dry-run")],
+      ["wrangler", "deploy", "--dry-run", "--outdir", path.join(root, "temp/wrangler/dry-run")],
       { cwd: root, encoding: "utf8", timeout: 180_000 },
     );
     const output = `${run.stdout ?? ""}\n${run.stderr ?? ""}`;
@@ -204,11 +204,23 @@ describe("workers-hosted OAuth/session contract", () => {
   });
 
   it.each(["http://installer.example", "https://installer.example/app", "https://installer.example?x=1", "installer.example"])(
-    "start refuses PUBLIC_ORIGIN %j (must be a bare https origin)",
+    "start refuses PUBLIC_ORIGIN %j and shows the expected format",
     async (origin) => {
       const res = await workerFetch(startRequest(), { ...AUTH_BINDINGS, PUBLIC_ORIGIN: origin });
       expect(res.status).toBe(500);
-      expect(((await res.json()) as { error: string }).error).toMatch(/PUBLIC_ORIGIN/);
+      const error = ((await res.json()) as { error: string }).error;
+      expect(error).toContain(`PUBLIC_ORIGIN "${origin}"`);
+      expect(error).toContain("https://deploy.example.com or https://deploy.example.com:8443");
+    },
+  );
+
+  it.each([[`${ORIGIN}:8443/`, `${ORIGIN}:8443`], [`${ORIGIN}:8443`, `${ORIGIN}:8443`], ["http://localhost:8787/", "http://localhost:8787"]])(
+    "accepts PUBLIC_ORIGIN %j with or without a trailing slash",
+    async (origin, canonical) => {
+      const res = await workerFetch(startRequest({ origin: canonical }), { ...AUTH_BINDINGS, PUBLIC_ORIGIN: origin });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const url = new URL(((await res.json()) as { url: string }).url);
+      expect(url.searchParams.get("redirect_uri")).toBe(`${canonical}/api/auth/callback`);
     },
   );
 
@@ -313,6 +325,8 @@ describe("workers-hosted OAuth/session contract", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(`${ORIGIN}/api/auth/callback`);
     const path = await workerFetch(startRequest(), { ...AUTH_BINDINGS, PUBLIC_ORIGIN: `${ORIGIN}/app` });
     expect(path.status).toBe(500);
-    expect(((await path.json()) as { error: string }).error).toContain(`got "${ORIGIN}/app"`);
+    const error = ((await path.json()) as { error: string }).error;
+    expect(error).toContain(`"${ORIGIN}/app" is not in the expected format`);
+    expect(error).toContain("https://deploy.example.com or https://deploy.example.com:8443");
   });
 });

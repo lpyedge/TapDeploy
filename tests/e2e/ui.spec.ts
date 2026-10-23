@@ -1,4 +1,4 @@
-// Entry-step E2E tests for the installer UI (-trimmed). Every backend call is
+// Entry-step E2E tests for the installer UI. Every backend call is
 // stubbed at the network layer with page.route, so this exercises the real
 // React UI. Only the pre-auth config entry-step tests that pass against the
 // current UI are kept here; the V3 product UI flow is covered by

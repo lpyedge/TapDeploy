@@ -52,7 +52,7 @@ and TapDeploy tells the user.
 
 | Name | Value |
 |---|---|
-| `PUBLIC_ORIGIN` | the address users open, e.g. `https://deploy.example.com` (http only for `localhost`) |
+| `PUBLIC_ORIGIN` | the address users open: `https://deploy.example.com`, or with a port `https://deploy.example.com:8443`; a trailing `/` is fine, http only for `localhost` |
 | `OAUTH_CLIENT_ID` | the OAuth client ID |
 | `OAUTH_CLIENT_SECRET` | the OAuth client secret; it also derives the key that encrypts session cookies, so rotating it signs everyone out |
 | `PORT` | Node only, default `8787` |

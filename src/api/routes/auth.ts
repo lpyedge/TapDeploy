@@ -52,25 +52,29 @@ function resolveAuthConfig(env: TapDeployEnv): AuthCfg {
   };
 }
 
+// The value has already been reduced to its origin when it named one (a
+// trailing `/` is fine, see canonicalOrigin); anything else is refused with
+// the expected format.
+const ORIGIN_FORMAT = "use scheme://host or scheme://host:port, e.g. https://deploy.example.com or https://deploy.example.com:8443 (a trailing / is fine; http only for localhost, e.g. http://localhost:8787)";
+
 function validatePublicOrigin(origin: string): { ok: boolean; error?: string } {
   if (!origin) {
-    return { ok: false, error: "PUBLIC_ORIGIN is required" };
+    return { ok: false, error: `PUBLIC_ORIGIN is required: ${ORIGIN_FORMAT}` };
   }
-  const bareOriginError = `PUBLIC_ORIGIN must be an origin like https://deploy.example.com (no path); got "${origin}"`;
-  let url: URL;
+  let url: URL | undefined;
   try {
     url = new URL(origin);
   } catch {
-    return { ok: false, error: bareOriginError };
+    url = undefined;
   }
-  if (url.origin !== origin) {
-    return { ok: false, error: bareOriginError };
+  if (!url || url.origin !== origin) {
+    return { ok: false, error: `PUBLIC_ORIGIN "${origin}" is not in the expected format: ${ORIGIN_FORMAT}` };
   }
   const isLocalhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (url.protocol === "https:" || (isLocalhost && url.protocol === "http:")) {
     return { ok: true };
   }
-  return { ok: false, error: `PUBLIC_ORIGIN must be https (or http for localhost); got "${origin}"` };
+  return { ok: false, error: `PUBLIC_ORIGIN "${origin}" must use https: ${ORIGIN_FORMAT}` };
 }
 
 function validateAuthConfig(cfg: AuthCfg): string | null {

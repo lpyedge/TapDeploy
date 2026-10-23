@@ -24,6 +24,7 @@ real values. Settings are explained in [self-hosting.md](self-hosting.md#2-setti
 | `npm run dev:web` / `dev:node` / `dev:workers` | Vite UI (proxies `/api` to :8787) / Node runtime / `wrangler dev` |
 | `npm run build` | UI → `dist/web`, Node server → `dist/node`, Worker → `dist/workers` |
 | `npm run typecheck` / `npm run lint` | TypeScript / ESLint |
+| `npm run generate:validator` | regenerate `src/manifest/config-v3-validator.generated.js` after editing the config JSON Schema (Workers cannot compile a schema at runtime; a test fails when the file is stale) |
 | `npm test` | Vitest (`tests/unit`, `tests/contracts`); run `npm run build` first |
 | `npm run test:e2e` | Playwright against the Vite dev server |
 | `PW_RUNTIME=node npm run test:e2e` | Playwright against the built Node server |

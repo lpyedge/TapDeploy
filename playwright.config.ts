@@ -3,7 +3,11 @@ const runtime = process.env.PW_RUNTIME ?? "vite";
 if (!["vite", "node", "workers"].includes(runtime)) throw new Error("PW_RUNTIME must be vite, node or workers");
 const port = Number(process.env.PW_PORT ?? "5173");
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("PW_PORT must be an integer from 1024 to 65535");
-const command = runtime === "node" ? "node dist/node/server.mjs" : runtime === "workers" ? `npx wrangler dev --local --ip 127.0.0.1 --port ${port} --log-level warn` : `npm run dev:web -- --port ${port} --strictPort`;
+// Test-only instance settings: the built Node server and the real Worker run the
+// unmocked auth routes (tests/e2e/runtime-auth.spec.ts); no Cloudflare call is made.
+const settings = { PUBLIC_ORIGIN: `http://localhost:${port}`, OAUTH_CLIENT_ID: "e2e-client", OAUTH_CLIENT_SECRET: "e2e-secret" };
+const workerVars = Object.entries(settings).map(([name, value]) => `--var ${name}:${value}`).join(" ");
+const command = runtime === "node" ? "node dist/node/server.mjs" : runtime === "workers" ? `npx wrangler dev --local --ip 127.0.0.1 --port ${port} --log-level warn ${workerVars}` : `npm run dev:web -- --port ${port} --strictPort`;
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -23,7 +27,7 @@ export default defineConfig({
   ],
   webServer: {
     command,
-    env: { NODE_ENV: "production", HOST: "127.0.0.1", PORT: String(port) },
+    env: { NODE_ENV: "production", PORT: String(port), ...settings },
     port,
     // Reuse an already-running dev server when explicitly requested
     // (PW_REUSE=1); otherwise Playwright owns the port and fails closed

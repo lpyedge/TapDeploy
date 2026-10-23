@@ -13,9 +13,7 @@
 // (defence in depth) rejects smuggled shapes. `schemaVersion` is the constant 3;
 // no older config shape is accepted.
 
-import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
-import schemaData from "../../schemas/tapdeploy.config.v3.schema.json";
+import validateSchema from "./config-v3-validator.generated.js";
 import { isPrivateHost } from "../release/url.js";
 import type { ScopeCapability } from "../auth/scope-registry.js";
 
@@ -290,24 +288,6 @@ export function parseConfigV3Text(
 // Schema validator
 // ---------------------------------------------------------------------------
 
-let cachedValidate: ValidateFunction | null = null;
-
-function getValidator(): ValidateFunction {
-  if (cachedValidate) {
-    return cachedValidate;
-  }
-  const ajv = new Ajv2020({
-    allErrors: true,
-    strict: true,
-    allowUnionTypes: true,
-    validateFormats: true,
-  });
-  addFormats(ajv as never);
-  const validate = ajv.compile(schemaData as object);
-  cachedValidate = validate;
-  return validate;
-}
-
 export interface ConfigV3ValidationError {
   instancePath: string;
   message: string;
@@ -316,11 +296,12 @@ export interface ConfigV3ValidationError {
 export function validateConfigV3(
   input: unknown,
 ): { ok: true; config: ConfigV3 } | { ok: false; errors: ConfigV3ValidationError[] } {
-  const validate = getValidator();
-  if (validate(input)) {
+  // Precompiled from the JSON Schema (scripts/generate-config-validator.mjs):
+  // the Workers runtime forbids compiling a schema at runtime.
+  if (validateSchema(input)) {
     return { ok: true, config: input as ConfigV3 };
   }
-  const errors = (validate.errors ?? []).map((e) => ({
+  const errors = (validateSchema.errors ?? []).map((e) => ({
     instancePath: e.instancePath || "/",
     message: e.message ?? "invalid",
   }));
