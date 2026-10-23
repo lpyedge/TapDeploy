@@ -40,6 +40,10 @@ describe("domain drafts", () => {
       web: { remove: [{ hostname: "docs.example.com", zone: "example.com" }] },
     });
   });
+  it("refuses binding the address of this TapDeploy instance", () => {
+    const drafts = { main: { ...EMPTY_DRAFT, bind: true, zone: "example.com", sub: "deploy" } };
+    expect(draftErrors([api], drafts, facts, records, "deploy.example.com")).toEqual({ main: expect.stringContaining("address of this TapDeploy instance") });
+  });
   it("sends nothing for an untouched form or a hostname that is already bound", () => {
     expect(domainRequest([api], {}, facts, records)).toBeUndefined();
     expect(domainRequest([api], { main: { ...EMPTY_DRAFT, bind: true, zone: "example.com", sub: "api" } }, facts, records)).toBeUndefined();

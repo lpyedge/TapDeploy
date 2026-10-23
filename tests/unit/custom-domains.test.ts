@@ -45,6 +45,10 @@ describe("domainEntriesFromChoices", () => {
       site: [{ kind: "pages-custom-domain", hostname: "example.com", zoneName: "example.com", updateAction: "preserve" }],
     } });
   });
+  it("never binds the address of this TapDeploy instance (removing it stays possible)", () => {
+    expect(domainEntriesFromChoices({ api: { bind: [{ hostname: "deploy.example.com", zone: "example.com", replaceExisting: true }] } }, units, "deploy.example.com")).toEqual({ ok: false, detail: expect.stringContaining("address of this TapDeploy instance") });
+    expect(domainEntriesFromChoices({ api: { remove: [{ hostname: "deploy.example.com", zone: "example.com" }] } }, units, "deploy.example.com").ok).toBe(true);
+  });
   it("refuses a non-HTTP unit, a hostname outside its zone and a repeated hostname", () => {
     expect(domainEntriesFromChoices({ data: { bind: [{ hostname: "a.example.com", zone: "example.com" }] } }, units).ok).toBe(false);
     expect(domainEntriesFromChoices({ api: { bind: [{ hostname: "a.other.com", zone: "example.com" }] } }, units).ok).toBe(false);
@@ -89,11 +93,13 @@ describe("decideCustomDomain: Pages", () => {
     const own = { ...cname, content: "site-abc.pages.dev" };
     expect(decideCustomDomain(pages("docs.example.com"), "site", facts({ dnsRecords: [own], pagesDomains: [{ name: "docs.example.com" }], pagesSubdomain: "site-abc.pages.dev" }))).toEqual({ action: "preserve" });
   });
-  it("needs consent for foreign records and never takes a Worker's hostname", () => {
+  it("needs consent for foreign records and for taking a Worker's hostname", () => {
     const foreign = facts({ dnsRecords: [{ ...cname, content: "elsewhere.example.net" }] });
     expect(decideCustomDomain(pages("docs.example.com"), "site", foreign).action).toBe("conflict");
     expect(decideCustomDomain(pages("docs.example.com", "explicit-change"), "site", foreign)).toEqual({ action: "attach", zoneId: "zone-1", replaceRecordIds: ["c1"] });
-    expect(decideCustomDomain(pages("docs.example.com", "explicit-change"), "site", facts({ workerDomains: [{ id: "d", hostname: "docs.example.com", service: "w" }] })).action).toBe("conflict");
+    const worker = facts({ workerDomains: [{ id: "d", hostname: "docs.example.com", service: "w" }] });
+    expect(decideCustomDomain(pages("docs.example.com"), "site", worker).action).toBe("conflict");
+    expect(decideCustomDomain(pages("docs.example.com", "explicit-change"), "site", worker)).toEqual({ action: "attach", zoneId: "zone-1", replaceRecordIds: [], replaceWorkerDomainId: "d" });
   });
   it("removes the project domain and its own CNAME", () => {
     expect(decideCustomDomain(pages("docs.example.com", "detach"), "site", facts({ dnsRecords: [cname], pagesDomains: [{ name: "docs.example.com" }] }))).toEqual({ action: "detach", zoneId: "zone-1", cnameRecordId: "c1" });

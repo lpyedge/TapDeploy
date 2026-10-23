@@ -79,7 +79,7 @@
   }
 
   .seg {
-    @apply inline-flex max-w-full flex-wrap gap-1 rounded-lg bg-slate-100 p-1;
+    @apply inline-flex max-w-full flex-wrap gap-1 self-start rounded-lg bg-slate-100 p-1;
   }
   .seg-opt {
     @apply relative cursor-pointer rounded-md px-3 py-1.5 text-sm text-slate-600 transition hover:text-slate-900 has-[:checked]:bg-white has-[:checked]:text-slate-900 has-[:checked]:font-medium has-[:checked]:shadow-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/50;
@@ -338,6 +338,9 @@
   /* One HTTP unit's custom-domain choices in the Configure step. */
   .domain-unit {
     @apply mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 p-3;
+  }
+  .diff-detail {
+    @apply basis-full text-sm text-red-700;
   }
   .domain-row {
     @apply flex flex-wrap items-end gap-2;

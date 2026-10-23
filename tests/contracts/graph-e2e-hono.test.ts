@@ -1801,12 +1801,10 @@ describe("queue producer/consumer graph (graph API)", () => {
     expect(f.plannedBody.graphPlan.guards).toContainEqual(
       expect.objectContaining({ code: "unit-blocked", level: "block", detail: expect.stringContaining("queue-drift") }),
     );
-    // The conflict itself is never dispatchable and would overwrite an
-    // existing resource; both refuse before any approval is sealed.
-    expect(f.plannedBody.graphPlan.guards).toContainEqual(
-      expect.objectContaining({ code: "unsupported-operation", detail: expect.stringContaining("UNSUPPORTED_GRAPH_OPERATION(api,queue-consumer,conflict)") }),
-    );
-    expect(f.plannedBody.graphPlan.guards).toContainEqual(expect.objectContaining({ code: "destructive-operation", level: "block" }));
+    // The blocked unit explains its conflict; it is not repeated as an
+    // unsupported or destructive operation.
+    expect(f.plannedBody.graphPlan.guards.map((guard) => guard.code)).not.toContain("unsupported-operation");
+    expect(f.plannedBody.graphPlan.guards.map((guard) => guard.code)).not.toContain("destructive-operation");
     const apiUnit = f.plannedBody.graphPlan.units.find((unit) => unit.unitId === "api")!;
     expect(apiUnit.diffs).toContainEqual(expect.objectContaining({ resource: "queue-consumer", action: "conflict", name: "jobs" }));
     // A blocked plan carries no execution context or approval: the step refuses
@@ -1972,10 +1970,10 @@ describe("workflow carrier graph (graph API)", () => {
     expect(foreign.plannedBody.graphPlan.guards).toContainEqual(
       expect.objectContaining({ code: "unit-blocked", level: "block", detail: expect.stringContaining("workflow-drift") }),
     );
-    expect(foreign.plannedBody.graphPlan.guards).toContainEqual(
-      expect.objectContaining({ code: "unsupported-operation", detail: expect.stringContaining("UNSUPPORTED_GRAPH_OPERATION(main,workflow,conflict)") }),
-    );
-    expect(foreign.plannedBody.graphPlan.guards).toContainEqual(expect.objectContaining({ code: "destructive-operation", level: "block" }));
+    // The blocked unit explains its conflict; it is not repeated as an
+    // unsupported or destructive operation.
+    expect(foreign.plannedBody.graphPlan.guards.map((guard) => guard.code)).not.toContain("unsupported-operation");
+    expect(foreign.plannedBody.graphPlan.guards.map((guard) => guard.code)).not.toContain("destructive-operation");
     expect(foreign.plannedBody.graphPlan.units.find((entry) => entry.unitId === "main")!.diffs).toContainEqual(
       expect.objectContaining({ resource: "workflow", action: "conflict", name: "wf" }),
     );
@@ -2712,6 +2710,36 @@ it("binds a Pages custom domain after the deployment: project domain plus proxie
   const deployBody = await deploy.json() as { phaseReceipt: unknown };
   const bound = await step("site", "pages-custom-domain", "attach", "docs.example.com", "reconcile-domains", { receipts: [project.phaseReceipt, handoff.phaseReceipt, deployBody.phaseReceipt] });
   expect(bound.status, await bound.clone().text()).toBe(200);
+  expect(f.pagesProjects.get("site")?.domains).toEqual(["docs.example.com"]);
+  expect(f.dnsRecords).toEqual([{ zoneId: ZONE_ID, id: expect.any(String), name: "docs.example.com", type: "CNAME", content: "site.pages.dev", proxied: true }]);
+});
+it("moves a hostname from another Worker to a Pages site only with the operator's confirmation", async () => {
+  const { toPagesAssetPath } = await import("../../src/cloudflare/pages/manifest.js");
+  const ZONE_ID = "6".repeat(32);
+  const config: ConfigV3 = { ...baseConfig(["pages"]), units: [{ id: "site", kind: "pages", wrangler: "wrangler.jsonc" }] };
+  const f = await graphHonoFixture(config, {
+    "wrangler.jsonc": enc.encode(JSON.stringify({ name: "site", compatibility_date: "2026-10-17", pages_build_output_dir: "dist" })),
+    "dist/index.html": enc.encode("<h1>hi</h1>"),
+  }, "node", { zones: [{ id: ZONE_ID, name: "example.com" }], workerDomains: [{ id: "a".repeat(32), hostname: "docs.example.com", service: "other", zone_id: ZONE_ID }] });
+  const unconfirmed = await (await f.plan({ domains: { site: { bind: [{ hostname: "docs.example.com", zone: "example.com" }] } } })).json() as typeof f.plannedBody;
+  expect(unconfirmed.graphPlan.blocked).toBe(true);
+  expect(unconfirmed.graphPlan.guards).toContainEqual(expect.objectContaining({ code: "unit-blocked", detail: expect.stringContaining("currently serves the Worker \"other\"") }));
+  const planned = await (await f.plan({ domains: { site: { bind: [{ hostname: "docs.example.com", zone: "example.com", replaceExisting: true }] } } })).json() as typeof f.plannedBody;
+  expect(planned.graphPlan.blocked, JSON.stringify(planned)).toBe(false);
+  expect(planned.graphPlan.units[0]!.diffs).toContainEqual(expect.objectContaining({ resource: "pages-custom-domain", action: "attach", name: "docs.example.com" }));
+  const step = f.makeStep(planned);
+  const early = await step("site", "pages-custom-domain", "attach", "docs.example.com", "reconcile-domains");
+  expect(early.status).toBe(409);
+  const project = await (await step("site", "pages-project", "create", "site", "pages-create-project")).json() as { phaseReceipt: unknown };
+  const siteUnit = f.release.units.find(unit => (unit as { unitId?: string }).unitId === "site") as unknown as { assets: Array<{ path: string; pagesHash: string }> };
+  const manifest = Object.fromEntries(siteUnit.assets.map(asset => [toPagesAssetPath(asset.path, "dist"), asset.pagesHash]));
+  const handoff = await (await step("site", "static-assets", "create", "site", "pages-register-assets", { receipts: [project.phaseReceipt] })).json() as { phaseReceipt: unknown };
+  const deploy = await step("site", "deployment", "create", "site", "pages-deploy", { manifest, receipts: [project.phaseReceipt, handoff.phaseReceipt] });
+  expect(deploy.status, await deploy.clone().text()).toBe(200);
+  const deployBody = await deploy.json() as { phaseReceipt: unknown };
+  const bound = await step("site", "pages-custom-domain", "attach", "docs.example.com", "reconcile-domains", { receipts: [project.phaseReceipt, handoff.phaseReceipt, deployBody.phaseReceipt], confirmDomainChanges: true });
+  expect(bound.status, await bound.clone().text()).toBe(200);
+  expect(f.workerDomains).toEqual([]);
   expect(f.pagesProjects.get("site")?.domains).toEqual(["docs.example.com"]);
   expect(f.dnsRecords).toEqual([{ zoneId: ZONE_ID, id: expect.any(String), name: "docs.example.com", type: "CNAME", content: "site.pages.dev", proxied: true }]);
 });

@@ -48,11 +48,13 @@ const MAX_DOMAINS_PER_UNIT = 20;
 /**
  * Validate the plan request's `domains` object into DomainEntrySpec entries per
  * unit. Only HTTP units may carry domains; every hostname must lie in the zone
- * named next to it; a hostname appears at most once per request.
+ * named next to it; a hostname appears at most once per request; the address
+ * of this TapDeploy instance (`selfHostname`) is never bound to an app.
  */
 export function domainEntriesFromChoices(
   raw: unknown,
   httpUnits: Readonly<Record<string, HttpUnitTarget>>,
+  selfHostname?: string,
 ): { ok: true; entries: Record<string, DomainEntrySpec[]> } | { ok: false; detail: string } {
   if (raw === undefined) return { ok: true, entries: {} };
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, detail: "domains must be an object keyed by unit id" };
@@ -77,6 +79,7 @@ export function domainEntriesFromChoices(
       if (!hostname || !zone) return { ok: false, detail: `domains.${unitId} entry ${index} needs a valid hostname and zone` };
       if (!hostnameInZone(hostname, zone)) return { ok: false, detail: `"${hostname}" is not inside the zone "${zone}"` };
       if (seen.has(hostname)) return { ok: false, detail: `"${hostname}" is listed more than once` };
+      if (mode === "bind" && hostname === selfHostname) return { ok: false, detail: `"${hostname}" is the address of this TapDeploy instance; binding it to an app would take TapDeploy offline` };
       seen.add(hostname);
       const replace = mode === "bind" && (choice as { replaceExisting?: unknown }).replaceExisting === true;
       list.push({ kind, hostname, zoneName: zone, updateAction: mode === "remove" ? "detach" : replace ? "explicit-change" : "preserve" });
@@ -114,7 +117,9 @@ export function pagesCnameTarget(owner: string, facts: Pick<CustomDomainFacts, "
 
 export type CustomDomainDecision =
   | { action: "preserve"; detail?: string }
-  | { action: "attach"; zoneId: string; replaceRecordIds: string[] }
+  // `replaceWorkerDomainId`: a Pages site taking a hostname another Worker
+  // serves (with the operator's confirmation) first removes that binding.
+  | { action: "attach"; zoneId: string; replaceRecordIds: string[]; replaceWorkerDomainId?: string }
   | { action: "update"; zoneId: string; domainId: string }
   | { action: "detach"; zoneId: string; domainId?: string; cnameRecordId?: string }
   | { action: "conflict"; detail: string };
@@ -169,8 +174,10 @@ export function decideCustomDomain(
     return { action: "detach", zoneId: zone.id, ...(ownCname ? { cnameRecordId: ownCname.id } : {}) };
   }
   if (workerDomain) {
-    // Another Worker's binding is never removed on its behalf.
-    return { action: "conflict", detail: `"${hostname}" is bound to the Worker "${workerDomain.service ?? "unknown"}"; remove it there first` };
+    if (entry.updateAction !== "explicit-change") {
+      return { action: "conflict", detail: `"${hostname}" currently serves the Worker "${workerDomain.service ?? "unknown"}"; confirm the replacement to move it to this Pages site` };
+    }
+    return { action: "attach", zoneId: zone.id, replaceRecordIds: records.map((record) => record.id), replaceWorkerDomainId: workerDomain.id };
   }
   const foreign = records.filter((record) => record !== ownCname);
   if (registered && ownCname && foreign.length === 0) return { action: "preserve" };

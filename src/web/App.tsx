@@ -590,7 +590,7 @@ function V3Flow(props: V3FlowProps) {
   const httpUnits: HttpUnit[] = snap.releaseUnits.flatMap((unit) => unit.kind === "worker" || unit.kind === "pages"
     ? [{ unitId: unit.unitId, kind: unit.kind, target: unit.kind === "worker" && renameAllowed && inputValues.workerName ? inputValues.workerName : unit.name }]
     : []);
-  const domainErrors = draftErrors(httpUnits, domainDrafts, domainFacts, recordsByZone);
+  const domainErrors = draftErrors(httpUnits, domainDrafts, domainFacts, recordsByZone, window.location.hostname);
   const domainsReady = Object.keys(domainErrors).length === 0;
   const hyperdriveUnits = snap.releaseUnits.flatMap((unit) => (unit.hyperdrive ?? []).length > 0
     ? [{ unitId: unit.unitId, target: unit.kind === "worker" && renameAllowed && inputValues.workerName ? inputValues.workerName : unit.name, bindings: unit.hyperdrive ?? [] }]

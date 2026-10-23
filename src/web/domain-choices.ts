@@ -83,6 +83,7 @@ export function draftErrors(
   drafts: Readonly<Record<string, UnitDomainDraft>>,
   facts: DomainsEnvelope | null,
   recordsByZone: Readonly<Record<string, ReadonlyArray<{ name: string; type: string; content?: string }>>>,
+  selfHostname?: string,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   const seen = new Map<string, string>();
@@ -90,7 +91,8 @@ export function draftErrors(
     const draft = drafts[unit.unitId] ?? EMPTY_DRAFT;
     if (draft.bind) {
       const hostname = draftHostname(draft);
-      if (!hostname) { errors[unit.unitId] = "choose a zone and a valid subdomain"; continue; }
+      if (!hostname) { errors[unit.unitId] = "choose a domain and a subdomain (@ for the domain itself)"; continue; }
+      if (hostname === selfHostname) { errors[unit.unitId] = `${hostname} is the address of this TapDeploy instance; binding it would take TapDeploy offline`; continue; }
       if (seen.has(hostname)) { errors[unit.unitId] = `${hostname} is already chosen for ${seen.get(hostname)}`; continue; }
       seen.set(hostname, unit.target);
       if (hostnameOccupant(hostname, unit, facts, recordsByZone[draft.zone] ?? []) && !draft.confirmReplace) { errors[unit.unitId] = "confirm the replacement first"; continue; }

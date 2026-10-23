@@ -167,6 +167,7 @@ export function V3DeployPanel({
                       <li key={index} data-diff={`${diff.resource}:${diff.action}${diff.name ? `:${diff.name}` : ""}`}>
                         <span className={`badge badge-${d.tone}`}>{d.action}</span>
                         <span>{d.subject}{d.name ? <strong> {d.name}</strong> : null}</span>
+                        {diff.action === "conflict" && diff.detail ? <span className="diff-detail" data-testid="v3-diff-detail">{diff.detail}</span> : null}
                       </li>
                     );
                   })}

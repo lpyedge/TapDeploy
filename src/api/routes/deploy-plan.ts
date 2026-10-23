@@ -105,7 +105,7 @@ async function planHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Respo
   // capability set the ACTUAL Wrangler config + install policy resolve to and
   // refuses a scope-underdeclared release as a developer error, with zero
   // provider calls and no second OAuth.
-  return planGraphV3(c, payload, key, body, accountId);
+  return planGraphV3(c, payload, key, body, accountId, publicOrigin);
 }
 
 // Config V3 graph-plan handler. It binds the V3 config to the session,
@@ -119,6 +119,7 @@ async function planGraphV3(
   key: CryptoKey,
   body: DeployPlanBody,
   accountId: string,
+  publicOrigin: string,
 ): Promise<Response> {
   const bound = await bindConfigToSession({
     sessionConfigHash: payload.configHash,
@@ -164,7 +165,7 @@ async function planGraphV3(
   if (!prepared.ok) return c.json({ error: "INVALID_RELEASE_PROOF", detail: prepared.detail }, 409);
   const specs = prepared.specs;
   // Operator-chosen custom domains join the unit's sealed domain entries.
-  const chosen = domainEntriesFromChoices(body.domains, Object.fromEntries(Object.entries(specs).map(([unitId, spec]) => [unitId, spec.targetKind])));
+  const chosen = domainEntriesFromChoices(body.domains, Object.fromEntries(Object.entries(specs).map(([unitId, spec]) => [unitId, spec.targetKind])), URL.canParse(publicOrigin) ? new URL(publicOrigin).hostname : undefined);
   if (!chosen.ok) return c.json({ error: "INVALID_DOMAIN_CHOICE", detail: chosen.detail }, 400);
   for (const [unitId, entries] of Object.entries(chosen.entries)) {
     const cloudflare = specs[unitId]!.cloudflare;

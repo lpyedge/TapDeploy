@@ -249,6 +249,7 @@ export interface GraphPlanUnitDiff {
   resource: string;
   action: string;
   name?: string;
+  detail?: string;
 }
 
 export interface GraphPlanUnit {

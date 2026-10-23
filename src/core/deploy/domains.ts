@@ -177,6 +177,7 @@ export async function reconcileDomains(
             if (registered) await ctx.client.deletePagesDomain(owner, entry.hostname);
             if (decision.cnameRecordId) await ctx.client.deleteDnsRecord(decision.zoneId, decision.cnameRecordId);
           } else {
+            if (decision.action === "attach" && decision.replaceWorkerDomainId) await ctx.client.detachWorkerDomain(decision.replaceWorkerDomainId);
             for (const id of decision.action === "attach" ? decision.replaceRecordIds : []) await ctx.client.deleteDnsRecord(decision.zoneId, id);
             if (!registered) await ctx.client.addPagesDomain(owner, { name: entry.hostname });
             const target = pagesCnameTarget(owner, facts);

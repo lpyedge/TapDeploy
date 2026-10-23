@@ -1664,14 +1664,14 @@ export async function buildGraphDeployPlan(
   // 4. Unit-level blocks + unsupported operations.
   for (const unit of units) {
     if (unit.plan?.blocked) {
-      const blockedCodes = unit.guards
+      const reasons = unit.guards
         .filter((guard) => guard.level === "block")
-        .map((guard) => guard.code);
+        .map((guard) => `${guard.detail} (${guard.code})`);
       guards.push({
         code: "unit-blocked",
         level: "block",
         unitId: unit.unitId,
-        detail: `unit "${unit.unitId}" plan is blocked${blockedCodes.length > 0 ? ` (${blockedCodes.join(", ")})` : ""}`,
+        detail: `unit "${unit.unitId}": ${reasons.length > 0 ? reasons.join("; ") : "plan is blocked"}`,
       });
     }
     for (const guard of unit.guards) {
@@ -1691,7 +1691,11 @@ export async function buildGraphDeployPlan(
   // block the plan before any approval is sealed, so no provider write can
   // follow (worker static-assets and secret create/update stay refused until
   // wire their exact phases).
-  for (const bad of unsupportedGraphDiffs(units)) {
+  // A conflict in a unit that is already blocked is explained by that unit's
+  // guard; it is not repeated as an unsupported or destructive operation.
+  const blockedUnits = new Set(units.filter((unit) => unit.plan?.blocked).map((unit) => unit.unitId));
+  const isExplainedConflict = (unitId: string, action: string) => action === "conflict" && blockedUnits.has(unitId);
+  for (const bad of unsupportedGraphDiffs(units).filter((diff) => !isExplainedConflict(diff.unitId, diff.action))) {
     guards.push({
       code: "unsupported-operation",
       level: "block",
@@ -1703,7 +1707,7 @@ export async function buildGraphDeployPlan(
   // 5. Destructive operations fail closed before any write.
   const destructive = units.flatMap((unit) =>
     unit.diffs
-      .filter((diff) => GRAPH_DESTRUCTIVE_ACTIONS.has(diff.action) && !(diff.action === "detach" && OPERATOR_REMOVABLE_RESOURCES.has(diff.resource)))
+      .filter((diff) => GRAPH_DESTRUCTIVE_ACTIONS.has(diff.action) && !(diff.action === "detach" && OPERATOR_REMOVABLE_RESOURCES.has(diff.resource)) && !isExplainedConflict(unit.unitId, diff.action))
       .map((diff) => ({ unitId: unit.unitId, diff })),
   );
   if (destructive.length > 0) {
