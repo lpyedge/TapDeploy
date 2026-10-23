@@ -232,13 +232,12 @@ test.describe("prebuilt UI flow", () => {
     expect(mocks.authStarts).toBe(0);
     expect(mocks.compilerRequests).toEqual([]);
     expect(mocks.unexpectedApi).toEqual([]);
-    for (const phase of ["create-r2-buckets", "create-worker", "activate", "postcheck"]) {
-      await expect(page.getByTestId(`v3-status-main-${phase}`)).toHaveAttribute("data-state", "done");
-    }
-    // Exactly the approved actions appear: three diff rows plus the worker
-    // postcheck observation. No static sequence spam.
-    await expect(page.locator('[data-testid^="v3-status-"]')).toHaveCount(4);
-    await expect(page.getByTestId("v3-status-main-create-worker")).toContainText("verified");
+    // One row per deployed item: the R2 bucket and the Worker (whose row covers
+    // upload, activation and the postcheck).
+    await expect(page.getByTestId("v3-status-main-r2-media")).toHaveAttribute("data-state", "done");
+    await expect(page.getByTestId("v3-status-main")).toHaveAttribute("data-state", "done");
+    await expect(page.locator('[data-testid^="v3-status-"]')).toHaveCount(2);
+    await expect(page.getByTestId("v3-status-main")).toContainText("verified");
     // A worker activate returns a Workers deployment id; the driver must never
     // route it into a Pages postcheck.
     const pagesPostchecks = mocks.stepCalls.filter((call) => (call as Record<string, unknown>).phase === "pages-postcheck");
@@ -369,6 +368,85 @@ test.describe("prebuilt UI flow", () => {
     expect((mocks.planBodies[0] as Record<string, unknown>).domains).toEqual({ main: { bind: [{ hostname: "www.example.com", zone: "example.com", replaceExisting: true }] } });
     expect(domainQueries.some((query) => query.zone === "example.com")).toBe(true);
     expect(mocks.unexpectedApi).toEqual([]);
+  });
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("configure can pick an existing subdomain from a dropdown, confirming the replacement", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/deploy/prepare");
+    await page.route("**/api/deploy/prepare", (route) =>
+      json(route, {
+        releaseProof: "proof-sealed",
+        releaseSummary: { archiveSha256: "a".repeat(64), manifestDigest: "b".repeat(64), entryCount: 2, units: [{ unitId: "main", kind: "worker", name: "web" }] },
+      }),
+    );
+    const domainQueries: Array<Record<string, unknown>> = [];
+    await page.unroute("**/api/cloudflare/domains");
+    await page.route("**/api/cloudflare/domains", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      domainQueries.push(body);
+      return json(route, {
+        accountId: "a".repeat(32),
+        zones: ["example.com"],
+        ...(body.zone === "example.com" ? { zone: "example.com", records: [{ name: "www.example.com", type: "A", content: "192.0.2.1" }] } : {}),
+        workerDomains: [],
+        pagesDomains: {},
+      });
+    });
+    await page.goto("/");
+    await pasteV3Config(page, V3_TEXT);
+    await page.getByTestId("v3-source-file-mode").check();
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-domains")).toBeVisible();
+    await page.getByTestId("v3-domain-bind-main").check();
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-domain-mode-existing-main").check();
+    await expect(page.getByTestId("v3-domain-existing-main")).toBeDisabled();
+    await page.getByTestId("v3-domain-zone-main").selectOption("example.com");
+    await page.getByTestId("v3-domain-existing-main").selectOption("www");
+    await expect(page.getByTestId("v3-domain-preview-main")).toContainText("https://www.example.com");
+    // An existing record: the operator must confirm the replacement first.
+    await expect(page.getByTestId("v3-domain-confirm-replace-main")).toBeVisible();
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-domain-confirm-replace-main").check();
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-plan-review")).toBeVisible();
+    expect((mocks.planBodies[0] as Record<string, unknown>).domains).toEqual({ main: { bind: [{ hostname: "www.example.com", zone: "example.com", replaceExisting: true }] } });
+    expect(domainQueries.some((query) => query.zone === "example.com")).toBe(true);
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("the billing confirmation stays visible and checked after the confirmed plan arrives, and can be withdrawn", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/deploy/plan");
+    await page.route("**/api/deploy/plan", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      mocks.planBodies.push(body);
+      const confirmed = body.paidRiskConfirmed === true;
+      const envelope = graphPlanBody();
+      envelope.graphPlan.cost = { operations: [{ unitId: "main", resource: "r2", action: "create", name: "media" }], requiresConfirmation: true, confirmed, blockedUnknownCost: false } as typeof envelope.graphPlan.cost;
+      envelope.graphPlan.blocked = !confirmed;
+      envelope.graphPlan.guards = confirmed ? [] : [{ code: "paid-risk-unconfirmed", level: "block", detail: "confirm the billable operations" }] as typeof envelope.graphPlan.guards;
+      return json(route, envelope);
+    });
+    await page.goto("/");
+    await pasteV3Config(page, V3_TEXT);
+    await page.getByTestId("v3-source-file-mode").check();
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
+    await page.getByTestId("v3-paid-confirm").check();
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeEnabled();
+    await expect(page.getByTestId("v3-paid-confirm")).toBeVisible();
+    await expect(page.getByTestId("v3-paid-confirm")).toBeChecked();
+    expect(mocks.planBodies.at(-1)?.paidRiskConfirmed).toBe(true);
+    await page.getByTestId("v3-paid-confirm").uncheck();
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
+    expect(mocks.planBodies.at(-1)?.paidRiskConfirmed).toBe(false);
   });
 
   // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
@@ -588,8 +666,8 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-result")).not.toContainText("workers.dev");
     await expect(page.getByTestId("v3-result-no-url")).toContainText("R2 bucket media");
     await expect(page.getByTestId("v3-result-dashboard")).toHaveAttribute("href", /dash\.cloudflare\.com/);
-    await expect(page.getByTestId("v3-status-resources-create-r2-buckets")).toHaveAttribute("data-state", "done");
-    await expect(page.getByTestId("v3-status-resources-create-kv-namespaces")).toHaveAttribute("data-state", "done");
+    await expect(page.getByTestId("v3-status-resources-r2-media")).toHaveAttribute("data-state", "done");
+    await expect(page.getByTestId("v3-status-resources-kv-cache")).toHaveAttribute("data-state", "done");
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
@@ -682,7 +760,7 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-result-dashboard")).toHaveAttribute("href", /dash\.cloudflare\.com/);
     // The browser performed the JWT handoff upload before the deployment.
     expect(uploaded).toEqual(["check-missing", "upload", "upsert"]);
-    await expect(page.getByTestId("v3-status-site-pages-deploy")).toHaveAttribute("data-state", "done");
+    await expect(page.getByTestId("v3-status-site")).toHaveAttribute("data-state", "done");
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
@@ -718,7 +796,7 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     await page.getByTestId("v3-confirm-deploy").click();
     await expect(page.getByTestId("v3-result")).toContainText("Deployment did not complete");
-    await expect(page.getByTestId("v3-failed-action")).toContainText("main create-worker");
+    await expect(page.getByTestId("v3-failed-action")).toContainText("Upload Worker code (api)");
     await expect(page.getByTestId("v3-result")).toContainText("1 verified receipts");
     await expect(page.getByTestId("v3-result")).not.toContainText("Deployment succeeded");
     expect(mocks.authStarts).toBe(0);

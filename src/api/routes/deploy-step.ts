@@ -292,13 +292,22 @@ async function graphV3Step(
   const client = createCloudflareClient({ accessToken: payload.accessToken });
   const suppliedReceipts = body.args?.receipts ?? [];
   if (!Array.isArray(suppliedReceipts) || suppliedReceipts.length > 2048) return c.json({ error: "GRAPH_RECEIPTS_INVALID" }, 400);
+  const dependencies = context.dependencies.filter(edge => edge.dependent === body.unitId).map(edge => edge.dependency);
+  // Only receipts of this unit and of the units it depends on can satisfy this
+  // step; others are not verified (each verification re-reads live state, and
+  // a Worker request has a subrequest budget). One snapshot per unit serves all
+  // of that unit's receipts in this request.
+  const relevantUnits = new Set([body.unitId, ...dependencies]);
+  const snapshots = new Map<string, Promise<TargetSnapshot>>();
   const verifiedReceipts: GraphPhaseReceipt[] = [];
   for (const envelope of suppliedReceipts) {
-    const receipt = await verifyCurrentGraphReceipt(key, envelope, client, context);
+    const sealed = envelope && typeof envelope === "object" ? await openSeal<unknown>(key, envelope as SealedEnvelope) : null;
+    if (!isGraphPhaseReceipt(sealed)) return c.json({ error: "GRAPH_RECEIPT_STATE_CHANGED" }, 409);
+    if (!relevantUnits.has(sealed.unitId)) continue;
+    const receipt = await verifyCurrentGraphReceipt(key, envelope, client, context, snapshots);
     if (!receipt) return c.json({ error: "GRAPH_RECEIPT_STATE_CHANGED" }, 409);
     verifiedReceipts.push(receipt);
   }
-  const dependencies = context.dependencies.filter(edge => edge.dependent === body.unitId).map(edge => edge.dependency);
   const prerequisiteActions = context.approvedDiffsWithActionIds.filter(action =>
     isDispatchableGraphAction(String(action.action)) && (
       dependencies.includes(String(action.unitId)) ||
@@ -704,7 +713,7 @@ async function graphActionState(client: CloudflareApiClient, accountId: string, 
   return { workerName: spec.cloudflare.workerName, version, activeDeploymentId: snapshot.activeDeploymentId };
 }
 
-async function verifyCurrentGraphReceipt(key: CryptoKey, envelope: unknown, client: CloudflareApiClient, context: GraphExecutionContext): Promise<GraphPhaseReceipt | null> {
+async function verifyCurrentGraphReceipt(key: CryptoKey, envelope: unknown, client: CloudflareApiClient, context: GraphExecutionContext, snapshots: Map<string, Promise<TargetSnapshot>> = new Map()): Promise<GraphPhaseReceipt | null> {
   if (!envelope || typeof envelope !== "object") return null;
   const receipt = await openSeal<unknown>(key, envelope as SealedEnvelope);
   if (!isGraphPhaseReceipt(receipt)) return null;
@@ -714,7 +723,12 @@ async function verifyCurrentGraphReceipt(key: CryptoKey, envelope: unknown, clie
   const unit = plan.units.find(item => item.unitId === receipt.unitId);
   if (!action || !spec || !unit) return null;
   try {
-    const snapshot = await readGraphTarget(client, context.accountId, spec, unit.kind === "resource-only");
+    let pending = snapshots.get(receipt.unitId);
+    if (!pending) {
+      pending = readGraphTarget(client, context.accountId, spec, unit.kind === "resource-only");
+      snapshots.set(receipt.unitId, pending);
+    }
+    const snapshot = await pending;
     const state = await graphActionState(client, context.accountId, spec, action, receipt.phase, snapshot, receipt.versionId);
     const stateHash = await graphPhaseStateHash(context.accountId, context.graphPlanDigest, receipt.unitId, receipt.actionId, receipt.phase, state);
     return openGraphPhaseReceipt(key, envelope, { nonce: context.nonce, configHash: context.configHash, accountId: context.accountId, sourcePolicyDigest: context.sourcePolicyDigest, graphPlanDigest: context.graphPlanDigest, executionContextDigest: context.executionContextDigest, unitId: receipt.unitId, actionId: receipt.actionId, phase: receipt.phase, stateHash }, context.expiresAt);

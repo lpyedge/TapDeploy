@@ -1,5 +1,6 @@
 import type { DomainsEnvelope } from "./api.js";
-import { EMPTY_DRAFT, boundHostnames, draftHostname, hostnameOccupant, type HttpUnit, type UnitDomainDraft } from "./domain-choices.js";
+import { EMPTY_DRAFT, boundHostnames, draftHostname, existingSubdomains, hostnameOccupant, type HttpUnit, type UnitDomainDraft } from "./domain-choices.js";
+import { Segmented } from "./Segmented.js";
 
 export interface V3DomainsPanelProps {
   units: readonly HttpUnit[];
@@ -35,8 +36,7 @@ export function V3DomainsPanel({ units, mode, facts, factsLoading, factsError, r
         const hostname = draft.bind ? draftHostname(draft) : null;
         const records = recordsByZone[draft.zone] ?? [];
         const occupant = hostname ? hostnameOccupant(hostname, unit, facts, records) : null;
-        const zoneSuffix = draft.zone ? `.${draft.zone}` : "";
-        const existingNames = records.map((record) => record.name).filter((name) => name.endsWith(zoneSuffix)).map((name) => name.slice(0, -zoneSuffix.length));
+        const existing = existingSubdomains(draft.zone, facts, records);
         return (
           <div key={unit.unitId} className="domain-unit" data-testid={`v3-domain-${unit.unitId}`}>
             <p className="m-0">{unit.kind === "pages" ? "Pages site" : "Worker"} <strong>{unit.target}</strong></p>
@@ -71,30 +71,52 @@ export function V3DomainsPanel({ units, mode, facts, factsLoading, factsError, r
             )}
             {draft.bind && (
               <>
-                <div className="flex flex-wrap items-center gap-1">
-                  <input
-                    type="text"
-                    className="flex-1"
-                    aria-label="Subdomain"
-                    placeholder="www (empty = the domain itself)"
-                    value={draft.sub}
-                    list={`v3-domain-names-${unit.unitId}`}
-                    onChange={(e) => set({ sub: e.target.value, confirmReplace: false })}
-                    data-testid={`v3-domain-sub-${unit.unitId}`}
-                  />
-                  <datalist id={`v3-domain-names-${unit.unitId}`}>
-                    {[...new Set(existingNames)].map((name) => <option key={name} value={name} />)}
-                  </datalist>
-                  <span aria-hidden="true">.</span>
+                <div className="domain-row">
+                  <div className="domain-sub">
+                    <Segmented
+                      name={`v3-domain-mode-${unit.unitId}`}
+                      label="Subdomain"
+                      value={draft.subMode}
+                      options={[
+                        { value: "new", label: "New name", testId: `v3-domain-mode-new-${unit.unitId}` },
+                        { value: "existing", label: "Existing name", testId: `v3-domain-mode-existing-${unit.unitId}` },
+                      ]}
+                      onChange={(subMode) => set({ subMode, sub: "", confirmReplace: false })}
+                    />
+                    {draft.subMode === "new" ? (
+                      <input
+                        type="text"
+                        aria-label="Subdomain"
+                        placeholder="www (or @ for the domain itself)"
+                        value={draft.sub}
+                        onChange={(e) => set({ sub: e.target.value, confirmReplace: false })}
+                        data-testid={`v3-domain-sub-${unit.unitId}`}
+                      />
+                    ) : (
+                      <select
+                        aria-label="Existing subdomain"
+                        value={draft.sub}
+                        disabled={!draft.zone}
+                        onChange={(e) => set({ sub: e.target.value, confirmReplace: false })}
+                        data-testid={`v3-domain-existing-${unit.unitId}`}
+                      >
+                        <option value="">{draft.zone ? (existing.length > 0 ? "Choose a name…" : "No names in this domain yet") : "Choose a domain first"}</option>
+                        {existing.map((name) => <option key={name || "@"} value={name || "@"}>{name || "@ (the domain itself)"}</option>)}
+                      </select>
+                    )}
+                  </div>
+                  <div className="domain-zone">
+                  <span className="domain-dot" aria-hidden="true">.</span>
                   <select
                     aria-label="Domain"
                     value={draft.zone}
-                    onChange={(e) => set({ zone: e.target.value, confirmReplace: false })}
+                    onChange={(e) => set({ zone: e.target.value, ...(draft.subMode === "existing" ? { sub: "" } : {}), confirmReplace: false })}
                     data-testid={`v3-domain-zone-${unit.unitId}`}
                   >
-                    <option value="">Select a domain…</option>
+                    <option value="">Choose a domain…</option>
                     {facts.zones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
                   </select>
+                  </div>
                 </div>
                 <p className="meta" data-testid={`v3-domain-preview-${unit.unitId}`}>{hostname ? `https://${hostname}` : "Choose a domain and a subdomain."}{hostname && bound.includes(hostname) ? " is already bound." : ""}</p>
                 {occupant && (

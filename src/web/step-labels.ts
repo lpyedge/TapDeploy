@@ -6,7 +6,7 @@
 export const STEP_STATE_LABEL: Record<string, string> = {
   pending: "Waiting",
   running: "In progress",
-  waiting: "Still processing at Cloudflare",
+  waiting: "Waiting for another step",
   done: "Done",
   error: "Failed",
 };

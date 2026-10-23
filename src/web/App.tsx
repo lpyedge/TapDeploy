@@ -35,6 +35,7 @@ import { V3DomainsPanel } from "./V3DomainsPanel.js";
 import { V3HyperdrivePanel } from "./V3HyperdrivePanel.js";
 import { domainRequest, draftErrors, type HttpUnit, type UnitDomainDraft } from "./domain-choices.js";
 import { Shell } from "./Shell.js";
+import { phaseLabel } from "./step-labels.js";
 
 // A quick link carries the config address: /?config=https://host/tapdeploy.config.json
 function readQuickLink(): string | undefined {
@@ -683,14 +684,16 @@ function V3Flow(props: V3FlowProps) {
         ok: false,
         error: outcome.error ?? "deploy failed",
         ...(outcome.pending ? { pending: true } : {}),
-        ...(outcome.failedAction ? { failedAction: `${outcome.failedAction.unitId} ${outcome.failedAction.phase}${outcome.failedAction.name ? ` ${outcome.failedAction.name}` : ""}` } : {}),
+        ...(outcome.failedAction ? { failedAction: `${phaseLabel(outcome.failedAction.phase)}${outcome.failedAction.name ? ` (${outcome.failedAction.name})` : ""}` } : {}),
         verifiedReceipts: outcome.receipts.length,
       }));
     }
   };
 
   const graphPlan = (snap.graphPlan ?? null) as GraphPlan | null;
-  const paidRisk = (graphPlan?.cost.requiresConfirmation === true && !graphPlan.cost.confirmed) || undefined;
+  // The confirmation is sealed into the plan approval, so toggling it re-plans;
+  // the checkbox stays visible (checked) once the confirmed plan arrives.
+  const paidRisk = graphPlan?.cost.requiresConfirmation === true || undefined;
   const blocked = graphPlan !== null && (graphPlan.blocked || !snap.executionContext || !snap.approval);
   const secretPromptNames = secretPromptsFor(props.configText, graphPlan);
   const secretsReady = secretPromptNames.every(({ name }) => (secretValues[name] ?? "").length > 0);
@@ -784,7 +787,7 @@ function V3Flow(props: V3FlowProps) {
         statuses={statuses}
         paidRisk={paidRisk}
         paidConfirmed={paidConfirmed}
-        onPaidConfirm={(checked) => { setPaidConfirmed(checked); if (snap.releaseProof && checked) void plan(snap.releaseProof, snap.inputs, true); }}
+        onPaidConfirm={(checked) => { setPaidConfirmed(checked); if (snap.releaseProof) void plan(snap.releaseProof, snap.inputs, checked); }}
         secretPromptNames={secretPromptNames}
         secretValues={secretValues}
         onSecretValue={(name, value) => setSecretValues((prev) => ({ ...prev, [name]: value }))}

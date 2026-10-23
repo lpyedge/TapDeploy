@@ -1,7 +1,7 @@
 import type { DeployStepState } from "./deploy-shared.js";
 import { graphActionsForPlan, type GraphStepStatus } from "./graph-deploy-runner.js";
-import type { GraphPlan } from "./api.js";
-import { STEP_STATE_LABEL, phaseLabel } from "./step-labels.js";
+import type { GraphPlan, GraphPlanUnit } from "./api.js";
+import { STEP_STATE_LABEL, phaseLabel, resourceLabel } from "./step-labels.js";
 
 export function dashboardTargetUrl(accountId: string, kind: string, name: string): string {
   const account = encodeURIComponent(accountId);
@@ -30,85 +30,101 @@ export function dashboardUrlForGraphPlan(accountId: string, plan: GraphPlan | nu
 }
 
 // ---------------------------------------------------------------------------
-// graph-native progress. Rows come ONLY from the server-approved plan
-// diffs (never a static step list): unapproved work cannot appear, and an
-// approved action the browser cannot address fails the run before dispatch
-// (graphActionsForPlan throws) instead of vanishing from this list.
+// Progress, one row per deployed item: each Worker and Pages site, each
+// account resource created for the release, each custom domain or route. A
+// row's state summarizes the approved steps behind it (the server plan is the
+// only source, so unapproved work cannot appear); its detail names the step in
+// progress or the step that failed.
 // ---------------------------------------------------------------------------
 
-export interface GraphStepRow {
+export interface GraphProgressItem {
   key: string;
   unitId: string;
-  resource: string;
-  action: string;
+  label: string;
   name?: string;
-  phase: string;
   state: DeployStepState;
   detail?: string;
-  receipt: boolean;
+  verified: boolean;
+}
+
+const DOMAIN_RESOURCES = new Set(["worker-custom-domain", "pages-custom-domain", "worker-route"]);
+
+// Which item a step belongs to: an account resource it creates, a domain it
+// binds, or else the unit's Worker / Pages site itself.
+function itemFor(unit: GraphPlanUnit | undefined, step: { unitId: string; resource: string; phase: string; name?: string }): { key: string; label: string; name?: string } {
+  if (DOMAIN_RESOURCES.has(step.resource)) return { key: `${step.unitId}-domain-${step.name ?? ""}`, label: resourceLabel(step.resource), ...(step.name ? { name: step.name } : {}) };
+  if (step.phase.startsWith("create-") && step.phase !== "create-worker" && step.phase !== "create-version") {
+    return { key: `${step.unitId}-${step.resource}-${step.name ?? ""}`, label: resourceLabel(step.resource), ...(step.name ? { name: step.name } : {}) };
+  }
+  const pages = unit?.kind.startsWith("pages") ?? step.phase.startsWith("pages-");
+  const name = unit?.name || step.name;
+  return { key: step.unitId, label: pages ? "Pages site" : "Worker", ...(name ? { name } : {}) };
 }
 
 /**
- * Build the visible rows for a graph plan with live statuses. Pure: the same
- * plan always yields the same rows in plan order; statuses only flip state.
+ * The visible items for a graph plan with live statuses (postchecks included).
+ * Pure: the same plan always yields the same items in plan order.
  */
-export function graphStepRows(plan: GraphPlan, statuses: GraphStepStatus[]): GraphStepRow[] {
-  const byPhase = new Map<string, GraphStepStatus>();
-  for (const status of statuses) {
-    byPhase.set(`${status.unitId}\0${status.phase}`, status);
+export function graphProgressItems(plan: GraphPlan, statuses: GraphStepStatus[], checks: GraphStepStatus[] = []): GraphProgressItem[] {
+  const live = new Map<string, GraphStepStatus>();
+  for (const status of [...statuses, ...checks]) live.set(`${status.unitId}\0${status.phase}`, status);
+  const units = new Map(plan.units.map((unit) => [unit.unitId, unit]));
+  const steps = [
+    ...graphActionsForPlan(plan).map((action) => ({ unitId: action.unitId, resource: action.resource, phase: action.phase, ...(action.name !== undefined ? { name: action.name } : {}) })),
+    ...checks.map((check) => ({ unitId: check.unitId, resource: check.resource, phase: check.phase })),
+  ];
+  const groups = new Map<string, { item: { key: string; label: string; name?: string }; unitId: string; steps: Array<{ phase: string; status?: GraphStepStatus }> }>();
+  for (const step of steps) {
+    const item = itemFor(units.get(step.unitId), step);
+    const group = groups.get(item.key) ?? { item, unitId: step.unitId, steps: [] };
+    if (!group.steps.some((entry) => entry.phase === step.phase)) group.steps.push({ phase: step.phase, status: live.get(`${step.unitId}\0${step.phase}`) });
+    groups.set(item.key, group);
   }
-  return graphActionsForPlan(plan).map((action) => {
-    const live = byPhase.get(`${action.unitId}\0${action.phase}`);
-    const state = live?.state ?? "pending";
+  return [...groups.values()].map(({ item, unitId, steps: entries }) => {
+    const failed = entries.find((entry) => entry.status?.state === "error");
+    const active = entries.find((entry) => entry.status?.state === "running") ?? entries.find((entry) => entry.status?.state === "waiting");
+    const done = entries.filter((entry) => entry.status?.state === "done").length;
+    const state: DeployStepState = failed ? "error" : done === entries.length ? "done" : active?.status?.state ?? (done > 0 ? "running" : "pending");
+    const current = failed ?? active ?? (done > 0 && done < entries.length ? entries.find((entry) => entry.status?.state !== "done") : undefined);
+    const detail = failed ? `${phaseLabel(failed.phase)}: ${failed.status?.detail ?? "failed"}` : current ? phaseLabel(current.phase) : undefined;
     return {
-      key: `${action.unitId}:${action.phase}`,
-      unitId: action.unitId,
-      resource: action.resource,
-      action: action.action,
-      ...(action.name !== undefined ? { name: action.name } : {}),
-      phase: action.phase,
+      key: item.key,
+      unitId,
+      label: item.label,
+      ...(item.name ? { name: item.name } : {}),
       state,
-      ...(live?.detail ? { detail: live.detail } : {}),
-      receipt: live?.receipt === true,
+      ...(detail ? { detail } : {}),
+      verified: done === entries.length && entries.every((entry) => entry.status?.receipt === true || entry.phase.endsWith("postcheck")),
     };
   });
 }
 
 const STATE_ICON: Record<string, string> = { pending: "○", running: "◔", waiting: "◔", done: "✓", error: "✕" };
 
-/**
- * The approved actions as a checklist. `checks` are the postcheck statuses
- * (worker / Pages verification), appended after the actions they verify.
- */
+/** The deployed items as a checklist, one row each. */
 export function GraphProgress({ plan, statuses, checks = [], finished = false, testidPrefix = "graph-step" }: { plan: GraphPlan; statuses: GraphStepStatus[]; checks?: GraphStepStatus[]; finished?: boolean; testidPrefix?: string }) {
-  const rows = graphStepRows(plan, statuses);
-  const checkRows = checks.map((status) => ({ key: `${status.unitId}:${status.phase}`, unitId: status.unitId, phase: status.phase, name: undefined as string | undefined, state: status.state, detail: status.detail, receipt: status.receipt === true }));
-  const all = [...rows, ...checkRows];
-  const singleUnit = new Set(all.map((row) => row.unitId)).size <= 1;
-  const done = all.filter((row) => row.state === "done").length;
+  const items = graphProgressItems(plan, statuses, checks);
+  const done = items.filter((item) => item.state === "done").length;
   return (
     <section className="progress" data-testid="graph-progress">
       <div className="progress-head">
-        <h3 className="m-0">{finished ? "Deployment steps" : "Deploying…"}</h3>
-        <span className="meta">{done} of {all.length} done</span>
+        <h3 className="m-0">{finished ? "Deployment" : "Deploying…"}</h3>
+        <span className="meta">{done} of {items.length} done</span>
       </div>
-      <div className="progress-bar" aria-hidden="true"><span style={{ width: `${all.length ? Math.round((done / all.length) * 100) : 0}%` }} /></div>
+      <div className="progress-bar" aria-hidden="true"><span style={{ width: `${items.length ? Math.round((done / items.length) * 100) : 0}%` }} /></div>
       {!finished && (
         <p className="panel-note">Runs in this browser tab — keep it open until the result appears. Nothing continues in the background.</p>
       )}
       <ol className="step-list">
-        {all.map((row) => (
-          <li key={row.key} data-testid={`${testidPrefix}-${row.unitId}-${row.phase}`} data-state={row.state}>
-            <span className="step-icon" aria-hidden="true">{STATE_ICON[row.state] ?? "○"}</span>
+        {items.map((item) => (
+          <li key={item.key} data-testid={`${testidPrefix}-${item.key}`} data-state={item.state}>
+            <span className="step-icon" aria-hidden="true">{STATE_ICON[item.state] ?? "○"}</span>
             <span className="step-name">
-              {phaseLabel(row.phase)}
-              {row.name ? <strong className="step-target"> {row.name}</strong> : null}
-              {singleUnit ? null : <span className="step-unit">{row.unitId}</span>}
+              {item.label}
+              {item.name ? <strong className="step-target"> {item.name}</strong> : null}
             </span>
-            <span className="step-state">{STEP_STATE_LABEL[row.state]}{row.receipt ? " · verified" : ""}</span>
-            {(row.state === "error" || row.state === "waiting") && row.detail ? (
-              <span className="step-detail">{row.detail}</span>
-            ) : null}
+            <span className="step-state">{STEP_STATE_LABEL[item.state]}{item.state === "done" && item.verified ? " · verified" : ""}</span>
+            {item.detail && item.state !== "done" ? <span className="step-detail">{item.detail}</span> : null}
           </li>
         ))}
       </ol>

@@ -339,6 +339,21 @@
   .domain-unit {
     @apply mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 p-3;
   }
+  .domain-row {
+    @apply flex flex-wrap items-end gap-2;
+  }
+  .domain-sub {
+    @apply flex min-w-0 flex-[1_1_14rem] flex-col gap-1;
+  }
+  .domain-dot {
+    @apply text-lg font-semibold text-slate-500;
+  }
+  .domain-zone {
+    @apply flex min-w-0 flex-[1_1_10rem] items-center gap-2;
+  }
+  .domain-zone select {
+    @apply min-w-0 flex-1;
+  }
 
   .blocked-block h3,
   .warn-block h3,

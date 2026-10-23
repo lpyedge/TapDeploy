@@ -1,7 +1,7 @@
 // Configure-step custom-domain drafts -> plan request (browser helpers).
 
 import { describe, expect, it } from "vitest";
-import { EMPTY_DRAFT, boundHostnames, domainRequest, draftErrors, draftHostname, hostnameOccupant, zoneOf, type HttpUnit } from "../../src/web/domain-choices.js";
+import { EMPTY_DRAFT, boundHostnames, domainRequest, draftErrors, draftHostname, existingSubdomains, hostnameOccupant, zoneOf, type HttpUnit } from "../../src/web/domain-choices.js";
 import type { DomainsEnvelope } from "../../src/web/api.js";
 
 const facts: DomainsEnvelope = {
@@ -15,9 +15,10 @@ const api: HttpUnit = { unitId: "main", kind: "worker", target: "api" };
 const site: HttpUnit = { unitId: "web", kind: "pages", target: "site" };
 
 describe("domain drafts", () => {
-  it("builds the hostname from subdomain and zone (empty = apex)", () => {
+  it("builds the hostname from subdomain and zone (@ = apex, empty = not chosen)", () => {
     expect(draftHostname({ zone: "example.com", sub: "WWW" })).toBe("www.example.com");
-    expect(draftHostname({ zone: "example.com", sub: "" })).toBe("example.com");
+    expect(draftHostname({ zone: "example.com", sub: "@" })).toBe("example.com");
+    expect(draftHostname({ zone: "example.com", sub: "" })).toBeNull();
     expect(draftHostname({ zone: "", sub: "www" })).toBeNull();
     expect(draftHostname({ zone: "example.com", sub: "bad_name" })).toBeNull();
   });
@@ -42,5 +43,10 @@ describe("domain drafts", () => {
   it("sends nothing for an untouched form or a hostname that is already bound", () => {
     expect(domainRequest([api], {}, facts, records)).toBeUndefined();
     expect(domainRequest([api], { main: { ...EMPTY_DRAFT, bind: true, zone: "example.com", sub: "api" } }, facts, records)).toBeUndefined();
+  });
+  it("lists the names that already exist in a zone, the apex as an empty label", () => {
+    const zoneRecords = [{ name: "www.example.com" }, { name: "example.com" }, { name: "a.shop.example.com" }, { name: "*.example.com" }, { name: "other.net" }];
+    expect(existingSubdomains("example.com", facts, zoneRecords)).toEqual(["", "a.shop", "api", "taken", "www"]);
+    expect(existingSubdomains("", facts, zoneRecords)).toEqual([]);
   });
 });

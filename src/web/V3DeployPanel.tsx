@@ -180,7 +180,7 @@ export function V3DeployPanel({
               <p>{graphPlan.cost.operations.map((op) => `${resourceLabel(op.resource)}${op.name ? ` ${op.name}` : ""}`).join(", ")}</p>
               {paidRisk && (
                 <label className="confirm-label mt-2 mb-0">
-                  <input type="checkbox" checked={paidConfirmed} onChange={(e) => onPaidConfirm(e.target.checked)} data-testid="v3-paid-confirm" />
+                  <input type="checkbox" checked={paidConfirmed} disabled={busy} onChange={(e) => onPaidConfirm(e.target.checked)} data-testid="v3-paid-confirm" />
                   I understand these operations may be billed to this account.
                 </label>
               )}

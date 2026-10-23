@@ -2809,3 +2809,51 @@ describe("platform bindings (graph API)", () => {
     expect(f.vectorizeIndexes).toEqual([{ name: "docs", created_on: expect.any(String), config: { dimensions: 384, metric: "dot-product" } }]);
   });
 });
+
+// A Worker request may make at most 50 subrequests on the Workers Free plan.
+// The browser sends every receipt it holds with every step; a step verifies
+// only the receipts of its own unit and its dependencies, one snapshot per unit.
+it("every step of a multi-unit install stays within the Workers subrequest budget, ignoring unrelated receipts", async () => {
+  const { toPagesAssetPath } = await import("../../src/cloudflare/pages/manifest.js");
+  const config: ConfigV3 = { ...baseConfig(["workers", "pages", "r2", "queues", "vectorize"]), units: [
+    { id: "data", kind: "resources", resources: [{ kind: "vectorize", name: "docs", mode: "ensure", dimensions: 32, metric: "cosine" }] },
+    { id: "main", kind: "worker", wrangler: "main/wrangler.jsonc", dependsOn: ["data"] },
+    { id: "site", kind: "pages", wrangler: "site/wrangler.jsonc" },
+  ] };
+  const f = await graphHonoFixture(config, {
+    "main/wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker.mjs", compatibility_date: "2026-10-17", workers_dev: false,
+      vectorize: [{ binding: "VECTORS", index_name: "docs" }], r2_buckets: [{ binding: "MEDIA", bucket_name: "media" }], queues: { producers: [{ binding: "JOBS", queue: "jobs" }] } })),
+    "main/worker.mjs": enc.encode("export default { fetch() { return new Response('ok'); } };"),
+    "site/wrangler.jsonc": enc.encode(JSON.stringify({ name: "site", compatibility_date: "2026-10-17", pages_build_output_dir: "dist" })),
+    "site/dist/index.html": enc.encode("<h1>hi</h1>"),
+  }, "node", { zones: [{ id: "7".repeat(32), name: "example.com" }] });
+  const planned = await (await f.plan({ domains: { site: { bind: [{ hostname: "docs.example.com", zone: "example.com" }] } } })).json() as typeof f.plannedBody;
+  expect(planned.graphPlan.blocked, JSON.stringify(planned.graphPlan)).toBe(false);
+  const step = f.makeStep(planned);
+  const receipts: unknown[] = [];
+  const calls: Record<string, number> = {};
+  const run = async (unit: string, resource: string, action: string, name: string, phase: string, args: Record<string, unknown> = {}) => {
+    const before = f.trace.length;
+    const res = await step(unit, resource, action, name, phase, { receipts: [...receipts], ...args });
+    expect(res.status, `${unit} ${phase}: ${await res.clone().text()}`).toBe(200);
+    calls[`${unit}:${phase}`] = f.trace.length - before;
+    const body = await res.json() as { phaseReceipt?: unknown; result?: Record<string, unknown> };
+    if (body.phaseReceipt !== undefined) receipts.push(body.phaseReceipt);
+    return body;
+  };
+  await run("data", "vectorize", "create", "docs", "create-vectorize-indexes");
+  await run("main", "r2", "create", "media", "create-r2-buckets");
+  await run("main", "queue", "create", "jobs", "create-queues");
+  const created = await run("main", "worker", "create", "api", "create-worker");
+  await run("main", "deployment", "create", "api", "activate", { versionId: created.result?.versionId });
+  await run("site", "pages-project", "create", "site", "pages-create-project");
+  const siteUnit = f.release.units.find(unit => (unit as { unitId?: string }).unitId === "site") as unknown as { assets: Array<{ path: string; pagesHash: string }> };
+  const manifest = Object.fromEntries(siteUnit.assets.map(asset => [toPagesAssetPath(asset.path, "site/dist"), asset.pagesHash]));
+  await run("site", "static-assets", "create", "site", "pages-register-assets");
+  await run("site", "deployment", "create", "site", "pages-deploy", { manifest });
+  const before = f.trace.length;
+  await run("site", "pages-custom-domain", "attach", "docs.example.com", "reconcile-domains");
+  // The Pages step carried the Worker and data receipts but never read their state.
+  expect(f.trace.slice(before).some(call => call.path.includes("/workers/scripts/") || call.path.includes("/vectorize/"))).toBe(false);
+  for (const [stepName, count] of Object.entries(calls)) expect(count, stepName).toBeLessThan(50);
+});

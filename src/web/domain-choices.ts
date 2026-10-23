@@ -15,9 +15,11 @@ export interface HttpUnit {
 }
 
 export interface UnitDomainDraft {
-  // Add a new hostname: `<sub>.<zone>` (empty sub = the zone apex).
+  // Add a hostname: `<sub>.<zone>` (`@` = the zone apex), typed as a new name
+  // or picked from the names that already exist in the zone.
   bind: boolean;
   zone: string;
+  subMode: "new" | "existing";
   sub: string;
   // The operator accepted replacing what serves the hostname today.
   confirmReplace: boolean;
@@ -26,13 +28,15 @@ export interface UnitDomainDraft {
   confirmRemove: boolean;
 }
 
-export const EMPTY_DRAFT: UnitDomainDraft = { bind: false, zone: "", sub: "", confirmReplace: false, remove: [], confirmRemove: false };
+export const EMPTY_DRAFT: UnitDomainDraft = { bind: false, zone: "", subMode: "new", sub: "", confirmReplace: false, remove: [], confirmRemove: false };
 
 /** The hostname a draft would bind, or null when it is not a valid name in the zone. */
 export function draftHostname(draft: Pick<UnitDomainDraft, "zone" | "sub">): string | null {
   if (!draft.zone) return null;
+  // `@` (the DNS convention) is the domain itself; an empty name is not chosen yet.
   const sub = draft.sub.trim().toLowerCase().replace(/\.$/, "");
-  return normalizeHostname(sub ? `${sub}.${draft.zone}` : draft.zone);
+  if (!sub) return null;
+  return normalizeHostname(sub === "@" ? draft.zone : `${sub}.${draft.zone}`);
 }
 
 /** Hostnames already bound to this unit's Worker / Pages project. */
@@ -50,6 +54,21 @@ export function hostnameOccupant(hostname: string, unit: HttpUnit, facts: Domain
   const occupying = records.filter((record) => record.name === hostname);
   if (occupying.length === 0) return null;
   return `DNS ${occupying.map((record) => `${record.type}${record.content ? ` → ${record.content}` : ""}`).join(", ")}`;
+}
+
+/**
+ * Names that already exist in `zone` (DNS address records and Worker custom
+ * domains), as subdomain labels relative to it; `""` is the zone apex.
+ */
+export function existingSubdomains(zone: string, facts: DomainsEnvelope | null, records: ReadonlyArray<{ name: string }>): string[] {
+  if (!zone) return [];
+  const names = [...records.map((record) => record.name), ...(facts?.workerDomains ?? []).map((domain) => domain.hostname)];
+  const labels = names.flatMap((name) => {
+    const host = name.toLowerCase().replace(/\.$/, "");
+    if (host === zone) return [""];
+    return host.endsWith(`.${zone}`) && !host.startsWith("*.") ? [host.slice(0, -zone.length - 1)] : [];
+  });
+  return [...new Set(labels)].sort((a, b) => a.localeCompare(b));
 }
 
 /** The zone (longest suffix match) a bound hostname belongs to. */
