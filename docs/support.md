@@ -14,7 +14,7 @@ a real account. Hosting TapDeploy itself on Workers is being verified.
 | Vectorize | bind an index; create it from a `resources` unit with `dimensions` + `metric` | yes |
 | Secrets Store | bind an existing secret (the release's store, else the account's only store) | yes |
 | Workers AI, Browser Rendering | bindings | yes |
-| Custom domains | the user binds, replaces (with confirmation) or unbinds their own hostname on any Worker or Pages site | yes |
+| Custom domains | the user binds, replaces (with confirmation) or unbinds their own hostname on any Worker or Pages site; the result page shows when it is live (a new domain can take a few minutes) | yes |
 | Hyperdrive | bind an existing configuration the user picks | no |
 | Several Workers with `services` bindings, zone routes, private-R2 owner bootstrap | supported | no |
 

@@ -5,7 +5,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { GraphPlan } from "../../src/web/api.js";
-import { V3ConfigurePanel, changeableSecrets, declaredConfigInputs, inputError } from "../../src/web/V3ConfigurePanel.js";
+import { V3ConfigurePanel } from "../../src/web/V3ConfigurePanel.js";
+import { changeableSecrets, declaredConfigInputs, inputError, type DeclaredInput } from "../../src/web/config-inputs.js";
 import { V3ReleasePanel } from "../../src/web/V3ReleasePanel.js";
 import { secretProblem, secretPromptsFor } from "../../src/web/V3DeployPanel.js";
 
@@ -126,7 +127,7 @@ describe("panel markup from props alone", () => {
       sourceLabel: "release.zip", releaseUnits: [{ unitId: "main", kind: "worker", name: "api" }], workerUnitCount: 1,
       showModeToggle: true, modeIntent: "install", onModeIntent: noop, renameAllowed: true, workerNameDef: undefined,
       visibleInputs: [], inputValues: { workerName: "api" }, onInputValue: noop, secretsToChange: [], replacedSecrets: [], onReplaceSecret: noop, upgradeTargets: null,
-      upgradeTargetsLoading: false, upgradeTargetsError: null, onSwitchToUpgrade: noop, continueDisabled: false, onBack: noop, onContinue: noop, ...overrides,
+      upgradeTargetsLoading: false, upgradeTargetsError: null, onSwitchToUpgrade: noop, continueDisabled: false, planning: false, onBack: noop, onContinue: noop, ...overrides,
     }));
 
   it("configure: name box on install, dropdown only for upgrade with live targets, fallback note on listing failure", () => {
@@ -146,6 +147,33 @@ describe("panel markup from props alone", () => {
     expect(taken).toContain('data-testid="v3-switch-to-upgrade"');
     expect(configure({ upgradeTargets: [{ name: "other" }] })).not.toContain('data-testid="v3-name-taken"');
     expect(configure({ modeIntent: "upgrade", upgradeTargets: [{ name: "api" }] })).not.toContain('data-testid="v3-name-taken"');
+  });
+
+  it("configure: required inputs are shown, optional ones wait in a collapsed section", () => {
+    const inputs: DeclaredInput[] = [
+      { key: "REGION", type: "select", label: "Region", options: [{ label: "EU", value: "eu" }] },
+      { key: "NOTE", type: "string", label: "Note", required: false },
+    ];
+    const html = configure({ visibleInputs: inputs });
+    const section = /<section class="disclosure"[^>]*data-testid="v3-optional-inputs"[\s\S]*?<\/section>/.exec(html)![0];
+    expect(section).toContain('aria-expanded="false"');
+    expect(section).toContain("0 of 1 set");
+    expect(section).toMatch(/class="disclosure-body" hidden=""[\s\S]*v3-input-NOTE/);
+    expect(html.indexOf("v3-input-REGION")).toBeLessThan(html.indexOf("v3-optional-inputs"));
+    expect(html).not.toMatch(/disclosure-body[^>]*>[\s\S]*v3-input-REGION[\s\S]*<\/section>/);
+    // An invalid optional value keeps its section open so the error cannot hide.
+    const invalid = configure({ visibleInputs: [{ key: "N", type: "integer", label: "N", required: false }], inputValues: { workerName: "api", N: "abc" } });
+    expect(invalid).toContain('aria-expanded="true"');
+  });
+
+  it("configure: while planning the button shows a spinner and says what it waits for", () => {
+    const idle = configure();
+    expect(idle).not.toContain("spinner");
+    expect(idle).not.toContain('data-testid="v3-planning"');
+    const planning = configure({ planning: true, continueDisabled: true });
+    expect(planning).toContain('class="spinner"');
+    expect(planning).toContain("Checking with Cloudflare…");
+    expect(planning).toContain('data-testid="v3-planning"');
   });
 
   it("configure: several workers keep release names; invalid name shows its error", () => {

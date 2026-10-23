@@ -200,17 +200,23 @@ async function domainsHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Re
       ? (await accountClient.listDnsRecords(zone.id)).filter((record) => ADDRESS_RECORD_TYPES.has(record.type)).map((record) => ({ name: record.name.toLowerCase(), type: record.type, ...(record.content !== undefined ? { content: record.content } : {}) }))
       : [];
     const workerDomains = (await accountClient.listWorkerDomains()).map((domain) => ({ hostname: domain.hostname.toLowerCase(), ...(domain.service ? { service: domain.service } : {}), ...(domain.zone_name ? { zone: domain.zone_name.toLowerCase() } : {}) }));
+    // Per project: the hostnames bound to it, and the status Cloudflare reports
+    // for each (a new domain stays pending until DNS and its certificate are done).
     const pagesDomains: Record<string, string[]> = {};
+    const pagesDomainStatus: Record<string, Record<string, string>> = {};
     for (const project of pagesProjects) {
       try {
-        pagesDomains[project] = (await accountClient.listPagesDomains(project)).map((domain) => domain.name.toLowerCase());
+        const domains = await accountClient.listPagesDomains(project);
+        pagesDomains[project] = domains.map((domain) => domain.name.toLowerCase());
+        pagesDomainStatus[project] = Object.fromEntries(domains.map((domain) => [domain.name.toLowerCase(), domain.status ?? "unknown"]));
       } catch (error) {
         // A project that does not exist yet has no domains.
         if ((error as { kind?: unknown }).kind !== "not-found") throw error;
         pagesDomains[project] = [];
+        pagesDomainStatus[project] = {};
       }
     }
-    return c.json({ accountId: body.accountId, zones: zones.map((candidate) => candidate.name).sort(), ...(zone ? { zone: zone.name, records } : {}), workerDomains, pagesDomains });
+    return c.json({ accountId: body.accountId, zones: zones.map((candidate) => candidate.name).sort(), ...(zone ? { zone: zone.name, records } : {}), workerDomains, pagesDomains, pagesDomainStatus });
   } catch (error) {
     if (isUpstreamError(error)) {
       return c.json({ error: "upstream", upstream: error.kind }, 502);

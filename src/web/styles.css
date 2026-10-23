@@ -171,18 +171,35 @@
   input[type="checkbox"].switch:checked::after {
     @apply translate-x-4;
   }
-  .result-open {
-    @apply my-4 flex flex-wrap items-center gap-3;
+  .result-links {
+    @apply m-0 my-4 flex list-none flex-col gap-3 p-0;
   }
-  .result-open a.open-app {
-    @apply inline-flex max-w-full items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white no-underline shadow-sm hover:bg-blue-700;
+  .result-link {
+    @apply flex flex-col items-start gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-3;
+  }
+  .result-link-kind {
+    @apply text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .result-link a.open-app {
+    @apply inline-flex max-w-full items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white no-underline shadow-sm hover:bg-blue-700;
     overflow-wrap: anywhere;
   }
-  .result-open a.open-more {
-    @apply text-sm text-blue-700 underline;
+  .result-link a.open-more {
+    @apply max-w-full text-sm font-medium text-blue-700 underline;
     overflow-wrap: anywhere;
   }
-  .result-open a.open-dashboard,
+  .domain-status {
+    @apply m-0 text-sm;
+  }
+  .domain-live {
+    @apply font-medium text-emerald-700;
+  }
+  .domain-pending {
+    @apply text-slate-600;
+  }
+  .domain-problem {
+    @apply text-red-700;
+  }
   .result-card a.open-dashboard {
     @apply text-sm text-blue-700 underline;
   }
@@ -338,6 +355,36 @@
   /* One HTTP unit's custom-domain choices in the Configure step. */
   .domain-unit {
     @apply mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 p-3;
+  }
+  .spinner {
+    @apply mr-2 inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent align-[-2px];
+  }
+  .section-label {
+    @apply mb-1 mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .disclosure {
+    @apply mt-2 rounded-lg border border-slate-200 bg-white;
+  }
+  .disclosure-head {
+    @apply flex w-full cursor-pointer items-baseline gap-2 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-none hover:bg-slate-50;
+  }
+  .disclosure-head:disabled {
+    @apply cursor-default opacity-100 hover:bg-transparent;
+  }
+  .disclosure-chevron {
+    @apply inline-block text-slate-400 transition-transform;
+  }
+  .disclosure[data-open="true"] .disclosure-chevron {
+    @apply rotate-90;
+  }
+  .disclosure-summary {
+    @apply ml-auto min-w-0 truncate text-xs font-normal text-slate-500;
+  }
+  .disclosure-body {
+    @apply border-t border-slate-100 px-3 pb-3 pt-1;
+  }
+  .disclosure-body > .field {
+    @apply mt-2;
   }
   .name-rows {
     @apply flex flex-col gap-2;

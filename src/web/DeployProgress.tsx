@@ -61,6 +61,18 @@ function itemFor(unit: GraphPlanUnit | undefined, step: { unitId: string; resour
   return { key: step.unitId, label: pages ? "Pages site" : "Worker", ...(name ? { name } : {}) };
 }
 
+// Every Worker and Pages site is read back once more after its last action: a
+// step of the item from the start, so the item is not "done" before that
+// verification has run and never steps back from done to verifying.
+function expectedPostchecks(plan: GraphPlan): Array<{ unitId: string; resource: string; phase: string }> {
+  return plan.units.flatMap((unit) => {
+    const diffs = unit.diffs ?? [];
+    if (unit.kind === "worker" && diffs.some((diff) => diff.resource === "worker")) return [{ unitId: unit.unitId, resource: "worker", phase: "postcheck" }];
+    if (unit.kind.startsWith("pages") && diffs.some((diff) => diff.resource === "deployment")) return [{ unitId: unit.unitId, resource: "deployment", phase: "pages-postcheck" }];
+    return [];
+  });
+}
+
 /**
  * The visible items for a graph plan with live statuses (postchecks included).
  * Pure: the same plan always yields the same items in plan order.
@@ -71,7 +83,7 @@ export function graphProgressItems(plan: GraphPlan, statuses: GraphStepStatus[],
   const units = new Map(plan.units.map((unit) => [unit.unitId, unit]));
   const steps = [
     ...graphActionsForPlan(plan).map((action) => ({ unitId: action.unitId, resource: action.resource, phase: action.phase, ...(action.name !== undefined ? { name: action.name } : {}) })),
-    ...checks.map((check) => ({ unitId: check.unitId, resource: check.resource, phase: check.phase })),
+    ...expectedPostchecks(plan),
   ];
   const groups = new Map<string, { item: { key: string; label: string; name?: string }; unitId: string; steps: Array<{ phase: string; status?: GraphStepStatus }> }>();
   for (const step of steps) {

@@ -179,6 +179,8 @@ export interface DomainsEnvelope {
   records?: Array<{ name: string; type: string; content?: string }>;
   workerDomains: Array<{ hostname: string; service?: string; zone?: string }>;
   pagesDomains: Record<string, string[]>;
+  /** Per Pages project and hostname: the status Cloudflare reports ("active" once DNS and the certificate are done). */
+  pagesDomainStatus?: Record<string, Record<string, string>>;
 }
 
 export async function getDomains(csrf: string, accountId: string, opts: { zone?: string; pagesProjects?: string[] } = {}): Promise<DomainsEnvelope> {

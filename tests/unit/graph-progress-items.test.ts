@@ -75,6 +75,27 @@ describe("graphProgressItems", () => {
     expect(graphProgressItems(plan(), steps, [{ unitId: "main", resource: "worker", action: "create", phase: "postcheck", state: "done" }]).find((item) => item.key === "main")).toMatchObject({ state: "done", verified: true });
   });
 
+  it("never reads done before its verification, so an item does not step back from done to verifying", () => {
+    const actions = [
+      { unitId: "main", resource: "worker", action: "create", name: "api", phase: "create-worker", state: "done" as const, receipt: true },
+      { unitId: "main", resource: "deployment", action: "create", name: "api", phase: "activate", state: "done" as const, receipt: true },
+      { unitId: "site", resource: "pages-project", action: "create", name: "site", phase: "pages-create-project", state: "done" as const, receipt: true },
+      { unitId: "site", resource: "static-assets", action: "create", name: "site", phase: "pages-register-assets", state: "done" as const, receipt: true },
+      { unitId: "site", resource: "deployment", action: "create", name: "site", phase: "pages-deploy", state: "done" as const, receipt: true },
+    ];
+    const timeline = [
+      [],
+      [{ unitId: "main", resource: "worker", action: "create", phase: "postcheck", state: "running" as const }],
+      [{ unitId: "main", resource: "worker", action: "create", phase: "postcheck", state: "done" as const }, { unitId: "site", resource: "deployment", action: "create", phase: "pages-postcheck", state: "running" as const }],
+      [{ unitId: "main", resource: "worker", action: "create", phase: "postcheck", state: "done" as const }, { unitId: "site", resource: "deployment", action: "create", phase: "pages-postcheck", state: "done" as const }],
+    ];
+    const states = timeline.map((checks) => {
+      const items = graphProgressItems(plan(), actions, checks);
+      return ["main", "site"].map((key) => items.find((item) => item.key === key)!.state);
+    });
+    expect(states).toEqual([["running", "running"], ["running", "running"], ["done", "running"], ["done", "done"]]);
+  });
+
   it("statuses for unapproved phases never add a row", () => {
     const items = graphProgressItems(plan(), [
       { unitId: "main", resource: "worker", action: "create", name: "api", phase: "register-assets", state: "done", receipt: true },

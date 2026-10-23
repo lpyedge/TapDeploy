@@ -131,11 +131,13 @@ export async function uploadV3PagesAssets(
 ): Promise<void> {
   const { refs, dir } = v3PagesRefs(ctx, wranglerPath);
   const manifest = await buildPagesManifest(refs, dir);
-  const byHash = new Map<string, { hash: string; bytes: Uint8Array }>();
+  // Pages serves each file with the content type stored at upload: without
+  // one a browser downloads an HTML page instead of showing it.
+  const byHash = new Map<string, { hash: string; bytes: Uint8Array; contentType: string }>();
   for (const ref of refs) {
     const rooted = toPagesAssetPath(ref.path, dir);
     const hash = manifest[rooted];
-    if (hash) byHash.set(hash, { hash, bytes: ref.bytes });
+    if (hash) byHash.set(hash, { hash, bytes: ref.bytes, contentType: guessAssetContentType(rooted) });
   }
   const fetcher = createUploadProxy(ctx.csrf);
   const missing = await checkPagesMissingHashes(Object.values(manifest), { jwt, fetcher });
@@ -143,7 +145,10 @@ export async function uploadV3PagesAssets(
   if (toUpload.length > 0) {
     const buckets = planPagesBuckets(toUpload.map((entry) => ({ hash: entry.hash, size: entry.bytes.length })), ASSET_UPLOAD_BATCH_RAW_BYTES);
     for (const bucket of buckets) {
-      const files = bucket.map((item) => ({ hash: item.hash, bytes: byHash.get(item.hash)!.bytes }));
+      const files = bucket.map((item) => {
+        const { hash, bytes, contentType } = byHash.get(item.hash)!;
+        return { hash, bytes, contentType };
+      });
       await uploadPagesAssets(files, { jwt, fetcher });
     }
   }

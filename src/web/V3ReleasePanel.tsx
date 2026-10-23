@@ -1,3 +1,4 @@
+import { Spinner } from "./Spinner.js";
 import type { RefObject } from "react";
 import { Segmented } from "./Segmented.js";
 
@@ -81,7 +82,7 @@ export function V3ReleasePanel({
           onClick={() => onPrepare()}
           data-testid="v3-prepare"
         >
-          {busy ? "Verifying…" : `Verify ${releaseMode === "url" ? "release from link" : source ? source.label : "release"}`}
+          {busy ? <><Spinner />Verifying…</> : `Verify ${releaseMode === "url" ? "release from link" : source ? source.label : "release"}`}
         </button>
       </div>
     </>

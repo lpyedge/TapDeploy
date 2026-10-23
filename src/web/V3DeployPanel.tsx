@@ -3,7 +3,10 @@ import type { V3MachineSnapshot } from "./v3-flow-machine.js";
 import { GraphProgress, dashboardUrlForGraphPlan } from "./DeployProgress.js";
 import type { GraphStepStatus } from "./graph-deploy-runner.js";
 import { describeDiff, resourceLabel } from "./step-labels.js";
-import { declaredSecrets, type DeclaredInput } from "./V3ConfigurePanel.js";
+import { declaredSecrets, type DeclaredInput } from "./config-inputs.js";
+import { Spinner } from "./Spinner.js";
+import { resultLinks, type ResultLink } from "./result-links.js";
+import { V3DomainStatus } from "./V3DomainStatus.js";
 import { inputValueProblem } from "../manifest/input-validation.js";
 
 export interface SecretPrompt {
@@ -41,8 +44,11 @@ export function secretProblem(prompt: SecretPrompt, value: string): string | nul
  * list the approved identities that were created instead of a fake URL.
  * Everything shown is server-derived (plan diffs + verified outcome).
  */
-function V3SuccessCard({ snap, graphPlan, accountId, accounts }: {
+const LINK_KIND: Record<ResultLink["kind"], string> = { domain: "Custom domain", "workers-dev": "workers.dev", pages: "Pages site" };
+
+function V3SuccessCard({ snap, graphPlan, csrf, accountId, accounts }: {
   snap: V3MachineSnapshot;
+  csrf: string;
   graphPlan: GraphPlan | null;
   accountId: string;
   accounts: { id: string; name: string }[];
@@ -52,6 +58,7 @@ function V3SuccessCard({ snap, graphPlan, accountId, accounts }: {
   const workerName = created.find((d) => d.resource === "worker")?.name as string | undefined;
   const accountName = accounts.find((a) => a.id === accountId)?.name ?? accountId;
   const dashboard = dashboardUrlForGraphPlan(accountId, graphPlan);
+  const links = resultLinks(snap.deployUrls, graphPlan);
   return (
     <div className="result-card result-ok" data-testid="v3-result">
       <div className="result-title">
@@ -61,14 +68,18 @@ function V3SuccessCard({ snap, graphPlan, accountId, accounts }: {
           <p className="meta m-0">Every step was read back and verified on Cloudflare · account {accountName}</p>
         </div>
       </div>
-      {snap.deployUrls.length > 0 ? (
-        <div className="result-open">
-          {snap.deployUrls.map((url, index) => (
-            <a key={url} className={index === 0 ? "open-app" : "open-more"} href={url} target="_blank" rel="noopener noreferrer" data-testid={index === 0 ? "v3-result-url" : "v3-result-url-more"}>
-              Open {url.replace(/^https:\/\//, "").replace(/\/$/, "")}
-            </a>
+      {links.length > 0 ? (
+        <ul className="result-links" data-testid="v3-result-links">
+          {links.map((link, index) => (
+            <li key={link.url} className="result-link">
+              <span className="result-link-kind">{LINK_KIND[link.kind]}</span>
+              <a className={index === 0 ? "open-app" : "open-more"} href={link.url} target="_blank" rel="noopener noreferrer" data-testid={index === 0 ? "v3-result-url" : "v3-result-url-more"}>
+                Open {link.url.replace(/^https:\/\//, "").replace(/\/$/, "")}
+              </a>
+              {link.domain && <V3DomainStatus csrf={csrf} accountId={accountId} domain={link.domain} />}
+            </li>
           ))}
-        </div>
+        </ul>
       ) : (
         <p className="meta" data-testid="v3-result-no-url">
           No public address for this release{workerName ? " (workers.dev is off for this Worker)" : ""}.
@@ -98,6 +109,7 @@ function ErrorMessage({ message }: { message: string }) {
 export interface V3DeployPanelProps {
   snap: V3MachineSnapshot;
   graphPlan: GraphPlan | null;
+  csrf: string;
   accountId: string;
   accounts: AccountSummary[];
   modeIntent: "install" | "upgrade";
@@ -125,6 +137,7 @@ export interface V3DeployPanelProps {
 export function V3DeployPanel({
   snap,
   graphPlan,
+  csrf,
   accountId,
   accounts,
   modeIntent,
@@ -217,7 +230,7 @@ export function V3DeployPanel({
           <div className="actionbar">
             <button type="button" className="link text-sm" onClick={() => onBackToConfigure()} data-testid="v3-back-to-configure">Back</button>
             <button type="button" className="primary" disabled={busy || blocked || !secretsReady} onClick={() => onDeploy()} data-testid="v3-confirm-deploy">
-              {modeIntent === "upgrade" ? "Confirm and upgrade" : "Confirm and deploy"}
+              {busy ? <><Spinner />Checking with Cloudflare…</> : modeIntent === "upgrade" ? "Confirm and upgrade" : "Confirm and deploy"}
             </button>
           </div>
         </>
@@ -227,7 +240,7 @@ export function V3DeployPanel({
       )}
       {message && <ErrorMessage message={message} />}
       {finished && snap.deployOk !== null && (
-        snap.deployOk ? <V3SuccessCard snap={snap} graphPlan={graphPlan} accountId={accountId} accounts={accounts} />
+        snap.deployOk ? <V3SuccessCard snap={snap} graphPlan={graphPlan} csrf={csrf} accountId={accountId} accounts={accounts} />
           : (
             <div className={`result-card ${snap.deployPending ? "result-pending" : "result-fail"}`} data-testid="v3-result">
               <p className="m-0 font-semibold">{snap.deployPending ? "Still in progress at Cloudflare" : "Deployment did not complete"}</p>

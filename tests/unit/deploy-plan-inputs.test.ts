@@ -2,7 +2,7 @@
 // non-secret `workerName` input (server-side validated, publisher opt-in) and
 // fails closed otherwise. Pure function: no provider calls by construction.
 import { describe, expect, it } from "vitest";
-import { preparedGraphInputs } from "../../src/api/routes/deploy-plan.js";
+import { preparedGraphInputs } from "../../src/core/planning/unit-specs.js";
 import type { ConfigV3 } from "../../src/manifest/config-v3.js";
 
 const baseConfig = (inputs: ConfigV3["inputs"] = []): ConfigV3 => ({

@@ -7,6 +7,9 @@
 import { normalizeHostname } from "../core/deploy/custom-domains.js";
 import type { DomainsEnvelope, GraphDomainRequest } from "./api.js";
 
+/** The address records of each zone the operator looked at, by zone name. */
+export type RecordsByZone = Readonly<Record<string, ReadonlyArray<{ name: string; type: string; content?: string }>>>;
+
 /** An HTTP unit of the prepared release and the Worker / Pages project it targets. */
 export interface HttpUnit {
   unitId: string;
@@ -82,7 +85,7 @@ export function draftErrors(
   units: readonly HttpUnit[],
   drafts: Readonly<Record<string, UnitDomainDraft>>,
   facts: DomainsEnvelope | null,
-  recordsByZone: Readonly<Record<string, ReadonlyArray<{ name: string; type: string; content?: string }>>>,
+  recordsByZone: RecordsByZone,
   selfHostname?: string,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
@@ -107,7 +110,7 @@ export function domainRequest(
   units: readonly HttpUnit[],
   drafts: Readonly<Record<string, UnitDomainDraft>>,
   facts: DomainsEnvelope | null,
-  recordsByZone: Readonly<Record<string, ReadonlyArray<{ name: string; type: string; content?: string }>>>,
+  recordsByZone: RecordsByZone,
 ): GraphDomainRequest | undefined {
   const request: GraphDomainRequest = {};
   for (const unit of units) {

@@ -76,8 +76,8 @@ step that the user cannot get wrong:
    permissions; the token never reaches the page's JavaScript.
 3. **Pick the release ZIP** (the published URL or a local file). The server
    verifies every byte; nothing is compiled.
-4. **Configure:** new install or upgrade, then the form the config describes:
-   its inputs, the name of every Worker, Pages site and resource (the
+4. **Configure:** new install or upgrade, then the form the config describes
+   (what must be answered first, optional settings collapsed): its inputs, the name of every Worker, Pages site and resource (the
    publisher's names are suggestions), and an optional domain per Worker or
    Pages site. On upgrade the resources in use today are kept unless the config
    lets the user swap them.

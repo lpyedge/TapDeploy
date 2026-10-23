@@ -664,7 +664,7 @@ describe("V3 KV/D1 provider-id identity (never an id-titled create)", () => {
   }
 
   it("projects the Wrangler KV id as an identity claim, never a creation handle", async () => {
-    const { preparedGraphInputs } = await import("../../src/api/routes/deploy-plan.js");
+    const { preparedGraphInputs } = await import("../../src/core/planning/unit-specs.js");
     const config = {
       schemaVersion: 3,
       app: { id: "example/app", name: "App" },
@@ -856,7 +856,7 @@ describe("queue producer/consumer projection and registration", () => {
   }
 
   it("normalizes wrangler producers/consumers into explicit per-queue roles", async () => {
-    const { preparedGraphInputs } = await import("../../src/api/routes/deploy-plan.js");
+    const { preparedGraphInputs } = await import("../../src/core/planning/unit-specs.js");
     const config = {
       schemaVersion: 3,
       app: { id: "example/app", name: "App" },

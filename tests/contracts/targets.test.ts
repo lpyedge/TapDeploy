@@ -235,7 +235,7 @@ describe("domains route (read-only custom-domain discovery)", () => {
       if (url.includes("/zones/") && url.includes("/dns_records")) return jsonResponse(envelope([{ id: "r1", name: "www.example.com", type: "A", content: "192.0.2.1" }, { id: "r2", name: "example.com", type: "MX", content: "mx.example.com" }]));
       if (url.includes("/zones")) return jsonResponse(envelope([{ id: zone, name: "Example.com" }]));
       if (url.includes("/workers/domains")) return jsonResponse(envelope([{ id: "d1", hostname: "api.example.com", service: "api", zone_id: zone, zone_name: "example.com" }]));
-      if (url.includes("/pages/projects/site/domains")) return jsonResponse(envelope([{ id: "p1", name: "docs.example.com" }]));
+      if (url.includes("/pages/projects/site/domains")) return jsonResponse(envelope([{ id: "p1", name: "docs.example.com", status: "pending" }]));
       if (url.includes("/pages/projects/new-site/domains")) return jsonResponse({ success: false, errors: [{ code: 8000007, message: "not found" }] }, 404);
       return jsonResponse(envelope([]));
     }) as typeof fetch;
@@ -249,6 +249,7 @@ describe("domains route (read-only custom-domain discovery)", () => {
         records: [{ name: "www.example.com", type: "A", content: "192.0.2.1" }],
         workerDomains: [{ hostname: "api.example.com", service: "api", zone: "example.com" }],
         pagesDomains: { site: ["docs.example.com"], "new-site": [] },
+        pagesDomainStatus: { site: { "docs.example.com": "pending" }, "new-site": {} },
       });
       expect(calls.every((call) => call.method === "GET")).toBe(true);
     } finally { globalThis.fetch = origFetch; }

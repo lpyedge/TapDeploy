@@ -183,6 +183,12 @@ async function mockV3Api(page: Page, mocks: FlowMocks, planStatus?: { status: nu
   });
 }
 
+/** Optional Configure sections start collapsed: open one to reach its fields. */
+async function openSection(page: Page, testId: string): Promise<void> {
+  const toggle = page.getByTestId(`${testId}-toggle`);
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+}
+
 async function pasteV3Config(page: Page, text: string = V3_TEXT): Promise<void> {
   await expect(page.getByTestId("config-step")).toBeVisible();
   await page.getByTestId("config-input").fill(text);
@@ -354,6 +360,9 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-domains")).toBeVisible();
+    await expect(page.getByTestId("v3-domains-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("v3-domains-toggle")).toContainText("none");
+    await openSection(page, "v3-domains");
     await page.getByTestId("v3-domain-bind-main").check();
     await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
     await page.getByTestId("v3-domain-zone-main").selectOption("example.com");
@@ -399,6 +408,9 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-domains")).toBeVisible();
+    await expect(page.getByTestId("v3-domains-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("v3-domains-toggle")).toContainText("none");
+    await openSection(page, "v3-domains");
     await page.getByTestId("v3-domain-bind-main").check();
     await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
     await page.getByTestId("v3-domain-mode-existing-main").check();
@@ -514,17 +526,23 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
-    // Install asks for everything but offers no secret change; a required one blocks until valid.
+    // Required inputs are always shown; optional ones wait in a collapsed section. A required one blocks until valid.
     await expect(page.getByTestId("v3-secrets-change")).toHaveCount(0);
+    await expect(page.getByTestId("v3-input-RETENTION_DAYS")).toBeVisible();
+    await expect(page.getByTestId("v3-optional-inputs-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("v3-input-TAGS")).toBeHidden();
+    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("0 of 2 set");
     await expect(page.getByTestId("v3-input-EXPIRES")).toHaveAttribute("type", "date");
     await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
     await page.getByTestId("v3-input-REGION").selectOption("eu");
     await page.getByTestId("v3-input-RETENTION_DAYS").fill("99");
     await expect(page.getByTestId("v3-input-RETENTION_DAYS-error")).toHaveText("at most 30");
     await page.getByTestId("v3-input-RETENTION_DAYS").fill("7");
+    await openSection(page, "v3-optional-inputs");
     await page.getByTestId("v3-input-TAGS-a").check();
     await page.getByTestId("v3-input-TAGS-b").check();
     await page.getByTestId("v3-input-EXPIRES").fill("2027-02-28");
+    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("2 of 2 set");
     await page.getByTestId("v3-to-deploy").click();
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     expect((mocks.planBodies[0] as Record<string, unknown>).inputs).toEqual({ workerName: "api", REGION: "eu", RETENTION_DAYS: "7", TAGS: "a,b", EXPIRES: "2027-02-28" });
@@ -534,6 +552,9 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-mode-upgrade").check();
     await page.getByTestId("v3-upgrade-target").selectOption("api-live");
     await expect(page.getByTestId("v3-input-REGION")).toHaveCount(0);
+    // On upgrade nothing is required: every setting sits in the collapsed section, empty keeps the current value.
+    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("empty keeps the current value");
+    await openSection(page, "v3-optional-inputs");
     await expect(page.getByTestId("v3-input-TAGS")).toContainText("Alpha");
     await expect(page.getByTestId("v3-secrets-change")).toBeVisible();
     await page.getByTestId("v3-input-RETENTION_DAYS").fill("14");
@@ -614,7 +635,9 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
-    // Install: editable, prefilled from the release; an existing name is reused.
+    // Install: collapsed with a summary; opened, editable, prefilled from the release, an existing name is reused.
+    await expect(page.getByTestId("v3-names-toggle")).toContainText("suggested by the app");
+    await openSection(page, "v3-names");
     await expect(page.getByTestId("v3-name-r2-media")).toHaveValue("media");
     await expect(page.getByTestId("v3-names")).toContainText("it will be reused");
     await page.getByTestId("v3-name-r2-media").fill("photos");
@@ -627,6 +650,8 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-back-to-configure").click();
     await page.getByTestId("v3-mode-upgrade").check();
     await page.getByTestId("v3-upgrade-target").selectOption("api");
+    await expect(page.getByTestId("v3-names-toggle")).toContainText("kept as today, some can change");
+    await openSection(page, "v3-names");
     await expect(page.getByTestId("v3-name-r2-media")).toBeDisabled();
     await expect(page.getByTestId("v3-name-r2-media")).toHaveValue("live-media");
     await expect(page.getByTestId("v3-name-r2-cache")).toBeEditable();
@@ -805,8 +830,11 @@ test.describe("prebuilt UI flow", () => {
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
-  test("pages flow completes the asset handoff and shows the verified address", async ({ page }) => {
+  test("pages flow completes the asset handoff, shows each address apart and watches the custom domain until it is live", async ({ page }) => {
+    await page.clock.install();
     const mocks = newMocks();
+    // Cloudflare keeps a new Pages domain pending until DNS and its certificate are done.
+    let domainStatus = "pending";
     const config = JSON.stringify({
       schemaVersion: 3,
       app: { id: "example/site", name: "Site" },
@@ -815,6 +843,9 @@ test.describe("prebuilt UI flow", () => {
       units: [{ id: "site", kind: "pages", wrangler: "wrangler.jsonc" }],
     });
     await mockBase(page, mocks);
+    await page.route("**/api/cloudflare/domains", (route) =>
+      json(route, { accountId: "a".repeat(32), zones: ["example.com"], workerDomains: [], pagesDomains: { site: ["www.example.com"] }, pagesDomainStatus: { site: { "www.example.com": domainStatus } } }),
+    );
     await page.route("**/api/deploy/prepare", (route) =>
       json(route, { releaseProof: "proof-p", releaseSummary: { archiveSha256: "a".repeat(64), manifestDigest: "b".repeat(64), entryCount: 3 } }),
     );
@@ -827,6 +858,7 @@ test.describe("prebuilt UI flow", () => {
             { resource: "pages-project", action: "create", name: "site" },
             { resource: "static-assets", action: "create", name: "site" },
             { resource: "deployment", action: "create", name: "site" },
+            { resource: "pages-custom-domain", action: "attach", name: "www.example.com" },
           ] }],
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
@@ -867,6 +899,7 @@ test.describe("prebuilt UI flow", () => {
         expect(Object.keys(manifest).sort()).toEqual(["/app.js", "/index.html"]);
         return json(route, { ok: true, result: { deploymentId: "dep-1" }, phaseReceipt: "p-dep" });
       }
+      if (phase === "reconcile-domains") return json(route, { ok: true, result: {}, phaseReceipt: "p-domain" });
       if (phase === "pages-postcheck") {
         expect(args.deploymentId).toBe("dep-1");
         return json(route, { ok: true, result: { succeeded: true, url: "https://site.pages.dev" }, phaseReceipt: "p-post" });
@@ -889,8 +922,21 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     await page.getByTestId("v3-confirm-deploy").click();
     await expect(page.getByTestId("v3-result")).toContainText("Deployment succeeded");
-    await expect(page.getByTestId("v3-result-url")).toContainText("Open site.pages.dev");
-    await expect(page.getByTestId("v3-result-url")).toHaveAttribute("href", "https://site.pages.dev/");
+    // Each address is its own row, told apart by kind; the custom domain comes first.
+    const rows = page.locator('[data-testid="v3-result-links"] > li');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText("Custom domain");
+    await expect(page.getByTestId("v3-result-url")).toContainText("Open www.example.com");
+    await expect(page.getByTestId("v3-result-url")).toHaveAttribute("href", "https://www.example.com/");
+    await expect(rows.nth(1)).toContainText("Pages site");
+    await expect(page.getByTestId("v3-result-url-more")).toHaveAttribute("href", "https://site.pages.dev/");
+    // The domain is bound but Cloudflare is still verifying it: say so, then show it live once it is.
+    await expect(page.getByTestId("v3-domain-pending")).toContainText("verifying DNS and issuing the certificate");
+    await expect(page.getByTestId("v3-domain-pending")).toContainText("Cloudflare status: pending");
+    domainStatus = "active";
+    await page.clock.fastForward(6000);
+    await expect(page.getByTestId("v3-domain-live")).toBeVisible();
+    await expect(page.getByTestId("v3-domain-pending")).toHaveCount(0);
     await expect(page.getByTestId("v3-result-dashboard")).toHaveAttribute("href", /dash\.cloudflare\.com/);
     // The browser performed the JWT handoff upload before the deployment.
     expect(uploaded).toEqual(["check-missing", "upload", "upsert"]);

@@ -25,11 +25,16 @@ the Deploy page; there is no separate Connect, progress or done page).
 |---|---|
 | Config | One textarea (URL or JSON) and one button; `.json` can be dropped; `?config=` pre-fills and auto-submits once. Loading a config goes straight to Cloudflare consent (or straight into the flow when the session already covers that exact config); there is no Connect screen, and an expired session re-authorizes the same config directly. |
 | Release | Inline segmented choice `Download URL | Local ZIP file`, one Prepare button; switching clears the other side. Prebuilt ZIPs only. |
-| Configure | Inline `New | Upgrade`. New: editable Worker name (pre-filled from the sealed release); a name that already exists is flagged with a switch to Upgrade. Upgrade: read-only dropdown of the account's Workers, manual entry if listing fails. Switching mode keeps the typed name. The server enforces the choice at plan time: New never updates a live Worker and Upgrade never creates one (`TARGET_MODE_CONFLICT`, zero writes). Per Worker/Pages unit, an optional custom domain from the account's zones (`<sub>.<zone>`); replacing what serves a hostname today needs explicit consent; on Upgrade the bound hostnames are listed and can be unbound (with consent). A release with Hyperdrive bindings requires picking one of the account's Hyperdrive configurations per binding. |
+| Configure | Inline `New | Upgrade`. New: editable Worker name (pre-filled from the sealed release); a name that already exists is flagged with a switch to Upgrade. Upgrade: read-only dropdown of the account's Workers, manual entry if listing fails. Switching mode keeps the typed name. The server enforces the choice at plan time: New never updates a live Worker and Upgrade never creates one (`TARGET_MODE_CONFLICT`, zero writes). What must be answered (Worker name, required inputs, Hyperdrive) is always shown; everything optional (optional inputs and secret changes, resource names, custom domains) is a collapsed section that shows its current state and opens on demand, or stays open while it holds an error. Per Worker/Pages unit, an optional custom domain from the account's zones (`<sub>.<zone>`); replacing what serves a hostname today needs explicit consent; on Upgrade the bound hostnames are listed and can be unbound (with consent). A release with Hyperdrive bindings requires picking one of the account's Hyperdrive configurations per binding. |
 | Deploy | Review (effective names, create/update/preserve, cost, secrets) → confirm → inline progress → result card. |
 
-Result card: a verified public URL is the large link; without one it lists the
-created identities and says why; a Cloudflare dashboard link is **always**
+Result card: every verified address is its own row, labelled (custom domain,
+workers.dev, Pages site). A custom domain row keeps checking until the domain
+serves, because Cloudflare answers the bind at once but DNS and the certificate
+follow (a Pages domain reads `pending` for a few minutes): Pages domains by the
+status the domains endpoint reports, Worker domains by an opaque HTTPS probe;
+it says so while it waits and offers a re-check if the watch gives up. Without
+any address the card lists the created identities and says why; a Cloudflare dashboard link is **always**
 present. The dashboard link is derived from the approved plan's effective
 Worker or Pages project name for any action (create, update, preserve) and falls
 back to the account home. URLs are never invented. Every step has one primary
@@ -68,39 +73,6 @@ release variables; a key the release already sets is refused. On upgrade
 `replaceSecrets` lists the secrets the user chose to change: their policy
 becomes `replace`, the plan shows `secret: update`, and the new value rides in
 the version upload instead of an inherit directive.
-
-Result card: a verified public URL is the large link; without one it lists the
-created identities and says why; a Cloudflare dashboard link is **always**
-present. The dashboard link is derived from the approved plan's effective
-Worker or Pages project name for any action (create, update, preserve) and falls
-back to the account home. URLs are never invented. Every step has one primary
-button whose enablement comes from the state machine plus input validation; the
-stepper follows the machine stage.
-
-Worker name override: any valid name (`^[a-z0-9-]{1,63}$`, plus the declared
-input's own validation when the config declares one) for a release with exactly
-one Worker (a Worker plus Pages counts as one). With zero or several Workers the
-release names are kept. Resource and Pages project names (`names` in the plan
-request, `src/core/planning/resource-names.ts`): at install every R2 bucket,
-D1 database (unless bound by id), queue and Vectorize index of the release, a
-`resources` unit's KV namespace, and every Pages project, may be renamed; the
-release's names are suggestions. The mapping is applied to the prepared units
-and the config before any spec or graph exists. On upgrade the Configure step
-sends the names the target Worker binds today (read from its settings) and the
-plan's rebind guard refuses any other, except for resources whose config
-entry says `onUpgrade: "change"`: their bindings are marked `changeOnUpgrade`
-and may move to another (or a new) resource. Service references never change.
-
-Config inputs (`src/manifest/input-validation.ts`, shared by browser and
-server): `requiredWhen` decides the mode an input is asked in, and the plan
-request is refused (`INVALID_INPUT`) for a value that is missing, not asked in
-that mode or breaks the declared type and `validation`. Non-secret inputs are
-merged into the Worker's `vars` when the specs are built, so the version
-upload and the postcheck treat them like release variables; a key the release
-already sets is refused. On upgrade `replaceSecrets` lists the prompt secrets
-the user chose to change: their policy becomes `replace`, the plan shows
-`secret: update`, and the new value rides in the version upload instead of an
-inherit directive.
 
 ## 3. Sealed-graph protocol (do not weaken)
 
@@ -147,19 +119,20 @@ only upper bound (Cloudflare answers `invalid_scope` beyond it).
 ```
 src/api/routes/   HTTP boundary: auth, accounts (accounts, targets, domains, Hyperdrive list), deploy-prepare/plan/step, asset-upload, release-download
 src/auth/         OAuth, tx, session, cookies, CSRF, scope ledger (single source of scope truth)
-src/core/planning/ graph, units, operation support (capability gate), digest, snapshot, drift, execution context
+src/core/planning/ graph, units, unit-specs (release → sealed specs), request-inputs, plan + per-family planners (worker-resource-planners, rebind-guards, plan-domains), operation support (capability gate), digest, snapshot, drift, execution context
 src/core/deploy/  step phases, bindings, secrets, postcheck, bootstrap, R2 privacy guard, domains, pages
 src/cloudflare/   provider adapters (models, resources, assets, pages, client)
 src/manifest/     config-v3 (contract), wrangler-v3 (normalization: schema, keys, resources)
 src/release/      prebuilt ZIP unpack + safety lint, per-unit bundles, artifact proof
-src/web/          App.tsx (V3 flow), v3-flow-machine.ts, graph-deploy-runner.ts (GraphDeployRunner), ConfigEntry, Shell
+src/web/          App.tsx (session + config entry), V3Flow.tsx (release → configure → deploy), the V3*Panel components, configure-model.ts / use-configure-form.ts (Configure state, pure plan request), v3-flow-machine.ts, graph-deploy-runner.ts (GraphDeployRunner)
 src/runtime/      node.ts (:8787), workers.ts
 ```
 
 - Frontend state: `V3FlowMachine` stages `release → configure → deploy → done`,
   explicit transition table, illegal jumps throw, upstream changes clear
-  downstream caches, a mismatch returns to an empty `release`. `V3Flow` is view
-  code only.
+  downstream caches, a mismatch returns to an empty `release`. `V3Flow` wires
+  state to the panels; what the Configure step means (units, readiness, the plan
+  request) is pure code in `configure-model.ts`.
 - Deploy driver: `GraphDeployRunner` (stable entry `runGraphDeploy`) runs actions,
   then Worker postchecks, then Pages postchecks. A Worker deployment id never
   enters the Pages loop.
@@ -182,7 +155,9 @@ carrier class must be an exported `WorkflowEntrypoint` subclass, bound by the
 version, schedules read back. Durable Object: own-script class, binding plus the
 single pure new-class migration (section 3). RateLimit: version metadata binding
 only. workers.dev: only when the release declares `workers_dev: true`; the URL is
-built from provider reads. Pages: static direct upload with hashed assets;
+built from provider reads. Pages: static direct upload with hashed assets, each stored with the content
+type of its extension (without one a browser downloads an HTML page; a hash
+already stored keeps the type it was stored with);
 Functions (`_worker.js`, `functions/`) are refused at prepare. Routes: explicit
 zone opt-in, unknown zones or duplicate patterns fail closed. Custom domains:
 chosen only by the operator (a config with a Worker/Pages unit implies
