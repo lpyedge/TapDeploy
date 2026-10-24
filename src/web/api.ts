@@ -43,7 +43,7 @@ export interface ApiFailure extends Error {
   issues?: string[];
 }
 
-function failure(status: number, body: unknown): ApiFailure {
+export function failure(status: number, body: unknown): ApiFailure {
   const detail = extractError(body, status);
   const err: ApiFailure = new Error(detail.message) as ApiFailure;
   err.status = status;
@@ -68,7 +68,9 @@ function extractError(
     const upstream = kind === "upstream" && typeof (b as { upstream?: unknown }).upstream === "string" ? `Cloudflare answered with an error (${(b as { upstream: string }).upstream})` : undefined;
     // A bare provider kind ("unknown", "upstream") adds nothing when a detail explains it.
     const label = upstream ?? (detail && (kind === "unknown" || kind === "upstream") ? undefined : kind);
-    const message = [label, detail, ...(issues ?? [])].filter(Boolean).join("; ");
+    const message = kind === "forbidden"
+      ? "Cloudflare denied this action: the account you signed in with lacks a permission the install needs. Signing in again will not help; check the account's role or choose another account."
+      : [label, detail, ...(issues ?? [])].filter(Boolean).join("; ");
     if (message) {
       return { message, kind, detail, issues };
     }
@@ -112,12 +114,16 @@ async function request(
   return json;
 }
 
+// The sign-in itself is no good (expired, revoked, CSRF/origin refused): signing in
+// again for the same config is the way forward. A provider "forbidden" is different:
+// the sign-in is valid but the account lacks a permission, and signing in again
+// would only loop.
 export function isAuthFailure(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
     return false;
   }
-  const status = (error as { status?: number }).status;
-  return status === 401 || status === 403;
+  const { status, kind } = error as { status?: number; kind?: string };
+  return status === 401 || (status === 403 && kind !== "forbidden");
 }
 
 export async function getSession(): Promise<SessionState> {
@@ -179,12 +185,15 @@ export interface DomainsEnvelope {
   records?: Array<{ name: string; type: string; content?: string }>;
   workerDomains: Array<{ hostname: string; service?: string; zone?: string }>;
   pagesDomains: Record<string, string[]>;
-  /** Per Pages project and hostname: the status Cloudflare reports ("active" once DNS and the certificate are done). */
-  pagesDomainStatus?: Record<string, Record<string, string>>;
 }
 
 export async function getDomains(csrf: string, accountId: string, opts: { zone?: string; pagesProjects?: string[] } = {}): Promise<DomainsEnvelope> {
   return (await request("/api/cloudflare/domains", csrf, { accountId, ...opts })) as DomainsEnvelope;
+}
+
+/** The status Cloudflare reports for one Pages custom domain ("active" once DNS and the certificate are done; "missing" when it is not bound). */
+export async function getPagesDomainStatus(csrf: string, accountId: string, project: string, hostname: string): Promise<string> {
+  return ((await request("/api/cloudflare/pages-domain-status", csrf, { accountId, project, hostname })) as { status: string }).status;
 }
 
 /** Names of the account's Hyperdrive configurations (never connection details). */
@@ -238,7 +247,8 @@ export interface GraphPrepareEnvelope {
  */
 export async function prepareReleaseZip(
   csrf: string,
-  bytes: Uint8Array,
+  zip: Blob,
+  signal?: AbortSignal,
 ): Promise<GraphPrepareEnvelope> {
   let res: Response;
   try {
@@ -249,7 +259,8 @@ export async function prepareReleaseZip(
         "Content-Type": "application/zip",
         ...(csrf ? { "x-tapdeploy-csrf": csrf } : {}),
       },
-      body: bytes as unknown as BodyInit,
+      body: zip,
+      ...(signal ? { signal } : {}),
     });
   } catch (error) {
     const err: ApiFailure = new Error(`network error: ${String(error)}`) as ApiFailure;
@@ -299,6 +310,8 @@ export interface GraphPlanEnvelope {
   executionContext?: unknown;
   approval?: unknown;
   bundleDigests?: Record<string, string>;
+  /** Non-secret dispatch-order advice (unit dependency edges); never authority. */
+  schedulerHints?: unknown;
   paidRisk?: unknown;
   error?: string;
   detail?: string;

@@ -12,16 +12,18 @@
 // tests/contracts/graph-e2e-hono.test.ts.
 
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { zipSync } from "fflate";
+import { createHash } from "node:crypto";
 
 import { buildValidZip } from "../unit/zip-builder.js";
 import { graphActionsForPlan, graphPhaseForDiff, runGraphDeploy } from "../../src/web/graph-deploy-runner.js";
 import {
-  retainV3SourceBytes,
   v3ModuleBytes,
   v3UnitWorkerPaths,
   v3WorkerStepBytes,
 } from "../../src/web/release.js";
 import { doGraphStep, fetchGraphPlan, prepareReleaseZip } from "../../src/web/api.js";
+import { retainedSource } from "../unit/retained-source.js";
 import { assetUploadHash } from "../../src/cloudflare/assets/manifest.js";
 
 const CSRF = "csrf-v3-fixture-0123456789";
@@ -85,6 +87,10 @@ interface FlowMocks {
   authStarts: number;
   compilerRequests: string[];
   unexpectedApi: string[];
+  /** When set, the first R2 step waits for it so a test can act mid-deploy. */
+  stepGate?: Promise<void>;
+  /** When set, the plan response carries these scheduler hints. */
+  schedulerHints?: unknown;
 }
 
 async function mockBase(page: Page, mocks: FlowMocks, sessionHash = "v3-session-config-hash"): Promise<{ accountId: string }> {
@@ -121,7 +127,7 @@ async function mockBase(page: Page, mocks: FlowMocks, sessionHash = "v3-session-
   // dev proxy). Records compiler pulls and any /api call that escaped above.
   page.on("request", (req) => {
     const url = req.url();
-    if (url.includes("/api/") && !url.includes("/api/auth/session") && !url.includes("/api/auth/check-config") && !url.includes("/api/cloudflare/accounts") && !url.includes("/api/cloudflare/targets") && !url.includes("/api/cloudflare/domains") && !url.includes("/api/cloudflare/hyperdrive") && !url.includes("/api/cloudflare/inventory") && !url.includes("/api/auth/start") && !url.includes("/api/deploy/prepare") && !url.includes("/api/deploy/plan") && !url.includes("/api/deploy/step") && !url.includes("/api/upload/assets")) {
+    if (url.includes("/api/") && !url.includes("/api/auth/session") && !url.includes("/api/auth/check-config") && !url.includes("/api/cloudflare/accounts") && !url.includes("/api/cloudflare/targets") && !url.includes("/api/cloudflare/domains") && !url.includes("/api/cloudflare/pages-domain-status") && !url.includes("/api/cloudflare/hyperdrive") && !url.includes("/api/cloudflare/inventory") && !url.includes("/api/auth/start") && !url.includes("/api/deploy/prepare") && !url.includes("/api/deploy/plan") && !url.includes("/api/deploy/step") && !url.includes("/api/upload/assets")) {
       mocks.unexpectedApi.push(`${req.method()} ${url}`);
     }
     if (/\.wasm$|esbuild|compiler/i.test(url)) mocks.compilerRequests.push(url);
@@ -146,7 +152,7 @@ async function mockV3Api(page: Page, mocks: FlowMocks, planStatus?: { status: nu
     const body = route.request().postDataJSON() as Record<string, unknown>;
     mocks.planBodies.push(body);
     if (planStatus) return json(route, planStatus.body, planStatus.status);
-    return json(route, graphPlanBody());
+    return json(route, { ...graphPlanBody(), ...(mocks.schedulerHints !== undefined ? { schedulerHints: mocks.schedulerHints } : {}) });
   });
   await page.route("**/api/deploy/step", async (route) => {
     const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
@@ -155,6 +161,7 @@ async function mockV3Api(page: Page, mocks: FlowMocks, planStatus?: { status: nu
     const seen = new Set(((args.receipts ?? []) as unknown[]).map(String));
     const phase = String(body.phase ?? "");
     if (phase === "create-r2-buckets") {
+      if (mocks.stepGate) await mocks.stepGate;
       return json(route, { ok: true, result: {}, phaseReceipt: "r-r2" });
     }
     if (phase === "create-worker") {
@@ -207,11 +214,12 @@ test.describe("prebuilt UI flow", () => {
     await mockV3Api(page, mocks);
     await page.goto("/");
     await pasteV3Config(page);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zip });
     await expect(page.getByTestId("v3-prepare")).toBeEnabled();
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
+    // The step change moves keyboard/screen-reader focus to the flow heading.
+    await expect(page.locator('[data-testid="v3-flow"] h2')).toBeFocused();
     // Install-new worker name is always editable, prefilled from the release.
     await expect(page.getByTestId("v3-input-workerName")).toHaveValue("api");
     await page.getByTestId("v3-to-deploy").click();
@@ -272,19 +280,319 @@ test.describe("prebuilt UI flow", () => {
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
-  test("release source is single-select: URL or file, prepare gated", async ({ page }) => {
+  test("release link and file share one page, prepare gated", async ({ page }) => {
     const mocks = newMocks();
     await mockV3Api(page, mocks);
     await page.goto("/");
     await pasteV3Config(page);
-    // URL mode with an empty address keeps Prepare disabled.
+    // Nothing to verify yet: no link and no file keeps Verify disabled.
     await page.getByTestId("v3-asset-url").fill("");
     await expect(page.getByTestId("v3-prepare")).toBeDisabled();
-    // File mode without a chosen file keeps Prepare disabled too.
-    await page.getByTestId("v3-source-file-mode").check();
+    // A chosen file takes over from the link on the same page; removing it hands back to the link.
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await expect(page.getByTestId("v3-local-zip-name")).toHaveText("release.zip");
+    await expect(page.getByTestId("v3-asset-url")).toBeDisabled();
+    await expect(page.getByTestId("v3-prepare")).toBeEnabled();
+    await expect(page.getByTestId("v3-prepare")).toContainText("Verify release.zip");
+    await page.getByTestId("v3-local-zip-clear").click();
+    await expect(page.getByTestId("v3-asset-url")).toBeEnabled();
     await expect(page.getByTestId("v3-prepare")).toBeDisabled();
     expect(mocks.prepareBodies).toEqual([]);
     expect(mocks.planBodies).toEqual([]);
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["mobile", { width: 390, height: 844 }]] as const) {
+    test(`cancel while the installer verifies returns to the Release step without an error (${label})`, async ({ page }) => {
+      await page.setViewportSize(size);
+      const mocks = newMocks();
+      await mockV3Api(page, mocks);
+      let held: Route | undefined;
+      await page.unroute("**/api/deploy/prepare");
+      await page.route("**/api/deploy/prepare", (route) => { held = route; });
+      await page.goto("/");
+      await pasteV3Config(page);
+      await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+      await page.getByTestId("v3-prepare").click();
+      await expect(page.getByTestId("v3-release-stage")).toHaveText("Verifying with the installer…");
+      await expect(page.getByTestId("v3-prepare")).toBeDisabled();
+      await page.getByTestId("v3-release-cancel").click();
+      await expect(page.getByTestId("v3-release-stage")).toHaveText("");
+      await expect(page.getByTestId("v3-release-cancel")).toHaveCount(0);
+      await expect(page.getByTestId("v3-prepare")).toBeEnabled();
+      await expect(page.getByTestId("v3-error")).toHaveCount(0);
+      await expect(page.getByTestId("v3-configure")).toHaveCount(0);
+      // The late server answer of the cancelled run must not install a release.
+      await held?.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ releaseProof: "late-proof", releaseSummary: { archiveSha256: "a".repeat(64), manifestDigest: "b".repeat(64), entryCount: 1, units: [] } }) });
+      await page.waitForTimeout(100);
+      await expect(page.getByTestId("v3-configure")).toHaveCount(0);
+      // The chosen file is still usable: verifying again reaches Configure.
+      await page.unroute("**/api/deploy/prepare");
+      await page.route("**/api/deploy/prepare", (route) => json(route, { releaseProof: "proof-sealed", releaseSummary: { archiveSha256: "a".repeat(64), manifestDigest: "b".repeat(64), entryCount: 2, units: [{ unitId: "main", kind: "worker", name: "api" }] } }));
+      await page.getByTestId("v3-prepare").click();
+      await expect(page.getByTestId("v3-configure")).toBeVisible();
+    });
+  }
+
+  test("cancel while the Worker unpacks a large ZIP leaves no stale result, and another ZIP can be chosen", async ({ page }) => {
+    // ~22 MiB expanded (3 files of a 4-symbol alphabet, ~4x compressible): the Worker is busy for a visible moment.
+    const symbols = (length: number, seed: number) => { let s = seed; const out = new Uint8Array(length); for (let i = 0; i < length; i++) { s = (s * 1664525 + 1013904223) >>> 0; out[i] = 65 + (s >>> 30); } return out; };
+    const big = Buffer.from(zipSync({
+      "wrangler.jsonc": new TextEncoder().encode(WRANGLER), "worker/main.mjs": new TextEncoder().encode(CODE),
+      "public/p1.bin": symbols(7_000_000, 1), "public/p2.bin": symbols(7_000_000, 2), "public/p3.bin": symbols(7_000_000, 3),
+    }, { level: 1 }));
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "big.zip", mimeType: "application/zip", buffer: big });
+    await expect(page.getByTestId("v3-release-stage")).toHaveText("Checking the ZIP in your browser…");
+    await page.getByTestId("v3-release-cancel").click();
+    await expect(page.getByTestId("v3-release-stage")).toHaveText("");
+    await page.waitForTimeout(1500);
+    await expect(page.getByTestId("v3-local-zip-name")).toHaveCount(0);
+    await expect(page.getByTestId("v3-error")).toHaveCount(0);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "small.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await expect(page.getByTestId("v3-local-zip-name")).toHaveText("small.zip");
+    expect(mocks.prepareBodies).toEqual([]);
+  });
+
+  const withSource = (source: Record<string, unknown>) => JSON.stringify({ ...V3_CONFIG, source: { defaultUrl: "https://example.org/notes-release.zip", ...source } });
+  const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+  const CORS = { "access-control-allow-origin": "*" };
+
+  test("a pinned SHA-256 that does not match refuses the ZIP in the browser (local file and download link), nothing is uploaded", async ({ page }) => {
+    const mocks = newMocks();
+    const pin = "0123456789ab".padEnd(64, "0");
+    await mockV3Api(page, mocks);
+    await page.route("https://example.org/notes-release.zip", (route) => route.fulfill({ status: 200, contentType: "application/zip", headers: CORS, body: zipBytes() }));
+    await page.goto("/");
+    await pasteV3Config(page, withSource({ allowLocalZip: true, expectedSha256: pin }));
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await expect(page.getByTestId("v3-error")).toContainText("SHA-256 does not match 0123456789ab…");
+    await expect(page.getByTestId("v3-local-zip-name")).toHaveCount(0);
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-error")).toContainText("SHA-256 does not match 0123456789ab…");
+    await expect(page.getByTestId("v3-configure")).toHaveCount(0);
+    expect(mocks.prepareBodies).toEqual([]);
+  });
+
+  for (const via of ["file", "link"] as const) {
+    test(`a matching pin lets the ZIP through from the ${via} with identical prepare bytes`, async ({ page }) => {
+      const zip = zipBytes();
+      const mocks = newMocks();
+      await mockV3Api(page, mocks);
+      await page.route("https://example.org/notes-release.zip", (route) => route.fulfill({ status: 200, contentType: "application/zip", headers: CORS, body: zip }));
+      await page.goto("/");
+      await pasteV3Config(page, withSource({ allowLocalZip: true, expectedSha256: sha256(zip) }));
+      if (via === "file") await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zip });
+      await page.getByTestId("v3-prepare").click();
+      await expect(page.getByTestId("v3-configure")).toBeVisible();
+      expect(mocks.prepareBodies).toHaveLength(1);
+      expect(mocks.prepareBodies[0]?.equals(zip)).toBe(true);
+    });
+  }
+
+  test("a download link whose ZIP is over the deployable limit is refused from its headers, without downloading it", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    const methods: string[] = [];
+    await page.route("https://example.org/notes-release.zip", (route) => {
+      methods.push(route.request().method());
+      return route.fulfill({ status: 200, contentType: "application/zip", headers: { ...CORS, "content-length": String(8 * 1024 * 1024 + 1) }, body: "x" });
+    });
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-error")).toContainText("the limit is 8.0 MiB");
+    expect(methods).not.toContain("GET");
+    expect(mocks.prepareBodies).toEqual([]);
+  });
+
+  test("cancel while the download link is still downloading stops it quietly", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started = false;
+    await page.route("https://example.org/notes-release.zip", async (route) => {
+      if (route.request().method() === "HEAD") return route.fulfill({ status: 200, headers: CORS });
+      started = true;
+      await gate;
+      return route.abort().catch(() => undefined);
+    });
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-release-stage")).toHaveText("Downloading the ZIP…");
+    await expect.poll(() => started).toBe(true);
+    await page.getByTestId("v3-release-cancel").click();
+    await expect(page.getByTestId("v3-release-stage")).toHaveText("");
+    await expect(page.getByTestId("v3-prepare")).toBeEnabled();
+    await expect(page.getByTestId("v3-error")).toHaveCount(0);
+    release?.();
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("v3-configure")).toHaveCount(0);
+    expect(mocks.prepareBodies).toEqual([]);
+  });
+
+  test("a config that allows only its own link hides the file chooser", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page, withSource({ allowLocalZip: false }));
+    await expect(page.getByTestId("v3-asset-url")).toBeVisible();
+    await expect(page.getByTestId("v3-local-zip")).toHaveCount(0);
+    await expect(page.getByTestId("v3-local-zip-browse")).toHaveCount(0);
+  });
+
+  test("a ZIP over the verifiable limit is refused before it is read", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "big.zip", mimeType: "application/zip", buffer: Buffer.alloc(8 * 1024 * 1024 + 1) });
+    await expect(page.getByTestId("v3-error")).toContainText("8.0 MiB");
+    await expect(page.getByTestId("v3-error")).toContainText("up to 8.0 MiB");
+    await expect(page.getByTestId("v3-local-zip-name")).toHaveCount(0);
+    expect(mocks.prepareBodies).toEqual([]);
+  });
+
+  test("plan scheduler hints reach the driver: no early dependency probe, steps run in the order the server requires", async ({ page }) => {
+    const mocks = newMocks();
+    mocks.schedulerHints = { version: 1, topoOrder: ["main"], dependencies: [] };
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-configure")).toBeVisible();
+    await page.getByTestId("v3-to-deploy").click();
+    await page.getByTestId("v3-confirm-deploy").click();
+    await expect(page.getByTestId("v3-result")).toContainText("Deployment succeeded");
+    expect(mocks.stepCalls.map((call) => call.phase)).toEqual(["create-r2-buckets", "create-worker", "activate", "postcheck"]);
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  async function deployUntilFirstStepAnswers(page: Page, mocks: FlowMocks, status: number, body: unknown) {
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/deploy/step");
+    await page.route("**/api/deploy/step", (route) => {
+      mocks.stepCalls.push((route.request().postDataJSON() ?? {}) as Record<string, unknown>);
+      return json(route, body, status);
+    });
+    await page.route("https://example.org/oauth", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>oauth</title>" }));
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-configure")).toBeVisible();
+    await page.getByTestId("v3-to-deploy").click();
+    await page.getByTestId("v3-confirm-deploy").click();
+  }
+
+  test("a provider 401 mid-deploy sends the operator back to sign in for the same config and does not retry the write", async ({ page }) => {
+    const mocks = newMocks();
+    await deployUntilFirstStepAnswers(page, mocks, 401, { ok: false, error: "unauthorized", detail: "Cloudflare API rejected the credentials" });
+    await expect.poll(() => mocks.authStarts).toBe(1);
+    await expect(page).toHaveURL("https://example.org/oauth");
+    // The very first step answered 401: nothing was sent after it, and it was not repeated.
+    expect(mocks.stepCalls).toHaveLength(1);
+  });
+
+  test("a provider 403 (missing permission) is explained and does not loop through sign-in", async ({ page }) => {
+    const mocks = newMocks();
+    await deployUntilFirstStepAnswers(page, mocks, 403, { ok: false, error: "forbidden", detail: "Cloudflare API denied access" });
+    await expect(page.getByTestId("v3-result")).toContainText("Cloudflare denied this action");
+    await expect(page.getByTestId("v3-result")).toContainText("Signing in again will not help");
+    expect(mocks.authStarts).toBe(0);
+    await expect(page).not.toHaveURL(/example\.org/);
+  });
+
+  test("reloading the page keeps no ZIP and no token: the release must be chosen again", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-configure")).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId("v3-flow")).toBeVisible();
+    await expect(page.getByTestId("v3-configure")).toHaveCount(0);
+    await expect(page.getByTestId("v3-local-zip-name")).toHaveCount(0);
+    // Only the config's own link is offered again; the chosen file is gone and must be picked again.
+    await expect(page.getByTestId("v3-prepare")).toHaveText("Verify release from link");
+    const stored = await page.evaluate(async () => {
+      const dump = JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } });
+      const dbs = (await indexedDB.databases?.()) ?? [];
+      return { dump, databases: dbs.length };
+    });
+    expect(stored.dump).not.toContain("UEsDB"); // base64 of a ZIP's local-file header
+    expect(stored.dump).not.toContain(CSRF);
+    expect(stored.dump).not.toContain("proof-sealed");
+    expect(stored.databases).toBe(0);
+  });
+
+  test("on a phone-width screen the whole install runs without sideways scrolling", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page);
+    const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    expect(await noOverflow()).toBe(true);
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-configure")).toBeVisible();
+    expect(await noOverflow()).toBe(true);
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-plan-review")).toBeVisible();
+    expect(await noOverflow()).toBe(true);
+    await page.getByTestId("v3-confirm-deploy").click();
+    await expect(page.getByTestId("v3-result")).toContainText("Deployment succeeded");
+    expect(await noOverflow()).toBe(true);
+  });
+
+  test("Stop holds back later actions, keeps what finished, and says nothing was rolled back", async ({ page }) => {
+    const mocks = newMocks();
+    let open!: () => void;
+    mocks.stepGate = new Promise<void>((resolve) => { open = resolve; });
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-configure")).toBeVisible();
+    await page.getByTestId("v3-to-deploy").click();
+    await page.getByTestId("v3-confirm-deploy").click();
+    await expect(page.getByTestId("v3-stop-note")).toContainText("does not undo anything already written");
+    await page.getByTestId("v3-stop-deploy").click();
+    await expect(page.getByTestId("v3-stop-deploy")).toBeDisabled();
+    await expect(page.getByTestId("v3-stop-note")).toContainText("Stopping after the step in progress");
+    open();
+    await expect(page.getByTestId("v3-result")).toContainText("Deployment did not complete");
+    await expect(page.getByTestId("v3-result")).toContainText("You stopped the deployment");
+    await expect(page.getByTestId("v3-result")).toContainText("nothing was rolled back");
+    await expect(page.getByTestId("v3-result")).toContainText("1 verified receipts");
+    // Only the step in flight completed; no later action ran (a Worker create may
+    // appear once as the early dependency probe the server answers with 409).
+    const phases = mocks.stepCalls.map((call) => call.phase);
+    expect(phases.filter((phase) => phase !== "create-worker")).toEqual(["create-r2-buckets"]);
+    expect(phases.filter((phase) => phase === "create-worker").length).toBeLessThanOrEqual(1);
+    await expect(page.getByTestId("v3-stop-deploy")).toHaveCount(0);
+  });
+
+  test("a ZIP the shared verifier refuses is rejected by the browser Worker before any upload", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.goto("/");
+    await pasteV3Config(page);
+    const withSecret = Buffer.from(buildValidZip({ "wrangler.jsonc": WRANGLER, "worker/main.mjs": CODE, ".env": "SECRET=1" }));
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: withSecret });
+    await expect(page.getByTestId("v3-error")).toContainText("INVALID_PREBUILT_ZIP");
+    await expect(page.getByTestId("v3-local-zip-name")).toHaveCount(0);
+    expect(mocks.prepareBodies).toEqual([]);
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
@@ -308,7 +616,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page, config);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -356,7 +663,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page, V3_TEXT);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-domains")).toBeVisible();
@@ -404,7 +710,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page, V3_TEXT);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-domains")).toBeVisible();
@@ -447,7 +752,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page, V3_TEXT);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await page.getByTestId("v3-to-deploy").click();
@@ -480,7 +784,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page, V3_TEXT);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-hyperdrive")).toBeVisible();
@@ -522,7 +825,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page, config);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -577,6 +879,51 @@ test.describe("prebuilt UI flow", () => {
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("upgrade: keeping, replacing and removing the bound domain are one choice", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/cloudflare/targets");
+    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api" }], pages: [] }));
+    await page.unroute("**/api/cloudflare/domains");
+    await page.route("**/api/cloudflare/domains", (route) =>
+      json(route, { accountId: "a".repeat(32), zones: ["example.com"], workerDomains: [{ hostname: "api.example.com", service: "api", zone: "example.com" }], pagesDomains: {} }),
+    );
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await expect(page.getByTestId("v3-configure")).toBeVisible();
+    await page.getByTestId("v3-mode-upgrade").check();
+    await page.getByTestId("v3-upgrade-target").selectOption("api");
+    await expect(page.getByTestId("v3-domains-toggle")).toContainText("1 bound today, kept");
+    await openSection(page, "v3-domains");
+    // Keep is the default: the bound domain is listed, nothing to bind or confirm.
+    await expect(page.getByTestId("v3-domain-bound-main")).toContainText("api.example.com");
+    await expect(page.getByTestId("v3-domain-stance-keep-main")).toBeChecked();
+    await expect(page.getByTestId("v3-domain-bind-main")).toHaveCount(0);
+    await expect(page.getByTestId("v3-domain-zone-main")).toHaveCount(0);
+    // Use another instead: the bind form appears and unbinding the old one needs confirming.
+    await page.getByTestId("v3-domain-stance-replace-main").check();
+    await expect(page.getByTestId("v3-domain-zone-main")).toBeVisible();
+    await expect(page.getByTestId("v3-domain-confirm-remove-main")).toBeVisible();
+    await page.getByTestId("v3-domain-zone-main").selectOption("example.com");
+    await page.getByTestId("v3-domain-sub-main").fill("new");
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-domain-confirm-remove-main").check();
+    await expect(page.getByTestId("v3-to-deploy")).toBeEnabled();
+    // Remove: the bind form goes away, the confirmation to unbind stays.
+    await page.getByTestId("v3-domain-stance-remove-main").check();
+    await expect(page.getByTestId("v3-domain-zone-main")).toHaveCount(0);
+    await expect(page.getByTestId("v3-domain-confirm-remove-main")).not.toBeChecked();
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-domain-confirm-remove-main").check();
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-plan-review")).toBeVisible();
+    expect((mocks.planBodies.at(-1) as Record<string, unknown>).domains).toEqual({ main: { remove: [{ hostname: "api.example.com", zone: "example.com" }] } });
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
   test("upgrade picks an existing worker from the account dropdown", async ({ page }) => {
     const mocks = newMocks();
     await mockV3Api(page, mocks);
@@ -586,7 +933,6 @@ test.describe("prebuilt UI flow", () => {
     );
     await page.goto("/");
     await pasteV3Config(page);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -632,7 +978,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page, V3_TEXT);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     // Install: collapsed with a summary; opened, editable, prefilled from the release, an existing name is reused.
@@ -673,7 +1018,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -692,7 +1036,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -808,7 +1151,6 @@ test.describe("prebuilt UI flow", () => {
     await page.goto("/");
     await pasteV3Config(page, config);
     const zip = Buffer.from(buildValidZip({ "README.md": "resource release" }));
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zip });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -833,6 +1175,8 @@ test.describe("prebuilt UI flow", () => {
   test("pages flow completes the asset handoff, shows each address apart and watches the custom domain until it is live", async ({ page }) => {
     await page.clock.install();
     const mocks = newMocks();
+    const consoleWarnings: string[] = [];
+    page.on("console", (message) => { if (message.type() === "warning") consoleWarnings.push(message.text()); });
     // Cloudflare keeps a new Pages domain pending until DNS and its certificate are done.
     let domainStatus = "pending";
     const config = JSON.stringify({
@@ -844,8 +1188,9 @@ test.describe("prebuilt UI flow", () => {
     });
     await mockBase(page, mocks);
     await page.route("**/api/cloudflare/domains", (route) =>
-      json(route, { accountId: "a".repeat(32), zones: ["example.com"], workerDomains: [], pagesDomains: { site: ["www.example.com"] }, pagesDomainStatus: { site: { "www.example.com": domainStatus } } }),
+      json(route, { accountId: "a".repeat(32), zones: ["example.com"], workerDomains: [], pagesDomains: { site: ["www.example.com"] } }),
     );
+    await page.route("**/api/cloudflare/pages-domain-status", (route) => json(route, { status: domainStatus }));
     await page.route("**/api/deploy/prepare", (route) =>
       json(route, { releaseProof: "proof-p", releaseSummary: { archiveSha256: "a".repeat(64), manifestDigest: "b".repeat(64), entryCount: 3 } }),
     );
@@ -913,7 +1258,6 @@ test.describe("prebuilt UI flow", () => {
       "dist/index.html": "<h1>hi</h1>",
       "dist/app.js": "console.log(1)",
     }));
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zip });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -940,6 +1284,9 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-result-dashboard")).toHaveAttribute("href", /dash\.cloudflare\.com/);
     // The browser performed the JWT handoff upload before the deployment.
     expect(uploaded).toEqual(["check-missing", "upload", "upsert"]);
+    // The manifest was hashed in the compute Worker with the BLAKE3 WASM (not the JS fallback).
+    expect(mocks.compilerRequests.filter((url) => /blake3_js_bg.*\.wasm/.test(url))).toHaveLength(1);
+    expect(consoleWarnings.filter((text) => text.includes("BLAKE3 WASM unavailable"))).toEqual([]);
     await expect(page.getByTestId("v3-status-site")).toHaveAttribute("data-state", "done");
     expect(mocks.unexpectedApi).toEqual([]);
   });
@@ -967,7 +1314,6 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.goto("/");
     await pasteV3Config(page);
-    await page.getByTestId("v3-source-file-mode").check();
     await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
     await page.getByTestId("v3-prepare").click();
     await expect(page.getByTestId("v3-configure")).toBeVisible();
@@ -1052,15 +1398,14 @@ test.describe("bridge contracts (no browser)", () => {
 
   test("retained bytes round-trip and re-encode exactly", async () => {
     const bytes = buildValidZip({ "wrangler.jsonc": WRANGLER, "worker/main.mjs": CODE });
-    const source = await retainV3SourceBytes(bytes, "release.zip");
-    expect(source.bytes).not.toBe(bytes);
-    expect(Array.from(source.bytes)).toEqual(Array.from(bytes));
-    expect(new TextDecoder().decode(v3ModuleBytes(source, "worker/main.mjs"))).toBe(CODE);
-    expect(() => v3ModuleBytes(source, "worker/missing.mjs")).toThrow();
-    const paths = v3UnitWorkerPaths(source, "wrangler.jsonc");
+    const source = await retainedSource(bytes, "release.zip");
+    expect(Array.from(new Uint8Array(await source.blob.arrayBuffer()))).toEqual(Array.from(bytes));
+    expect(new TextDecoder().decode(await v3ModuleBytes(source, "worker/main.mjs"))).toBe(CODE);
+    await expect(v3ModuleBytes(source, "worker/missing.mjs")).rejects.toThrow();
+    const paths = await v3UnitWorkerPaths(source, "wrangler.jsonc");
     expect(paths.main).toBe("worker/main.mjs");
     expect(paths.extras).toEqual([]);
-    const step = v3WorkerStepBytes(source, paths.main, paths.extras);
+    const step = await v3WorkerStepBytes(source, paths.main, paths.extras);
     expect(Buffer.from(step.scriptB64, "base64").toString()).toBe(CODE);
     expect(step.additionalModules).toEqual([]);
   });
@@ -1078,12 +1423,12 @@ test.describe("bridge contracts (no browser)", () => {
       return Response.json({ error: "GRAPH_DEPENDENCY_REQUIRED" }, { status: 409 });
     }) as typeof fetch;
     try {
-      const prepared = await prepareReleaseZip("csrf-x", new Uint8Array([1, 2, 3]));
+      const prepared = await prepareReleaseZip("csrf-x", new Blob([new Uint8Array([1, 2, 3])]));
       expect(prepared.releaseProof).toBe("p");
       expect(seen[0]?.url).toBe("/api/deploy/prepare");
       expect((seen[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe("application/zip");
       expect((seen[0]?.init.headers as Record<string, string>)["x-tapdeploy-csrf"]).toBe("csrf-x");
-      expect(Array.from(seen[0]?.init.body as Uint8Array)).toEqual([1, 2, 3]);
+      expect(Array.from(new Uint8Array(await (seen[0]?.init.body as Blob).arrayBuffer()))).toEqual([1, 2, 3]);
       // Non-2xx responses surface as typed failures, never silent fallbacks.
       await expect(fetchGraphPlan("csrf-x", { accountId: "a", releaseProof: "p", config: { text: V3_TEXT } })).rejects.toMatchObject({ kind: "UNSUPPORTED_GRAPH_OPERATION", status: 409 });
       await expect(doGraphStep("csrf-x", { accountId: "a", executionContext: "c", approval: "x", unitId: "m", actionId: "act", phase: "activate", step: "activate" })).rejects.toMatchObject({ kind: "GRAPH_DEPENDENCY_REQUIRED", status: 409 });
@@ -1094,7 +1439,7 @@ test.describe("bridge contracts (no browser)", () => {
 
   test("driver completes worker+r2 with dependency retries and exact version cutover", async () => {
     const bytes = buildValidZip({ "wrangler.jsonc": WRANGLER, "worker/main.mjs": CODE });
-    const source = await retainV3SourceBytes(bytes, "release.zip");
+    const source = await retainedSource(bytes, "release.zip");
     const phases: string[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
@@ -1165,7 +1510,7 @@ test.describe("bridge contracts (no browser)", () => {
       "public/index.html": "<h1>hi</h1>",
       "public/app.js": "console.log(1)",
     });
-    const source = await retainV3SourceBytes(bytes, "release.zip");
+    const source = await retainedSource(bytes, "release.zip");
     const phases: string[] = [];
     const seenAssetJwt: unknown[] = [];
     // The stub registers the exact approved hashes of the retained source, so
@@ -1245,7 +1590,7 @@ test.describe("bridge contracts (no browser)", () => {
 
   test("driver publishes workers.dev only from a verified provider result", async () => {
     const bytes = buildValidZip({ "wrangler.jsonc": WRANGLER, "worker/main.mjs": CODE });
-    const source = await retainV3SourceBytes(bytes, "release.zip");
+    const source = await retainedSource(bytes, "release.zip");
     const seenPublish: unknown[] = [];
     const realFetch = globalThis.fetch;
     const runWith = async (publishResult: Record<string, unknown>, extraDiffs: Array<{ resource: string; action: string; name: string }> = []) => {
@@ -1327,7 +1672,7 @@ test.describe("bridge contracts (no browser)", () => {
 
   test("driver fails the deploy when postcheck bindings do not verify", async () => {
     const bytes = buildValidZip({ "wrangler.jsonc": WRANGLER, "worker/main.mjs": CODE });
-    const source = await retainV3SourceBytes(bytes, "release.zip");
+    const source = await retainedSource(bytes, "release.zip");
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String((init as RequestInit & { body?: string }).body)) as Record<string, unknown>;

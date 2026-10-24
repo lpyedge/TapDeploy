@@ -25,6 +25,7 @@ export function attachAccountsRoutes(app: Hono<AppEnv>, env: TapDeployEnv): void
   // zones, the address records of one chosen zone, and the domains already
   // bound to Workers / to the named Pages projects.
   app.post("/api/cloudflare/domains", async (c) => domainsHandler(c, env));
+  app.post("/api/cloudflare/pages-domain-status", async (c) => pagesDomainStatusHandler(c, env));
   // Read-only list of the account's Hyperdrive configurations (names only, never
   // connection details) so the operator can pick one per Hyperdrive binding.
   app.post("/api/cloudflare/hyperdrive", async (c) => hyperdriveHandler(c, env));
@@ -200,27 +201,43 @@ async function domainsHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Re
       ? (await accountClient.listDnsRecords(zone.id)).filter((record) => ADDRESS_RECORD_TYPES.has(record.type)).map((record) => ({ name: record.name.toLowerCase(), type: record.type, ...(record.content !== undefined ? { content: record.content } : {}) }))
       : [];
     const workerDomains = (await accountClient.listWorkerDomains()).map((domain) => ({ hostname: domain.hostname.toLowerCase(), ...(domain.service ? { service: domain.service } : {}), ...(domain.zone_name ? { zone: domain.zone_name.toLowerCase() } : {}) }));
-    // Per project: the hostnames bound to it, and the status Cloudflare reports
-    // for each (a new domain stays pending until DNS and its certificate are done).
     const pagesDomains: Record<string, string[]> = {};
-    const pagesDomainStatus: Record<string, Record<string, string>> = {};
     for (const project of pagesProjects) {
       try {
-        const domains = await accountClient.listPagesDomains(project);
-        pagesDomains[project] = domains.map((domain) => domain.name.toLowerCase());
-        pagesDomainStatus[project] = Object.fromEntries(domains.map((domain) => [domain.name.toLowerCase(), domain.status ?? "unknown"]));
+        pagesDomains[project] = (await accountClient.listPagesDomains(project)).map((domain) => domain.name.toLowerCase());
       } catch (error) {
         // A project that does not exist yet has no domains.
         if ((error as { kind?: unknown }).kind !== "not-found") throw error;
         pagesDomains[project] = [];
-        pagesDomainStatus[project] = {};
       }
     }
-    return c.json({ accountId: body.accountId, zones: zones.map((candidate) => candidate.name).sort(), ...(zone ? { zone: zone.name, records } : {}), workerDomains, pagesDomains, pagesDomainStatus });
+    return c.json({ accountId: body.accountId, zones: zones.map((candidate) => candidate.name).sort(), ...(zone ? { zone: zone.name, records } : {}), workerDomains, pagesDomains });
   } catch (error) {
     if (isUpstreamError(error)) {
       return c.json({ error: "upstream", upstream: error.kind }, 502);
     }
+    throw error;
+  }
+}
+
+// One Cloudflare read for the result page's watch on a new Pages domain, so a
+// poll every few seconds costs one subrequest instead of the whole discovery.
+const HOSTNAME = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/;
+
+async function pagesDomainStatusHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
+  const auth = await authenticate(c, env);
+  if ("denied" in auth) return auth.denied;
+  const body = (await c.req.json().catch(() => null)) as { accountId?: unknown; project?: unknown; hostname?: unknown } | null;
+  const hostname = typeof body?.hostname === "string" ? body.hostname.toLowerCase() : "";
+  if (typeof body?.accountId !== "string" || body.accountId.length === 0 || typeof body.project !== "string" || !PROJECT_NAME.test(body.project) || !HOSTNAME.test(hostname)) {
+    return c.json({ error: "accountId, project and hostname are required" }, 400);
+  }
+  try {
+    const domains = await createCloudflareClient({ accessToken: auth.session.accessToken }).withAccount(body.accountId).listPagesDomains(body.project);
+    const found = domains.find((domain) => domain.name.toLowerCase() === hostname);
+    return c.json({ status: found ? (found.status ?? "unknown") : "missing" });
+  } catch (error) {
+    if (isUpstreamError(error)) return c.json({ error: "upstream", upstream: error.kind }, 502);
     throw error;
   }
 }

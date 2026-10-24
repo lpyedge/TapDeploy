@@ -55,9 +55,11 @@ export function ConfigEntry({ initialUrl, onLoaded, busy, error }: ConfigEntryPr
   const errorRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
-  const handleDrop = async (event: React.DragEvent<HTMLTextAreaElement>) => {
-    event.preventDefault();
-    const file = event.dataTransfer?.files?.[0];
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  // A local .json file replaces whatever is in the box.
+  const readFile = async (file: File | undefined) => {
     if (!file) return;
     if (file.size > CONFIG_MAX_BYTES) {
       setErrors([{ field: "$", message: `config is ${formatBytes(file.size)}; the limit is ${formatBytes(CONFIG_MAX_BYTES)}` }]);
@@ -67,8 +69,14 @@ export function ConfigEntry({ initialUrl, onLoaded, busy, error }: ConfigEntryPr
       setText(await file.text());
       setErrors([]);
     } catch {
-      setErrors([{ field: "$", message: "could not read the dropped file" }]);
+      setErrors([{ field: "$", message: "could not read the file" }]);
     }
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    void readFile(event.dataTransfer?.files?.[0]);
   };
 
   const accept = (rawText: string, label: string) => {
@@ -150,10 +158,10 @@ export function ConfigEntry({ initialUrl, onLoaded, busy, error }: ConfigEntryPr
       <form className="mt-4" onSubmit={handleGo}>
         <div className="field">
           <label htmlFor="config-input">
-            Config address, JSON or file
+            Config address or JSON
             <InfoTip>
-              Paste an <code>https://…/tapdeploy.config.json</code> address or the JSON itself (up to {formatBytes(CONFIG_MAX_BYTES)}), or drop
-              a local <code>.json</code> file onto the box — its content replaces what is there.
+              Paste an <code>https://…/tapdeploy.config.json</code> address or the JSON itself (up to {formatBytes(CONFIG_MAX_BYTES)}), or load
+              a local <code>.json</code> file — its content replaces what is there.
             </InfoTip>
           </label>
           <textarea
@@ -161,13 +169,24 @@ export function ConfigEntry({ initialUrl, onLoaded, busy, error }: ConfigEntryPr
             rows={8}
             spellCheck={false}
             data-testid="config-input"
+            className={dragging ? "drop-active" : undefined}
             value={text}
             disabled={busy}
             onChange={(e) => setText(e.target.value)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => void handleDrop(e)}
-            placeholder={"https://example.com/tapdeploy.config.json\n\nor paste the tapdeploy.config.json content here — or drop a .json file"}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            placeholder="https://example.com/tapdeploy.config.json"
           />
+          <div className="config-hints">
+            <p className="m-0">Paste the link to a <code>tapdeploy.config.json</code>, or paste its content.</p>
+            <p className="m-0 flex flex-wrap items-center gap-2">
+              Or load it from a file:
+              <button type="button" className="px-3 py-1.5" disabled={busy} onClick={() => fileInput.current?.click()} data-testid="config-file-browse">Choose a .json file…</button>
+              <span>or drop it onto the box above.</span>
+            </p>
+          </div>
+          <input ref={fileInput} type="file" accept=".json,application/json" className="sr-only" data-testid="config-file" onChange={(e) => { void readFile(e.target.files?.[0]); e.target.value = ""; }} />
           <p className={pastedBytes > CONFIG_MAX_BYTES ? "field-error" : "field-hint"} data-testid="config-size">
             {formatBytes(pastedBytes)} of {formatBytes(CONFIG_MAX_BYTES)}
           </p>

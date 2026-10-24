@@ -24,12 +24,13 @@ the Deploy page; there is no separate Connect, progress or done page).
 | Step | Contract |
 |---|---|
 | Config | One textarea (URL or JSON) and one button; `.json` can be dropped; `?config=` pre-fills and auto-submits once. Loading a config goes straight to Cloudflare consent (or straight into the flow when the session already covers that exact config); there is no Connect screen, and an expired session re-authorizes the same config directly. |
-| Release | Inline segmented choice `Download URL | Local ZIP file`, one Prepare button; switching clears the other side. Prebuilt ZIPs only. |
-| Configure | Inline `New | Upgrade`. New: editable Worker name (pre-filled from the sealed release); a name that already exists is flagged with a switch to Upgrade. Upgrade: read-only dropdown of the account's Workers, manual entry if listing fails. Switching mode keeps the typed name. The server enforces the choice at plan time: New never updates a live Worker and Upgrade never creates one (`TARGET_MODE_CONFLICT`, zero writes). What must be answered (Worker name, required inputs, Hyperdrive) is always shown; everything optional (optional inputs and secret changes, resource names, custom domains) is a collapsed section that shows its current state and opens on demand, or stays open while it holds an error. Per Worker/Pages unit, an optional custom domain from the account's zones (`<sub>.<zone>`); replacing what serves a hostname today needs explicit consent; on Upgrade the bound hostnames are listed and can be unbound (with consent). A release with Hyperdrive bindings requires picking one of the account's Hyperdrive configurations per binding. |
+| Release | One page: the download link and a ZIP-from-this-computer drop zone (omitted when the config sets `allowLocalZip: false`). A chosen file wins and the link rests until it is removed; one Verify button. Prebuilt ZIPs only, at most 8 MiB (`RELEASE_MAX_BYTES`, one number for a chosen file, a direct download, the installer relay and the server check). The browser checks the ZIP first in a Worker (stage text, Cancel that terminates the Worker or aborts the call); the server then verifies the same bytes, and only that check issues the proof (section 3a). |
+| Configure | Inline `New | Upgrade`. New: editable Worker name (pre-filled from the sealed release); a name that already exists is flagged with a switch to Upgrade. Upgrade: read-only dropdown of the account's Workers, manual entry if listing fails. Switching mode keeps the typed name. The server enforces the choice at plan time: New never updates a live Worker and Upgrade never creates one (`TARGET_MODE_CONFLICT`, zero writes). What must be answered (Worker name, required inputs, Hyperdrive) is always shown; everything optional (optional inputs and secret changes, resource names, custom domains) is a collapsed section that shows its current state and opens on demand, or stays open while it holds an error. Per Worker/Pages unit, an optional custom domain from the account's zones (`<sub>.<zone>`); replacing what serves a hostname today needs explicit consent; on Upgrade the bound hostnames are listed and one choice applies to them: keep (default), use another instead, or remove (unbinding needs consent). A release with Hyperdrive bindings requires picking one of the account's Hyperdrive configurations per binding. |
 | Deploy | Review (effective names, create/update/preserve, cost, secrets) → confirm → inline progress → result card. |
 
 Result card: every verified address is its own row, labelled (custom domain,
-workers.dev, Pages site). A custom domain row keeps checking until the domain
+workers.dev, Pages site), and the custom domains the account says are bound to
+what was deployed are listed too, so a domain an upgrade kept is not missing. A custom domain row keeps checking until the domain
 serves, because Cloudflare answers the bind at once but DNS and the certificate
 follow (a Pages domain reads `pending` for a few minutes): Pages domains by the
 status the domains endpoint reports, Worker domains by an opaque HTTPS probe;
@@ -99,6 +100,56 @@ reads the target back and seals a receipt).
   before any provider call; the same pure validator re-checks at upload. TapDeploy never
   rewrites or squashes tags that may already be deployed.
 
+## 3a. Browser compute: what it is and what it is not
+
+The browser does real work, but none of it is authority.
+
+- **Verification in a Dedicated Worker** (`src/web/compute/`). One Worker per
+  release source runs `verifyPrebuiltRelease` (`src/release/verify-prebuilt-release.ts`),
+  the same pure sequence `/api/deploy/prepare` runs (size, policy, unpack and
+  lint, pin and origin checks, per-unit bundles), so a bad ZIP, a pin mismatch
+  or an oversize file is refused before anything is uploaded, with the server's
+  error code and detail. `releasePolicyFromConfigText` rebuilds the source policy
+  from the config the user authorized. Cancel terminates the Worker; each run has
+  a run number so a cancelled or replaced run can neither update the page nor
+  install a source.
+- **The Worker keeps the extracted files.** The page holds the original `Blob`
+  (re-sent unchanged to `/prepare`) and a narrow async `SourceAccessor`
+  (`listFiles`, `readFile`, Worker-asset index/bytes by approved hash, Pages
+  manifest/bytes by hash; fixed method names, no URL or arbitrary read). One
+  live source per flow; it is released when replaced, removed or on unmount.
+- **Hashing** (official Worker-asset hash, Pages BLAKE3) happens once per
+  content in that Worker (per-source cache keyed by algorithm, content digest and
+  exact extension). Pages BLAKE3 uses WebAssembly (`blake3-wasm`, pinned,
+  same-origin asset, loaded only for a release that has a Pages unit, both for the
+  browser-side verification and for the later manifest) and falls back to the
+  pure-JS hash if WebAssembly is unavailable, blocked or fails on a call; the
+  digest is identical either way and the server keeps its own JS hash. The app
+  asks for no `unsafe-eval`. A browser without Worker support, or a Worker that
+  dies (usually out of memory), gets a message that says so and what to try.
+- **The server is unchanged as authority** (Stage 1, strict). `/prepare` still
+  re-verifies every byte and issues `tapdeploy-verified-prebuilt-release/v1`; the
+  browser's verdict is early feedback and is never submitted as a proof. The CPU
+  moved onto the user's device is not removed from the server: measured locally,
+  the strict `/prepare` route still takes hundreds of milliseconds for a release
+  with large assets, so the Workers Free 10 ms CPU limit is **not cleared**
+  (billed CPU is not measured). A trust change (for example a publisher-signed
+  manifest) was researched and is not approved.
+- **Asset uploads** go browser → same-origin `POST /api/upload/assets` → four
+  fixed Cloudflare URLs with the short-lived upload JWT only. The relay
+  authenticates and validates the request before it reads any body, counts and
+  caps the bytes (16 MiB), drops a stalled sender, forwards the exact bytes and
+  content type, and cancels the upstream request when the browser cancels. It is
+  buffered after that point; streaming upstream is not enabled (not live
+  verified).
+- **Dispatch order.** The plan response also carries non-secret
+  `schedulerHints` (the unit dependency edges already sealed in the context).
+  The driver uses them to avoid asking for work whose prerequisites are
+  unfinished; invalid or absent hints fall back to the legacy order, and the
+  server still refuses (`GRAPH_DEPENDENCY_REQUIRED`) anything out of order. One
+  aggregated `/step` per approved action; there is no generic fetch bridge
+  (`tests/contracts/api-surface.test.ts` pins the route list).
+
 ## 4. OAuth model
 
 Authorization is one-shot and bound to the exact config hash; scopes derive from
@@ -110,20 +161,25 @@ returns the UI to the same panel. The config text lives only in the tab
 (`sessionStorage`, 30 minutes); the server stores only its hash. Cookies, CSRF
 and the redirect URI derive from the single trusted origin `PUBLIC_ORIGIN`.
 The session and OAuth-transaction cookies are sealed with AES-GCM under a key
-derived (HKDF) from the OAuth client secret; sessions last 20 minutes. The
+derived (HKDF) from the OAuth client secret; a session lasts at most 20 minutes
+and never past the provider token it carries (`expires_in` minus 15 s; a token
+that is already expiring ends the callback with `token_expired`). A provider
+401 reaches the browser as 401 (sign in again for the same config), a provider
+403 as 403 (the account lacks a permission: signing in again will not help),
+and only a missing target is 404. The
 scopes requested are exactly the config's; the client registration is the
 only upper bound (Cloudflare answers `invalid_scope` beyond it).
 
 ## 5. Code shape
 
 ```
-src/api/routes/   HTTP boundary: auth, accounts (accounts, targets, domains, Hyperdrive list), deploy-prepare/plan/step, asset-upload, release-download
+src/api/routes/   HTTP boundary: auth, accounts (accounts, targets, domains, Hyperdrive list), deploy-prepare/plan/step, asset-upload, release-download (`read-bounded-body.ts`: the counted, deadline-limited body reader)
 src/auth/         OAuth, tx, session, cookies, CSRF, scope ledger (single source of scope truth)
 src/core/planning/ graph, units, unit-specs (release → sealed specs), request-inputs, plan + per-family planners (worker-resource-planners, rebind-guards, plan-domains), operation support (capability gate), digest, snapshot, drift, execution context
 src/core/deploy/  step phases, bindings, secrets, postcheck, bootstrap, R2 privacy guard, domains, pages
 src/cloudflare/   provider adapters (models, resources, assets, pages, client)
 src/manifest/     config-v3 (contract), wrangler-v3 (normalization: schema, keys, resources)
-src/release/      prebuilt ZIP unpack + safety lint, per-unit bundles, artifact proof
+src/release/      prebuilt ZIP unpack + safety lint, per-unit bundles, `verify-prebuilt-release.ts` (the verification sequence shared by `/prepare` and the browser Worker), artifact proof
 src/web/          App.tsx (session + config entry), V3Flow.tsx (release → configure → deploy), the V3*Panel components, configure-model.ts / use-configure-form.ts (Configure state, pure plan request), v3-flow-machine.ts, graph-deploy-runner.ts (GraphDeployRunner)
 src/runtime/      node.ts (:8787), workers.ts
 ```
@@ -135,7 +191,12 @@ src/runtime/      node.ts (:8787), workers.ts
   request) is pure code in `configure-model.ts`.
 - Deploy driver: `GraphDeployRunner` (stable entry `runGraphDeploy`) runs actions,
   then Worker postchecks, then Pages postchecks. A Worker deployment id never
-  enters the Pages loop.
+  enters the Pages loop. `graph-scheduler.ts` validates `schedulerHints`
+  (dispatch order only). "Stop after this step" aborts future actions, never
+  the one in flight, and never rolls anything back.
+- Browser compute: `src/web/compute/` (`client.ts` handles, `release.worker.ts`,
+  `source-store.ts` accessor, `hash-cache.ts`, `pages-hasher.ts`, `protocol.ts`
+  versioned messages, `release-policy.ts`, `refusal-message.ts`).
 - Composition over inheritance; no deep class hierarchies.
 - Config V3 is the only config format: any other shape is `invalid_config`, and
   a deploy step without the sealed execution context from `/api/deploy/plan` is
@@ -144,8 +205,13 @@ src/runtime/      node.ts (:8787), workers.ts
 ## 6. Resource rules (read before changing a provider path)
 
 Worker: the release name, optionally overridden (section 2). Static assets:
-register → browser upload → complete, completion JWT bound to the version upload,
-the browser's hashes are never trusted. Cron: whole-set PUT with exact ordered
+register → browser upload → complete, completion JWT bound to the version upload.
+The manifest (paths and hashes) always comes from the sealed release, never from
+the browser; the uploaded **bytes** are not verified by the installer (the relay
+forwards them) and, measured live, Cloudflare Workers Assets serves bytes that do
+not match the hash they were uploaded under (Pages stores by content hash, so a
+mismatching upload leaves the hash missing). The browser that holds the ZIP is
+therefore trusted to upload the files it verified. Cron: whole-set PUT with exact ordered
 readback; an empty approved set preserves. KV: the id is a claim, lookup only,
 never created from an id. D1: verified `database_id`; resource-only units may
 ensure by name. R2: verified by name; private bootstrap is a guarded owner flow
@@ -179,7 +245,10 @@ must be shaped like the live provider (the fixture refuses a Pages project
 without a production branch, an array `migrations` upload and a bare Workflow
 class). A capability may be called supported only with route-level success and
 forged-input failure tests. Offline green is never a live pass: until a
-disposable-account acceptance passes, the release stays not ready.
+disposable-account acceptance passes, the release stays not ready. The e2e suite
+also runs against the built Node server and real workerd (`PW_RUNTIME=node|workers`),
+where `tests/e2e/built-assets.spec.ts` checks that the compute Worker chunk and
+the BLAKE3 WASM are served same-origin, validate, and ask for no `unsafe-eval`.
 
 ## 8. Lessons that must not regress
 

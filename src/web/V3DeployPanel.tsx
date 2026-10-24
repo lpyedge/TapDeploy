@@ -1,11 +1,12 @@
-import type { AccountSummary, GraphPlan } from "./api.js";
+import { getDomains, type AccountSummary, type GraphPlan } from "./api.js";
 import type { V3MachineSnapshot } from "./v3-flow-machine.js";
 import { GraphProgress, dashboardUrlForGraphPlan } from "./DeployProgress.js";
 import type { GraphStepStatus } from "./graph-deploy-runner.js";
 import { describeDiff, resourceLabel } from "./step-labels.js";
 import { declaredSecrets, type DeclaredInput } from "./config-inputs.js";
 import { Spinner } from "./Spinner.js";
-import { resultLinks, type ResultLink } from "./result-links.js";
+import { boundDomains, deployedTargets, resultLinks, type ResultLink } from "./result-links.js";
+import { useLoaded } from "./use-loaded.js";
 import { V3DomainStatus } from "./V3DomainStatus.js";
 import { inputValueProblem } from "../manifest/input-validation.js";
 
@@ -58,7 +59,10 @@ function V3SuccessCard({ snap, graphPlan, csrf, accountId, accounts }: {
   const workerName = created.find((d) => d.resource === "worker")?.name as string | undefined;
   const accountName = accounts.find((a) => a.id === accountId)?.name ?? accountId;
   const dashboard = dashboardUrlForGraphPlan(accountId, graphPlan);
-  const links = resultLinks(snap.deployUrls, graphPlan);
+  // What the account says is bound now, so a domain an upgrade kept is listed too.
+  const targets = deployedTargets(graphPlan);
+  const bound = useLoaded(targets.workers.length + targets.pagesProjects.length > 0 ? accountId : null, () => getDomains(csrf, accountId, { pagesProjects: targets.pagesProjects }));
+  const links = resultLinks(snap.deployUrls, graphPlan, bound.data ? boundDomains(bound.data, graphPlan) : []);
   return (
     <div className="result-card result-ok" data-testid="v3-result">
       <div className="result-title">
@@ -125,6 +129,9 @@ export interface V3DeployPanelProps {
   busy: boolean;
   blocked: boolean;
   message: string | null;
+  /** Stop after the step in flight; true once the operator asked to stop. */
+  stopping: boolean;
+  onStop: () => void;
   onBackToConfigure: () => void;
   onDeploy: () => void;
   onStartOver: () => void;
@@ -152,6 +159,8 @@ export function V3DeployPanel({
   busy,
   blocked,
   message,
+  stopping,
+  onStop,
   onBackToConfigure,
   onDeploy,
   onStartOver,
@@ -237,6 +246,12 @@ export function V3DeployPanel({
       )}
       {(snap.stage === "deploy" || finished) && graphPlan && !reviewing && (
         <GraphProgress plan={graphPlan} statuses={actions} checks={postchecks} finished={finished} testidPrefix="v3-status" />
+      )}
+      {snap.stage === "deploy" && !reviewing && snap.deployOk === null && (
+        <div className="actionbar" data-testid="v3-running">
+          <p className="meta m-0" role="status" data-testid="v3-stop-note">{stopping ? "Stopping after the step in progress…" : "Keep this tab open. Stopping does not undo anything already written to Cloudflare."}</p>
+          <button type="button" className="link text-sm" disabled={stopping} onClick={() => onStop()} data-testid="v3-stop-deploy">{stopping ? "Stopping…" : "Stop after this step"}</button>
+        </div>
       )}
       {message && <ErrorMessage message={message} />}
       {finished && snap.deployOk !== null && (

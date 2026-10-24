@@ -131,7 +131,9 @@ export function App() {
       const code = errorLabel(params.get("error"));
       setNotice(code === "invalid_scope"
         ? "This installer's Cloudflare OAuth client does not include a permission this app needs (invalid_scope). The instance operator must add it to the client."
-        : `Cloudflare authorization was not completed (${code}).`);
+        : code === "token_expired"
+          ? "Cloudflare authorization was not completed (token_expired): the sign-in it issued was already about to expire. Try again."
+          : `Cloudflare authorization was not completed (${code}).`);
     }
     if (auth !== null || params.has("config")) window.history.replaceState({}, "", window.location.pathname);
     justAuthorized.current = auth === "success";
@@ -211,6 +213,7 @@ function errorLabel(code: string | null): string {
     "temporarily_unavailable",
     "exchange",
     "scope_denied",
+    "token_expired",
   ]);
   return code && known.has(code) ? code : "provider_error";
 }

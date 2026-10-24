@@ -767,8 +767,15 @@ function graphBundleFromProof(proof: unknown, spec: DeploySpec, archiveSha256: s
   return { schemaVersion: 1, appName: spec.cloudflare.workerName, targetKind: spec.targetKind, ...(main ? { mainModule: main.path as string } : {}), modules: modules.map((m) => ({ name: m.path as string, kind: m.mime === "application/wasm" ? "wasm" : "esm", mime: m.mime as string, size: m.size as number, sha256: m.sha256 as string })), assets: assets.map((a) => ({ path: a.path as string, size: a.size as number, sha256: a.sha256 as string })), config: { path: value.wranglerPath, size: 0, sha256: value.wranglerSha256 }, source: { archiveBytes: 0, archiveSha256, manifestDigest }, wranglerEffectiveHash: value.wranglerEffectiveHash, bundleDigest: value.bundleDigest };
 }
 
+// A provider answer about the credentials is an auth state, not a missing target:
+// 401 = the token is no longer valid (sign in again), 403 = it is valid but lacks
+// the permission (signing in again will not help). Only a real not-found is 404.
+function providerAuthStatus(kind: string): 401 | 403 | undefined {
+  return kind === "unauthorized" ? 401 : kind === "forbidden" ? 403 : undefined;
+}
+
 function upstreamResponse(c: Context<AppEnv>, error: CloudflareApiError): Response {
-  const status = error.kind === "not-found" ? 404 : 502;
+  const status = providerAuthStatus(error.kind) ?? (error.kind === "not-found" ? 404 : 502);
   return c.json({ error: "upstream", upstream: error.kind }, status);
 }
 
@@ -876,8 +883,10 @@ function stepFailureResponse(
     status = 400;
   } else if (kind === "wrong-version" || kind === "step-not-applicable") {
     status = 409;
-  } else if (kind === "not-found" || kind === "unauthorized") {
+  } else if (kind === "not-found") {
     status = 404;
+  } else if (providerAuthStatus(kind) !== undefined) {
+    status = providerAuthStatus(kind)!;
   } else if (
     kind === "conflict" ||
     kind === "binding-conflict" ||

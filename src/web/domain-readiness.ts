@@ -33,5 +33,9 @@ export async function probeHostname(hostname: string, fetchImpl: typeof fetch = 
   }
 }
 
-export const READINESS_POLL_MS = 5000;
 export const READINESS_WATCH_MS = 5 * 60 * 1000;
+
+/** Checks start close together and spread out: 5, 10, 20, then every 30 seconds, so a watch costs about a dozen requests. */
+export function readinessDelay(attempt: number): number {
+  return Math.min(30_000, 5_000 * 2 ** attempt);
+}

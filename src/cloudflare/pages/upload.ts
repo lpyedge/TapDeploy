@@ -19,6 +19,7 @@ import {
   buildPagesAssetsUpsertHashesUrl,
 } from "../client/index.js";
 import { PAGES_UPLOAD_HASH_RE } from "./constants.js";
+import { base64String } from "../../core/encoding/base64-ascii.js";
 
 export type PagesUploadErrorKind =
   | "token-expired"
@@ -50,15 +51,6 @@ export interface PagesUploadOptions {
 
 function uploadError(kind: PagesUploadErrorKind, detail: string): PagesUploadError {
   return { kind, detail };
-}
-
-function base64FromBytes(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)));
-  }
-  return btoa(binary);
 }
 
 function mapStatusToError(status: number, retryAfter?: number): PagesUploadError {
@@ -143,7 +135,7 @@ export async function uploadPagesAssets(
     }
     return {
       key: file.hash,
-      value: base64FromBytes(file.bytes),
+      value: base64String(file.bytes),
       metadata: { contentType: file.contentType ?? "application/octet-stream" },
       base64: true,
     };

@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { uploadV3PagesAssets } from "../../src/web/graph-upload.js";
-import { retainV3SourceBytes } from "../../src/web/release.js";
+import { retainedSource } from "./retained-source.js";
 import { buildValidZip } from "./zip-builder.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("uploadV3PagesAssets", () => {
   it("stores each file with the content type of its extension, so a browser shows an HTML page instead of downloading it", async () => {
-    const source = await retainV3SourceBytes(buildValidZip({
+    const source = await retainedSource(buildValidZip({
       "units/site/wrangler.jsonc": JSON.stringify({ name: "site", compatibility_date: "2026-10-01", pages_build_output_dir: "public" }),
       "units/site/public/index.html": "<!doctype html><title>x</title>",
       "units/site/public/app.css": "body{}",

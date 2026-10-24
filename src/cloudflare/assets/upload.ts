@@ -13,6 +13,7 @@
 // src/api/routes/asset-upload.ts), which relays only the JWT-scoped multipart
 // (never the OAuth token). It never fabricates a bucketHost PUT.
 
+import { base64String } from "../../core/encoding/base64-ascii.js";
 import { buildWorkerAssetsUploadUrl } from "../client/index.js";
 import { ASSET_UPLOAD_HASH_RE, guessAssetContentType } from "./manifest.js";
 
@@ -66,15 +67,6 @@ function parseRetryAfter(headers: Headers): number | undefined {
     return Math.max(1, Math.ceil((parsed - Date.now()) / 1000));
   }
   return undefined;
-}
-
-function base64FromBytes(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)));
-  }
-  return btoa(binary);
 }
 
 function mapStatusToError(status: number, retryAfter?: number): AssetUploadError {
@@ -132,7 +124,7 @@ export async function uploadAssetBucket(
     for (const hash of unique) {
       const file = filesByHash.get(hash)!;
       const contentType = file.contentType ?? guessAssetContentType(hash);
-      const b64 = base64FromBytes(file.bytes);
+      const b64 = base64String(file.bytes);
       form.append(hash, new Blob([b64], { type: contentType }), hash);
     }
     const controller = new AbortController();

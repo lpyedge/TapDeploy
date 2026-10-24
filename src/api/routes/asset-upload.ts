@@ -10,6 +10,8 @@
 import type { Context, Hono } from "hono";
 import type { AppEnv, TapDeployEnv } from "../app.js";
 import { readBoundedResponse } from "../../core/bounded-response.js";
+import { ASSET_UPLOAD_MAX_BODY_BYTES } from "../../core/upload-limits.js";
+import { readBoundedBody } from "../read-bounded-body.js";
 import {
   buildPagesAssetsCheckMissingUrl,
   buildPagesAssetsUploadUrl,
@@ -19,6 +21,7 @@ import {
 import { authenticate } from "../session-guard.js";
 
 const UPSTREAM_TIMEOUT_MS = 60_000;
+const BODY_READ_DEADLINE_MS = 60_000;
 const UPSTREAM_RESPONSE_MAX_BYTES = 1024 * 1024;
 // Token characters only (no whitespace or control characters can reach a header).
 const JWT_RE = /^[A-Za-z0-9._~+/=-]{16,8192}$/;
@@ -63,13 +66,29 @@ async function forwardUpload(c: Context<AppEnv>, env: TapDeployEnv): Promise<Res
     return c.json({ error: "invalid_account" }, 400);
   }
 
+  // Only now, with the session, CSRF, target, token, type and account all
+  // accepted, does the relay start consuming the body.
+  const tooLarge = () => c.json({ error: "payload_too_large", detail: `request exceeds the ${ASSET_UPLOAD_MAX_BODY_BYTES}-byte API limit; ZIP and static asset bytes must remain in the browser` }, 413);
+  if (Number(c.req.header("content-length")) > ASSET_UPLOAD_MAX_BODY_BYTES) {
+    await c.req.raw.body?.cancel().catch(() => {});
+    return tooLarge();
+  }
+  const read = await readBoundedBody(c.req.raw.body, ASSET_UPLOAD_MAX_BODY_BYTES, BODY_READ_DEADLINE_MS);
+  if (!read.ok) {
+    if (read.reason === "too_large") return tooLarge();
+    return read.reason === "timeout"
+      ? c.json({ error: "request_timeout", detail: "the upload did not arrive in time" }, 408)
+      : c.json({ error: "invalid_body", detail: "request body could not be read" }, 400);
+  }
+
   let upstream: Response;
   try {
     upstream = await fetch(url, {
       method: "POST",
       headers: { Authorization: `Bearer ${jwt}`, "Content-Type": contentType },
-      body: await c.req.arrayBuffer(),
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      body: read.bytes as BodyInit,
+      // The browser cancelling its upload also cancels the upstream request.
+      signal: AbortSignal.any([AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), c.req.raw.signal]),
     });
   } catch {
     return c.json({ error: "upstream_unreachable" }, 502);

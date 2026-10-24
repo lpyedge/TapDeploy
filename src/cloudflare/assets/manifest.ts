@@ -4,6 +4,8 @@
 // 32 hex characters. The server uses the approved workersHash from the manifest;
 // it cannot derive the upload hash from an integrity SHA without file bytes.
 
+import { base64Ascii } from "../../core/encoding/base64-ascii.js";
+
 export const ASSET_UPLOAD_HASH_RE = /^[0-9a-f]{32}$/;
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -52,10 +54,8 @@ export function guessAssetContentType(path: string): string {
   return MIME_BY_EXT[dot] ?? "application/octet-stream";
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const data = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", data as Uint8Array<ArrayBuffer>);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+function hex(bytes: Uint8Array): string {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // 32-hex upload identifier, distinct from the 64-hex release-integrity SHA.
@@ -64,10 +64,8 @@ export async function assetUploadHash(rootedPath: string, bytes: Uint8Array): Pr
   const filename = path.split("/").at(-1)!;
   const dot = filename.lastIndexOf(".");
   const extension = dot > 0 ? filename.slice(dot + 1) : "";
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  const full = await sha256Hex(btoa(binary) + extension);
-  return full.slice(0, 32);
+  const digest = await crypto.subtle.digest("SHA-256", base64Ascii(bytes, new TextEncoder().encode(extension)) as Uint8Array<ArrayBuffer>);
+  return hex(new Uint8Array(digest)).slice(0, 32);
 }
 
 export interface ReleaseAssetRef {

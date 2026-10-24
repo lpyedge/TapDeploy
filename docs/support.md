@@ -19,7 +19,27 @@ a real account. Hosting TapDeploy itself on Workers is being verified.
 | Several Workers with `services` bindings, zone routes, private-R2 owner bootstrap | supported | no |
 
 "Live: yes" means it ran from a local instance against a real account
-(2026-10-21/22), not yet from a hosted instance.
+(2026-10-21/22), not yet from a hosted instance, and with the code of that day.
+
+**Run live on the current build (2026-10-24, a disposable `tapdeploy-live-*` set):**
+Worker and Pages install and upgrade from a local ZIP with the browser-Worker
+check and WebAssembly Pages hashing, a custom domain, a four-Worker service-binding
+chain in dependency order, preserved R2/D1/Queue/Vectorize/AI/Browser bindings,
+the Pages asset relay, and forged-input refusals with unchanged provider state.
+
+**Not live verified in the current build** (offline tests on Node and a local
+workerd with Cloudflare's HTTP mocked only): a release downloaded from a GitHub
+link, the Workers static-asset relay through the installer, creating R2/D1/KV/Queue
+resources and Durable Objects/Workflows (earlier runs only), the session lifetime
+against a real token expiry, and a streamed (rather than buffered) upload to Cloudflare, which
+is not enabled (a direct probe on 2026-10-24 showed Cloudflare accepts a chunked
+body on the Workers-assets and Pages upload endpoints). Cloudflare-side CPU and request metrics have not been measured:
+on the Workers Free plan `prepare` is expected to exceed 10 ms CPU for any
+release with large assets (see [self-hosting](self-hosting.md#3a-deploy-on-cloudflare-workers)).
+
+**Release ZIP:** a local file, a GitHub release link (through the instance's
+relay) or an HTTPS link that sends CORS headers, at most 8 MiB / 24 MiB expanded
+(see [limits](publishing.md#limits)).
 
 ## How a deploy behaves
 

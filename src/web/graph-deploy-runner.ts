@@ -3,8 +3,9 @@
 // then runs the Worker postchecks and the Pages postchecks. A Worker
 // deployment id never enters the Pages loop.
 
-import { doGraphStep, type GraphPlan } from "./api.js";
+import { doGraphStep, isAuthFailure, type GraphPlan } from "./api.js";
 import { v3UnitWorkerPaths, v3WorkerStepBytes, type V3RetainedSource } from "./release.js";
+import { blockedByPrerequisite, parseSchedulerHints, type SchedulerHints } from "./graph-scheduler.js";
 import { graphActionId } from "../core/planning/digest.js";
 import { resolveGraphOperation } from "../core/planning/graph-operation-support.js";
 import { type DeployStepState, verifiedDeploymentUrl, safeErrorMessage } from "./deploy-shared.js";
@@ -49,6 +50,8 @@ export interface GraphDeployContext {
   secretValues?: Record<string, string>;
   /** The operator confirmed replacing what serves a chosen hostname today (Configure step). */
   confirmDomainChanges?: boolean;
+  /** Non-secret dispatch-order advice from the plan response; never authority. */
+  schedulerHints?: unknown;
   signal?: AbortSignal;
   onStep?: (status: GraphStepStatus) => void;
 }
@@ -143,7 +146,7 @@ interface V3UnitAddress {
 }
 
 /** Resolve each unit id to its declared Wrangler path from the V3 config text (addressing only). */
-function v3UnitAddresses(configText: string, source: V3RetainedSource): Map<string, V3UnitAddress> {
+async function v3UnitAddresses(configText: string, source: V3RetainedSource): Promise<Map<string, V3UnitAddress>> {
   let value: unknown;
   try {
     value = JSON.parse(configText);
@@ -153,7 +156,7 @@ function v3UnitAddresses(configText: string, source: V3RetainedSource): Map<stri
   const units = (value as { units?: unknown }).units;
   const out = new Map<string, V3UnitAddress>();
   if (units === undefined) {
-    const candidates = source.files.filter((entry) => entry.path === "wrangler.jsonc" || entry.path.endsWith("/wrangler.jsonc")).map((entry) => entry.path);
+    const candidates = (await source.access.listFiles()).filter((entry) => entry.path === "wrangler.jsonc" || entry.path.endsWith("/wrangler.jsonc")).map((entry) => entry.path);
     if (candidates.length !== 1 || !candidates[0]) throw new Error("implicit single-unit release must contain exactly one wrangler.jsonc");
     out.set("main", { wranglerPath: candidates[0] });
     return out;
@@ -202,6 +205,7 @@ class GraphDeployRunner {
   private readonly deploymentActionIds = new Map<string, string>();
   private assetUnits = new Set<string>();
   private pending: GraphDeployAction[] = [];
+  private hints: SchedulerHints | null = null;
 
   constructor(private readonly ctx: GraphDeployContext) {
     this.onStep = ctx.onStep ?? (() => undefined);
@@ -214,7 +218,7 @@ class GraphDeployRunner {
       return { ok: false, receipts: this.receipts, error: safeErrorMessage(error) };
     }
     try {
-      this.addresses = v3UnitAddresses(this.ctx.configText, this.ctx.source);
+      this.addresses = await v3UnitAddresses(this.ctx.configText, this.ctx.source);
     } catch (error) {
       return { ok: false, receipts: this.receipts, error: safeErrorMessage(error) };
     }
@@ -227,6 +231,7 @@ class GraphDeployRunner {
     // any version upload for that unit.
     this.assetUnits = new Set(this.actions.filter((a) => a.resource === "static-assets").map((a) => a.unitId));
     this.pending = [...this.actions];
+    this.hints = parseSchedulerHints(this.ctx.schedulerHints, (this.ctx.graphPlan.units ?? []).map((unit) => unit.unitId));
     const actionsOutcome = await this.runActions();
     if (actionsOutcome) return actionsOutcome;
     const workerOutcome = await this.runWorkerPostchecks();
@@ -240,7 +245,7 @@ class GraphDeployRunner {
   }
 
   private fail(action: GraphDeployAction | undefined, error: unknown): GraphDeployResult {
-    if (error && typeof error === "object" && ((error as { status?: number }).status === 401 || (error as { status?: number }).status === 403)) {
+    if (isAuthFailure(error)) {
       return { ok: false, receipts: this.receipts, authExpired: true, ...(action ? { failedAction: toFailedAction(action) } : {}) };
     }
     return { ok: false, receipts: this.receipts, ...(action ? { failedAction: toFailedAction(action) } : {}), error: safeErrorMessage(error) };
@@ -253,11 +258,16 @@ class GraphDeployRunner {
     const unitState = { versions, deployments, assetCompletions };
     // Dependency-retry loop: each round must complete at least one action or the
     // graph is deadlocked and fails closed. Server order is authoritative.
+    // With valid hints the plan is walked in order and an action waits (locally,
+    // no request) until the work it must follow is finished; without them the
+    // legacy newest-first sweep relies on the server's dependency refusals.
+    const hints = this.hints;
     for (let round = 0; pending.length > 0 && round <= actions.length; round += 1) {
       if (ctx.signal?.aborted) return { ok: false, receipts, error: "deploy aborted" };
       let completed = 0;
-      for (let index = pending.length - 1; index >= 0; index -= 1) {
+      for (let index = hints ? 0 : pending.length - 1; hints ? index < pending.length : index >= 0; index += hints ? 1 : -1) {
         const action = pending[index]!;
+        if (hints && blockedByPrerequisite(action, pending, hints)) continue;
         onStep({ ...toFailedAction(action), state: "running" });
         try {
           const result = await dispatchGraphAction(ctx, base, addresses, action, receipts, unitState, assetUnits);
@@ -280,6 +290,7 @@ class GraphDeployRunner {
           if (action.resource === "worker") workerActionIds.set(action.unitId, action.actionId);
           if (action.resource === "deployment") deploymentActionIds.set(action.unitId, action.actionId);
           pending.splice(index, 1);
+          if (hints) index -= 1;
           completed += 1;
           onStep({ ...toFailedAction(action), state: "done", ...(result.phaseReceipt !== undefined ? { receipt: true as const } : {}) });
         } catch (error) {
@@ -290,6 +301,12 @@ class GraphDeployRunner {
           onStep({ ...toFailedAction(action), state: "error", detail: safeErrorMessage(error) });
           return fail(action, error);
         }
+      }
+      if (completed === 0 && hints && this.hints) {
+        // Advice that leaves nothing runnable is wrong advice: drop it and let the
+        // legacy sweep and the server's own refusals decide, instead of deadlocking.
+        this.hints = null;
+        return this.runActions();
       }
       if (completed === 0) {
         const stuck = pending[0]!;
@@ -458,8 +475,8 @@ async function dispatchGraphAction(
     args.versionId = versionId;
   } else if (action.phase === "create-worker" || action.phase === "create-version") {
     if (!address.wranglerPath) throw new Error(`unit "${action.unitId}" declares no Wrangler path; cannot address worker bytes`);
-    const paths = v3UnitWorkerPaths(ctx.source, address.wranglerPath);
-    Object.assign(args, v3WorkerStepBytes(ctx.source, paths.main, paths.extras));
+    const paths = await v3UnitWorkerPaths(ctx.source, address.wranglerPath);
+    Object.assign(args, await v3WorkerStepBytes(ctx.source, paths.main, paths.extras));
     if (ctx.secretValues && Object.keys(ctx.secretValues).length > 0) args.secrets = { ...ctx.secretValues };
     if (assetUnits.has(action.unitId)) {
       // The version upload must carry the completion JWT of the same unit's

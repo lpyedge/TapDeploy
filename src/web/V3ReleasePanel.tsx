@@ -1,88 +1,85 @@
-import { Spinner } from "./Spinner.js";
 import type { RefObject } from "react";
-import { Segmented } from "./Segmented.js";
+import { Spinner } from "./Spinner.js";
 
-export type V3ReleaseMode = "url" | "file";
+export type ReleaseStage = "reading" | "analyzing" | "verifying";
+
+// Plain stage names; no percentage because no stage has a trustworthy total.
+const STAGE_TEXT: Record<ReleaseStage, string> = {
+  reading: "Downloading the ZIP…",
+  analyzing: "Checking the ZIP in your browser…",
+  verifying: "Verifying with the installer…",
+};
 
 export interface V3ReleasePanelProps {
-  releaseMode: V3ReleaseMode;
-  /** The parent owns clearing the other side (retained bytes, file input key). */
-  onReleaseMode: (mode: V3ReleaseMode) => void;
   assetUrl: string;
   onAssetUrl: (value: string) => void;
-  /** The retained local ZIP (label only), or null. */
-  source: { label: string } | null;
+  /** The ZIP chosen on this computer (label only), or null: then the link is used. */
+  localFile: { label: string } | null;
+  /** False when the config only allows its own download link. */
+  allowLocalZip: boolean;
   fileKey: number;
   fileInputRef: RefObject<HTMLInputElement | null>;
   busy: boolean;
   /** Computed by the flow from the machine (can RELEASE_READY), account and input validity. */
   prepareDisabled: boolean;
+  /** What the busy flow is doing right now (null while idle). */
+  stage: ReleaseStage | null;
+  onCancel: () => void;
   onFile: (file: File) => void;
+  onClearFile: () => void;
   onPrepare: () => void;
 }
 
-/** Release step: one URL | local ZIP choice and a single Verify button. */
-export function V3ReleasePanel({
-  releaseMode,
-  onReleaseMode,
-  assetUrl,
-  onAssetUrl,
-  source,
-  fileKey,
-  fileInputRef,
-  busy,
-  prepareDisabled,
-  onFile,
-  onPrepare,
-}: V3ReleasePanelProps) {
+/**
+ * Release step on one page: the publisher's download link, or a ZIP from this
+ * computer. A chosen file wins and the link rests until it is removed; there is
+ * nothing to switch.
+ */
+export function V3ReleasePanel({ assetUrl, onAssetUrl, localFile, allowLocalZip, fileKey, fileInputRef, busy, prepareDisabled, stage, onCancel, onFile, onClearFile, onPrepare }: V3ReleasePanelProps) {
   return (
     <>
-      <p className="lead mt-0">Choose the release to install: the publisher's download link, or a release ZIP on this computer. The installer verifies every byte before anything touches Cloudflare.</p>
+      <p className="lead mt-0">Choose the release to install. The installer verifies every byte before anything touches Cloudflare.</p>
       <div className="field">
-        <span id="v3-source-label" className="sr-only">Release source</span>
-        <Segmented
-          name="v3-source"
-          label="Release source"
-          value={releaseMode}
-          onChange={onReleaseMode}
-          options={[
-            { value: "url", label: "Download link", testId: "v3-source-url-mode" },
-            { value: "file", label: "ZIP file", testId: "v3-source-file-mode" },
-          ]}
+        <label htmlFor="v3-asset-url">Download link</label>
+        <input
+          id="v3-asset-url"
+          type="url"
+          data-testid="v3-asset-url"
+          value={assetUrl}
+          disabled={localFile !== null}
+          onChange={(e) => onAssetUrl(e.target.value)}
+          placeholder="https://example.com/release.zip"
         />
-        <div className="mt-3" role="group" aria-labelledby="v3-source-label">
-          {releaseMode === "url" ? (
-            <input id="v3-asset-url" type="url" data-testid="v3-asset-url" value={assetUrl} onChange={(e) => onAssetUrl(e.target.value)} placeholder="https://example.com/release.zip" aria-label="Release ZIP URL" />
-          ) : (
-            <div
-              className="dropzone"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => { e.preventDefault(); const file = e.dataTransfer?.files?.[0]; if (file && !busy) onFile(file); }}
-            >
-              <input
-                readOnly
-                value={source?.label ?? ""}
-                placeholder="Drop a release ZIP here, or browse…"
-                data-testid="v3-local-zip-name"
-                className="text-center"
-                aria-label="Chosen release ZIP file"
-                onClick={() => fileInputRef.current?.click()}
-              />
-              <button type="button" disabled={busy} onClick={() => fileInputRef.current?.click()} data-testid="v3-local-zip-browse">Browse…</button>
-              <input id="v3-local-zip" key={fileKey} ref={fileInputRef} type="file" className="sr-only" accept=".zip,application/zip" data-testid="v3-local-zip" disabled={busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) onFile(file); }} />
-            </div>
-          )}
-        </div>
+        {localFile && <p className="meta">Not used while a ZIP file is chosen.</p>}
       </div>
+      {allowLocalZip && (
+        <div className="field">
+          <label htmlFor="v3-local-zip">{assetUrl.trim() === "" && !localFile ? "Or a release ZIP from this computer" : "Or use a release ZIP from this computer instead"}</label>
+          <div
+            className="dropzone"
+            aria-busy={busy}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); const file = e.dataTransfer?.files?.[0]; if (file && !busy) onFile(file); }}
+          >
+            {localFile ? (
+              <p className="m-0 break-all">
+                <strong data-testid="v3-local-zip-name">{localFile.label}</strong>{" "}
+                <button type="button" className="link" disabled={busy} onClick={() => onClearFile()} data-testid="v3-local-zip-clear">Remove</button>
+              </p>
+            ) : (
+              <p className="m-0">Drop a ZIP here or{" "}
+                <button type="button" className="link" disabled={busy} onClick={() => fileInputRef.current?.click()} data-testid="v3-local-zip-browse">choose a file…</button>
+              </p>
+            )}
+            <input id="v3-local-zip" key={fileKey} ref={fileInputRef} type="file" className="sr-only" accept=".zip,application/zip" data-testid="v3-local-zip" disabled={busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) onFile(file); }} />
+          </div>
+        </div>
+      )}
+      <p className="meta" role="status" data-testid="v3-release-stage">{busy && stage ? STAGE_TEXT[stage] : ""}</p>
       <div className="actionbar">
-        <button
-          type="button"
-          className="primary"
-          disabled={prepareDisabled}
-          onClick={() => onPrepare()}
-          data-testid="v3-prepare"
-        >
-          {busy ? <><Spinner />Verifying…</> : `Verify ${releaseMode === "url" ? "release from link" : source ? source.label : "release"}`}
+        {busy && <button type="button" className="link text-sm" onClick={() => onCancel()} data-testid="v3-release-cancel">Cancel</button>}
+        <button type="button" className="primary" disabled={prepareDisabled} onClick={() => onPrepare()} data-testid="v3-prepare">
+          {busy ? <><Spinner />Verifying…</> : `Verify ${localFile ? localFile.label : "release from link"}`}
         </button>
       </div>
     </>

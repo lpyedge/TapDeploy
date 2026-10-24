@@ -31,7 +31,11 @@ real values. Settings are explained in [self-hosting.md](self-hosting.md#2-setti
 | `PW_RUNTIME=workers npm run test:e2e` | Playwright against the built Worker (`wrangler dev --local`) |
 
 Playwright needs its browser once (`npx playwright install chromium`) and uses
-port 5173 (`PW_PORT` to change it). CI (`.github/workflows/ci.yml`) runs all of
+port 5173 (`PW_PORT` to change it). Build first for `PW_RUNTIME=node|workers`
+(use different `PW_PORT`s if you run them side by side): those runs also execute
+`tests/e2e/runtime-auth.spec.ts` and `tests/e2e/built-assets.spec.ts` (the
+compute Worker chunk and the BLAKE3 WASM are served same-origin and validate),
+which the Vite run skips. CI (`.github/workflows/ci.yml`) runs all of
 the above on every push and pull request, without secrets and without a
 Cloudflare account.
 
@@ -52,5 +56,11 @@ with `deps:install`, caches, test output; safe to delete), `dist/` (build
 output), `.env.local`, and `plan/` (local notes). The root `wrangler.jsonc`
 deploys TapDeploy itself; it is unrelated to the `wrangler.jsonc` files inside
 a release ZIP.
+
+Browser compute (release verification, source accessor, hashing) lives in
+`src/web/compute/` and runs in a Dedicated Worker; the verification sequence is
+shared with the server in `src/release/verify-prebuilt-release.ts`, and
+`tests/unit/release-fixtures.ts` builds the 38-archive corpus (accepted, refused,
+observation) that both are tested against. Do not add a second validator.
 
 Design rules to keep when changing code: [ARCHITECTURE.md](ARCHITECTURE.md).

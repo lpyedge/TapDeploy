@@ -244,7 +244,7 @@ Full field reference: the JSON Schema
 
 ## 5. Test before you share
 
-Open the link, sign in, choose **Local ZIP** and pick your ZIP: you get the full
+Open the link, sign in, and choose your ZIP from this computer on the release page: you get the full
 plan (what will be created, refusals, cost notes) before anything is written. The
 same bytes from the URL are the same release.
 
@@ -310,16 +310,19 @@ Only the final bytes matter:
 - **HTTPS URL**: a GitHub release asset (`…/releases/download/<tag>/<file>.zip`
   or `…/releases/latest/download/<file>.zip`) goes through the instance's
   bounded relay; any other HTTPS host must send CORS headers.
-- **Local ZIP**: a file the user picks; the bytes are sent unchanged.
+- **ZIP from this computer**: a file the user picks (or drops); the bytes are sent unchanged.
 
 Both end at the same server-side verification, and identical bytes are the
-same release. There is no repository or branch picker and no build service.
+same release. Before that, the browser unpacks and checks the ZIP in a Worker
+with the same checks (a bad file, a mismatching `expectedSha256` or an oversize
+download is refused before anything is uploaded); only the server's check issues
+the release proof. There is no repository or branch picker and no build service.
 
 ## Limits
 
 | Budget | Value | Refusal |
 |---|---|---|
-| ZIP (compressed / expanded) | 8 MiB / 24 MiB | `SERVER_ZIP_VERIFY_LIMIT` (413) / `INVALID_PREBUILT_ZIP` |
+| ZIP (compressed / expanded) | 8 MiB / 24 MiB (the same 8 MiB limits a chosen file, a direct download and the GitHub relay, so nothing larger is downloaded) | `SERVER_ZIP_VERIFY_LIMIT` (413) / `INVALID_PREBUILT_ZIP` |
 | Files per ZIP, bytes per file | 1024, 8 MiB | `INVALID_PREBUILT_ZIP` |
 | Compression ratio, path depth | 100×, 16 | `INVALID_PREBUILT_ZIP` |
 | Worker upload | 128 modules, ~6 MiB decoded | `payload-too-large` |
@@ -327,7 +330,10 @@ same release. There is no repository or branch picker and no build service.
 | Pages static assets | 20,000 files | manifest bound error |
 
 Every refusal happens before any write; nothing is chunked or retried around
-a limit.
+a limit. Server cost: `/prepare` re-verifies the whole ZIP, so on the Workers
+Free plan (10 ms CPU per request) a release with large assets is expected to
+exceed the budget (measured locally, not on Cloudflare); use a Paid plan or the
+Node build for such releases.
 
 ## Checklist before publishing
 
@@ -338,4 +344,4 @@ a limit.
 4. Workflow classes extend `WorkflowEntrypoint`, Durable Object classes extend
    `DurableObject`, and new Durable Object classes use `new_sqlite_classes` in a
    single migration tag.
-5. You tested the ZIP with **Local ZIP** on an instance and read the plan.
+5. You tested the ZIP from this computer on an instance and read the plan.

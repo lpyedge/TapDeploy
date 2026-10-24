@@ -17,6 +17,7 @@ import {
   sessionCookieHeader,
   clearSessionCookieHeader,
   sessionCookieName,
+  sessionTtlMs,
 } from "../../auth/session.js";
 import { validateCsrf, validateOrigin } from "../../auth/csrf.js";
 import { cookieName } from "../../auth/cookies.js";
@@ -253,7 +254,10 @@ async function callbackHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<R
     return redirect(c, `${cfg.publicOrigin}/?auth=error&error=scope_denied`);
   }
 
-  const session = await createSession(key, { ttlMs: SESSION_TTL_MS, publicOrigin: cfg.publicOrigin }, {
+  // The session cannot outlive the provider token it carries.
+  const ttlMs = sessionTtlMs(exchanged.expiresIn, SESSION_TTL_MS);
+  if (ttlMs === null) return redirect(c, `${cfg.publicOrigin}/?auth=error&error=token_expired`);
+  const session = await createSession(key, { ttlMs, publicOrigin: cfg.publicOrigin }, {
     accessToken: exchanged.accessToken!,
     tokenType: exchanged.tokenType ?? "Bearer",
     scope: tx.scopes,
@@ -261,7 +265,7 @@ async function callbackHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<R
     configHash: tx.configHash,
     sourcePolicy: { ...tx.source, appId: tx.appId, units: tx.units },
   });
-  const attrs = sessionCookie(session, { ttlMs: SESSION_TTL_MS, publicOrigin: cfg.publicOrigin });
+  const attrs = sessionCookie(session, { ttlMs, publicOrigin: cfg.publicOrigin });
   const setCookie = sessionCookieHeader(attrs);
   const clearTx = `${txName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${cfg.publicOrigin.startsWith("https://") ? "; Secure" : ""}`;
 

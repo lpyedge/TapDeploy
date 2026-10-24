@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   checkConfigCoverage,
+  failure,
   fetchGraphPlan,
   getDomains,
   getHyperdriveConfigs,
@@ -22,15 +23,20 @@ import {
 import { V3FlowMachine, type V3MachineSnapshot, type V3Stage } from "./v3-flow-machine.js";
 import { runGraphDeploy, type GraphStepStatus } from "./graph-deploy-runner.js";
 import { safeErrorMessage } from "./deploy-shared.js";
-import { fetchReleaseBytes, retainV3SourceBytes, type V3RetainedSource } from "./release.js";
-import { V3ReleasePanel } from "./V3ReleasePanel.js";
+import { fetchReleaseBytes, type V3RetainedSource } from "./release.js";
+import { ReleaseAnalysisCancelled, startReleaseAnalysis, type ReleaseAnalysisJob } from "./compute/client.js";
+import { RELEASE_MAX_BYTES } from "../core/upload-limits.js";
+import { formatBytes } from "./lib/guarded-fetch.js";
+import { releasePolicyFromConfigText } from "./compute/release-policy.js";
+import { releaseRefusalMessage } from "./compute/refusal-message.js";
+import { V3ReleasePanel, type ReleaseStage } from "./V3ReleasePanel.js";
 import { V3DeployPanel, secretProblem, secretPromptsFor } from "./V3DeployPanel.js";
 import { V3ConfigurePanel } from "./V3ConfigurePanel.js";
 import { V3DomainsPanel } from "./V3DomainsPanel.js";
 import { V3HyperdrivePanel } from "./V3HyperdrivePanel.js";
 import { V3NamesPanel } from "./V3NamesPanel.js";
 import { changeableSecrets, declaredConfigInputs, inputError } from "./config-inputs.js";
-import { appDisplayName, defaultSourceUrl } from "./config-text.js";
+import { allowsLocalZip, appDisplayName, defaultSourceUrl } from "./config-text.js";
 import { buildPlanRequest, httpUnitsFor, hyperdriveReady, hyperdriveUnitsFor, planInputs } from "./configure-model.js";
 import { draftErrors } from "./domain-choices.js";
 import { nameRows } from "./name-choices.js";
@@ -67,14 +73,14 @@ export function V3Flow(props: V3FlowProps) {
   const [paidConfirmed, setPaidConfirmed] = useState(false);
   const [statuses, setStatuses] = useState<GraphStepStatus[]>([]);
 
-  // Release source is single-select: a URL download or a local file, never a
-  // mix. Switching modes keeps the other input untouched but Prepare only
-  // ever uses the active one; picking a new file replaces the retained bytes.
+  // The release comes from one place: a ZIP chosen on this computer when there
+  // is one, otherwise the download link. Verifying uses exactly that.
   const [assetUrl, setAssetUrl] = useState(() => defaultSourceUrl(configText));
-  const [releaseMode, setReleaseMode] = useState<"url" | "file">("url");
   const [fileKey, setFileKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [source, setSource] = useState<V3RetainedSource | null>(null);
+  const [localFile, setLocalFile] = useState<V3RetainedSource | null>(null);
+  const [releaseStage, setReleaseStage] = useState<ReleaseStage | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [releaseResources, setReleaseResources] = useState<ReleaseResourceName[]>([]);
 
   // onExpired / onReauthorize / onStage are fresh closures on every parent
@@ -87,6 +93,15 @@ export function V3Flow(props: V3FlowProps) {
   const onStageRef = useRef(props.onStage);
   onStageRef.current = props.onStage;
   useEffect(() => { onStageRef.current?.(snap.stage); }, [snap.stage]);
+  // A step change removes the button the keyboard or screen reader was on:
+  // land on the flow heading instead of the top of the document.
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const stageSeen = useRef(snap.stage);
+  useEffect(() => {
+    if (stageSeen.current === snap.stage) return;
+    stageSeen.current = snap.stage;
+    headingRef.current?.focus();
+  }, [snap.stage]);
 
   // Coverage probe: the one-shot OAuth is bound to the exact config it was
   // granted for. A different config needs its own authorization; the server
@@ -136,33 +151,94 @@ export function V3Flow(props: V3FlowProps) {
     setMessage(safeErrorMessage(error));
   };
 
+  // The ZIP is unpacked and checked in a Worker so the page stays responsive;
+  // the server still verifies the same bytes again before any proof exists.
+  // The extracted files stay in that Worker (one per source); this flow owns at
+  // most one live source and releases it when replaced, removed or unmounted.
+  const analysisRef = useRef<ReleaseAnalysisJob | null>(null);
+  const liveSourceRef = useRef<V3RetainedSource | null>(null);
+  useEffect(() => () => { analysisRef.current?.cancel(); liveSourceRef.current?.access.dispose(); }, []);
+  const analyze = async (blob: Blob, label: string): Promise<V3RetainedSource> => {
+    const policy = releasePolicyFromConfigText(configText);
+    if (!policy) throw new Error("This config is invalid: fix it at the config step.");
+    analysisRef.current?.cancel();
+    const job = startReleaseAnalysis(blob, policy);
+    analysisRef.current = job;
+    const analysis = await job.result;
+    if (!analysis.ok) {
+      const friendly = releaseRefusalMessage(analysis, { bytes: blob.size, expectedSha256: policy.expectedSha256 });
+      throw friendly ? new Error(friendly) : failure(analysis.status, analysis.body);
+    }
+    liveSourceRef.current?.access.dispose();
+    const source = { blob, access: analysis.access, label };
+    liveSourceRef.current = source;
+    return source;
+  };
+  const releaseSource = () => { liveSourceRef.current?.access.dispose(); liveSourceRef.current = null; };
+
+  // One release run at a time. Cancel (or a newer run) bumps the run number, so a
+  // superseded run can neither update the page nor install a source afterwards.
+  const runRef = useRef(0);
+  const prepareAbortRef = useRef<AbortController | null>(null);
+  const cancelRelease = () => {
+    runRef.current += 1;
+    analysisRef.current?.cancel();
+    prepareAbortRef.current?.abort();
+    setReleaseStage(null);
+    setBusy(false);
+  };
+
+  const analyzeInRun = async (run: number, blob: Blob, label: string): Promise<V3RetainedSource | null> => {
+    setReleaseStage("analyzing");
+    const source = await analyze(blob, label);
+    if (run !== runRef.current) {
+      source.access.dispose();
+      return null;
+    }
+    return source;
+  };
+
   const loadFile = async (file: File) => {
+    if (file.size > RELEASE_MAX_BYTES) {
+      setMessage(`This ZIP is ${formatBytes(file.size)}; the installer can verify up to ${formatBytes(RELEASE_MAX_BYTES)}.`);
+      return;
+    }
+    const run = ++runRef.current;
     setBusy(true);
     setMessage(null);
     try {
-      setSource(await retainV3SourceBytes(new Uint8Array(await file.arrayBuffer()), file.name));
+      const source = await analyzeInRun(run, file, file.name);
+      if (source) setLocalFile(source);
     } catch (error) {
-      fail(error);
+      if (run === runRef.current && !(error instanceof ReleaseAnalysisCancelled)) fail(error);
     } finally {
-      setBusy(false);
+      if (run === runRef.current) { setBusy(false); setReleaseStage(null); }
     }
   };
 
   const prepare = async () => {
     if (!accountId || !machine.can("RELEASE_READY")) return;
+    const run = ++runRef.current;
     setBusy(true);
     setMessage(null);
     form.clearSecrets();
+    // Cancel aborts whichever network call this run is in (download or server verify).
+    const abort = new AbortController();
+    prepareAbortRef.current = abort;
     try {
-      let retained = source;
-      if (releaseMode === "url") {
+      let retained = localFile;
+      if (!retained) {
         const url = assetUrl.trim();
-        if (!isValidReleaseUrl(url)) throw new Error("enter a public HTTPS ZIP URL first");
-        retained = await retainV3SourceBytes(await fetchReleaseBytes(url, csrf), url);
-        setSource(retained);
+        if (!isValidReleaseUrl(url)) throw new Error("enter a public HTTPS ZIP URL or choose a ZIP file first");
+        setReleaseStage("reading");
+        const bytes = await fetchReleaseBytes(url, csrf, abort.signal);
+        if (run !== runRef.current) return;
+        retained = await analyzeInRun(run, new Blob([bytes as BlobPart]), url);
+        if (!retained) return;
       }
-      if (!retained) throw new Error("choose a release ZIP file first");
-      const prepared = await prepareReleaseZip(csrf, retained.bytes);
+      setReleaseStage("verifying");
+      const prepared = await prepareReleaseZip(csrf, retained.blob, abort.signal);
+      if (run !== runRef.current) return;
       if (!prepared.releaseProof) throw new Error("prepare did not return a release proof");
       const units = prepared.releaseSummary.units ?? [];
       setReleaseResources(prepared.releaseSummary.resources ?? []);
@@ -171,9 +247,9 @@ export function V3Flow(props: V3FlowProps) {
       // still change it on the configure stage (the server re-validates).
       form.startRelease(units.find((unit) => unit.kind === "worker" && typeof unit.name === "string" && unit.name)?.name);
     } catch (error) {
-      fail(error);
+      if (run === runRef.current && !(error instanceof ReleaseAnalysisCancelled)) fail(error);
     } finally {
-      setBusy(false);
+      if (run === runRef.current) { setBusy(false); setReleaseStage(null); }
     }
   };
 
@@ -239,6 +315,7 @@ export function V3Flow(props: V3FlowProps) {
         executionContext: envelope.executionContext,
         approval: envelope.approval,
         ...(envelope.bundleDigests && typeof envelope.bundleDigests === "object" ? { bundleDigests: envelope.bundleDigests as Record<string, string> } : {}),
+        ...(envelope.schedulerHints !== undefined ? { schedulerHints: envelope.schedulerHints } : {}),
       }));
       setPaidConfirmed(paidRiskConfirmed);
     } catch (error) {
@@ -265,13 +342,21 @@ export function V3Flow(props: V3FlowProps) {
   };
 
   // ---- Deploy step ---------------------------------------------------------
+  // Stop only holds back future actions: the step in flight finishes (a provider
+  // write cannot be taken back mid-request) and nothing already written is undone.
+  const deployAbortRef = useRef<AbortController | null>(null);
+  const stopDeploy = () => { setStopping(true); deployAbortRef.current?.abort(); };
   const deploy = async () => {
     const s = machine.snapshot();
     if (!s.source || !s.releaseProof || !s.graphPlan || !s.executionContext || !s.approval) return;
     setStatuses([]);
     setMessage(null);
     setSnap(machine.startDeploy());
+    const stop = new AbortController();
+    deployAbortRef.current = stop;
+    setStopping(false);
     const outcome = await runGraphDeploy({
+      signal: stop.signal,
       csrf,
       accountId,
       source: s.source,
@@ -281,10 +366,13 @@ export function V3Flow(props: V3FlowProps) {
       executionContext: s.executionContext,
       approval: s.approval,
       ...(s.bundleDigests ? { bundleDigests: s.bundleDigests } : {}),
+      ...(s.schedulerHints ? { schedulerHints: s.schedulerHints } : {}),
       ...(Object.keys(form.secretValues).length > 0 ? { secretValues: { ...form.secretValues } } : {}),
       ...(Object.values(form.domainDrafts).some((draft) => draft.bind && draft.confirmReplace) ? { confirmDomainChanges: true } : {}),
       onStep: (status) => setStatuses((prev) => [...prev.filter((entry) => !(entry.unitId === status.unitId && entry.phase === status.phase)), status]),
     });
+    deployAbortRef.current = null;
+    setStopping(false);
     if (outcome.authExpired) {
       props.onExpired();
       return;
@@ -294,7 +382,7 @@ export function V3Flow(props: V3FlowProps) {
     } else {
       setSnap(machine.finishDeploy({
         ok: false,
-        error: outcome.error ?? "deploy failed",
+        error: stop.signal.aborted ? "You stopped the deployment. Steps that already finished stay live; nothing was rolled back." : (outcome.error ?? "deploy failed"),
         ...(outcome.pending ? { pending: true } : {}),
         ...(outcome.failedAction ? { failedAction: `${phaseLabel(outcome.failedAction.phase)}${outcome.failedAction.name ? ` (${outcome.failedAction.name})` : ""}` } : {}),
         verifiedReceipts: outcome.receipts.length,
@@ -314,7 +402,7 @@ export function V3Flow(props: V3FlowProps) {
     <section className="panel" data-testid="v3-flow">
       <div className="flow-head">
         <div className="min-w-0">
-          <h2 className="m-0">Install {appDisplayName(configText, props.appId)}</h2>
+          <h2 className="m-0 outline-none" ref={headingRef} tabIndex={-1}>Install {appDisplayName(configText, props.appId)}</h2>
           <p className="meta m-0 break-all">{props.appId} · config from {props.sourceLabel}</p>
         </div>
         <button type="button" className="link text-sm" onClick={props.onExit} data-testid="v3-exit">Use another config</button>
@@ -332,15 +420,17 @@ export function V3Flow(props: V3FlowProps) {
       )}
       {snap.coverage === "covered" && snap.stage === "release" && (
         <V3ReleasePanel
-          releaseMode={releaseMode}
-          onReleaseMode={(mode) => { setReleaseMode(mode); setSource(null); setFileKey((k) => k + 1); }}
           assetUrl={assetUrl}
           onAssetUrl={setAssetUrl}
-          source={source}
+          localFile={localFile}
+          allowLocalZip={allowsLocalZip(configText)}
+          stage={releaseStage}
+          onCancel={cancelRelease}
+          onClearFile={() => { releaseSource(); setLocalFile(null); setFileKey((k) => k + 1); }}
           fileKey={fileKey}
           fileInputRef={fileInputRef}
           busy={busy}
-          prepareDisabled={busy || !accountId || !machine.can("RELEASE_READY") || (releaseMode === "url" ? !isValidReleaseUrl(assetUrl) : !source)}
+          prepareDisabled={busy || !accountId || !machine.can("RELEASE_READY") || (!localFile && !isValidReleaseUrl(assetUrl))}
           onFile={(file) => void loadFile(file)}
           onPrepare={() => void prepare()}
         />
@@ -417,6 +507,8 @@ export function V3Flow(props: V3FlowProps) {
         busy={busy}
         blocked={blocked}
         message={message}
+        stopping={stopping}
+        onStop={stopDeploy}
         onBackToConfigure={() => setSnap(machine.backToConfigure())}
         onDeploy={() => void deploy()}
         onStartOver={() => setSnap(machine.backToRelease())}

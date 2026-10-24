@@ -51,6 +51,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.4",
     "@noble/hashes": "^2.4.0",
+    "blake3-wasm": "2.1.5",
     "fflate": "^0.8.3",
     "hono": "^4.13.13",
     "jsonc-parser": "^3.3.1",

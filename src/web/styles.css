@@ -134,6 +134,17 @@
     @apply border-0 bg-transparent p-0 text-blue-700 shadow-none hover:bg-transparent hover:underline;
   }
 
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    @apply cursor-not-allowed bg-slate-100 text-slate-400;
+  }
+  textarea.drop-active {
+    @apply border-blue-500 bg-blue-50/40 ring-2 ring-blue-500/30;
+  }
+  .config-hints {
+    @apply mt-2 flex flex-col gap-2 text-sm text-slate-700;
+  }
   .dropzone {
     @apply flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600 hover:border-blue-400 hover:bg-blue-50/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/50;
   }

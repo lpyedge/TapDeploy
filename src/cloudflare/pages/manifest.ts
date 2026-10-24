@@ -11,14 +11,24 @@
 // initializer or reliance on Wrangler's transitive development dependencies.
 
 import { blake3 } from "@noble/hashes/blake3.js";
+import { base64Ascii } from "../../core/encoding/base64-ascii.js";
 import { PAGES_SPECIAL_FILES, PAGES_UPLOAD_HASH_RE } from "./constants.js";
 
 // Compute the 32-hex Pages upload hash for a file path + byte contents.
 // `extension` is derived from the file path's basename extension (no dot).
 export function pagesAssetHash(path: string, contents: Uint8Array): string {
-  const base64 = base64FromBytes(contents);
-  const extension = fileExtension(path);
-  return [...blake3(new TextEncoder().encode(base64 + extension)).subarray(0, 16)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  return pagesHashDigestHex(blake3(pagesHashInput(path, contents)));
+}
+
+// The exact bytes the Pages upload hash digests: ASCII base64 of the file plus
+// its lowercase extension. Shared so an alternative BLAKE3 engine cannot drift.
+export function pagesHashInput(path: string, contents: Uint8Array): Uint8Array {
+  return base64Ascii(contents, new TextEncoder().encode(fileExtension(path)));
+}
+
+// First 16 digest bytes as the 32-hex upload hash.
+export function pagesHashDigestHex(digest: Uint8Array): string {
+  return [...digest.subarray(0, 16)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function assertPagesUploadHash(hash: string): void {
@@ -81,7 +91,11 @@ export function pagesControlFileAtRoot(rootedPath: string): string | undefined {
 // Build the Pages deployment manifest (rooted path -> 32-hex hash) from the
 // extracted static asset files. Duplicate rooted paths fail closed, and a
 // deployment control file at the output root is never hashed as a static asset.
-export function buildPagesManifest(assets: PagesAssetRef[], directory?: string): Record<string, string> {
+export function buildPagesManifest(
+  assets: PagesAssetRef[],
+  directory?: string,
+  hashFile: (path: string, contents: Uint8Array) => string = pagesAssetHash,
+): Record<string, string> {
   const out: Record<string, string> = {};
   for (const asset of assets) {
     const rooted = toPagesAssetPath(asset.path, directory);
@@ -94,7 +108,7 @@ export function buildPagesManifest(assets: PagesAssetRef[], directory?: string):
     if (out[rooted] !== undefined) {
       throw new Error(`duplicate Pages asset path "${rooted}"`);
     }
-    const hash = pagesAssetHash(asset.path, asset.bytes);
+    const hash = hashFile(asset.path, asset.bytes);
     assertPagesUploadHash(hash);
     out[rooted] = hash;
   }
@@ -105,13 +119,4 @@ function fileExtension(path: string): string {
   const base = path.split("/").pop() ?? "";
   const dot = base.lastIndexOf(".");
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
-}
-
-function base64FromBytes(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)));
-  }
-  return btoa(binary);
 }

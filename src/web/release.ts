@@ -3,9 +3,9 @@
 // CORS headers, so only that fixed allowlist uses the authenticated, bounded
 // same-origin relay; ZIP extraction and integrity checking remain in-browser.
 
-import type { ExtractedFile } from "../release/zip.js";
-import { extractZipAsync } from "./lib/zip.js";
+import type { SourceAccessor } from "./compute/source-store.js";
 import { parse as parseJsonc } from "jsonc-parser";
+import { base64String } from "../core/encoding/base64-ascii.js";
 import { readBoundedResponse } from "../core/bounded-response.js";
 import { RELEASE_MAX_BYTES } from "../core/upload-limits.js";
 import { isRelayedDownloadHost } from "../release/url.js";
@@ -18,8 +18,8 @@ const RELEASE_FETCH_TIMEOUT_MS = 120_000;
 // V3 sealed-graph source bridge.
 //
 // Both ZIP sources (HTTPS URL bytes, local file bytes) converge here: the
-// EXACT bytes are retained for the tab flow, the authenticated prepare route
-// receives those identical bytes, and every action-time module payload is
+// EXACT bytes are retained as a Blob for the tab flow, the authenticated prepare
+// route receives those identical bytes, and every action-time module payload is
 // re-read from the retained bytes — never from a mutated in-memory copy and
 // never re-downloaded. The server rehashes every byte against the sealed
 // per-unit bundle before any provider mutation, so a browser-side mixup fails
@@ -27,29 +27,16 @@ const RELEASE_FETCH_TIMEOUT_MS = 120_000;
 // ---------------------------------------------------------------------------
 
 export interface V3RetainedSource {
-  bytes: Uint8Array;
-  files: ExtractedFile[];
+  /** The exact ZIP the server re-verifies; read fresh for each use, never a detached buffer. */
+  blob: Blob;
+  /** Addressing onto the extracted files, which live in the compute Worker. */
+  access: SourceAccessor;
   label: string;
 }
 
-/** Retain a defensive copy of the exact source bytes plus their listing. */
-export async function retainV3SourceBytes(
-  bytes: Uint8Array,
-  label: string,
-): Promise<V3RetainedSource> {
-  const retained = bytes.slice();
-  const extracted = await extractZipAsync(retained);
-  if (!extracted.ok || !extracted.files) {
-    throw new Error(extracted.error ?? "ZIP did not extract");
-  }
-  return { bytes: retained, files: extracted.files, label };
-}
-
 /** Read one exact file from the retained source; unknown paths fail closed. */
-export function v3ModuleBytes(source: V3RetainedSource, path: string): Uint8Array {
-  const file = source.files.find((entry) => entry.path === path);
-  if (!file) throw new Error(`approved source does not contain "${path}"`);
-  return file.bytes.slice();
+export function v3ModuleBytes(source: V3RetainedSource, path: string): Promise<Uint8Array> {
+  return source.access.readFile(path);
 }
 
 export interface V3WorkerStepBytes {
@@ -63,27 +50,17 @@ export interface V3WorkerStepBytes {
  * browser from its own copy of the unit Wrangler); the server verifies every
  * byte against the sealed bundle before dispatch.
  */
-export function v3WorkerStepBytes(
+export async function v3WorkerStepBytes(
   source: V3RetainedSource,
   mainPath: string,
   extraPaths: string[],
-): V3WorkerStepBytes {
-  return {
-    scriptB64: base64FromRetained(v3ModuleBytes(source, mainPath)),
-    additionalModules: [...new Set(extraPaths)].filter((path) => path !== mainPath).map((name) => ({
-      name,
-      contentB64: base64FromRetained(v3ModuleBytes(source, name)),
-    })),
-  };
-}
-
-function base64FromRetained(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)));
+): Promise<V3WorkerStepBytes> {
+  const scriptB64 = base64String(await v3ModuleBytes(source, mainPath));
+  const additionalModules: V3WorkerStepBytes["additionalModules"] = [];
+  for (const name of new Set(extraPaths)) {
+    if (name !== mainPath) additionalModules.push({ name, contentB64: base64String(await v3ModuleBytes(source, name)) });
   }
-  return btoa(binary);
+  return { scriptB64, additionalModules };
 }
 
 /** Directory prefix (with trailing slash, or "") of a unit Wrangler path. */
@@ -124,11 +101,11 @@ export interface V3UnitWorkerPaths {
  * except the Wrangler file itself and the declared asset directory. Addressing
  * only — the server verifies the exact set and every byte before dispatch.
  */
-export function v3UnitWorkerPaths(
+export async function v3UnitWorkerPaths(
   source: V3RetainedSource,
   wranglerPath: string,
-): V3UnitWorkerPaths {
-  const text = new TextDecoder().decode(v3ModuleBytes(source, wranglerPath));
+): Promise<V3UnitWorkerPaths> {
+  const text = new TextDecoder().decode(await v3ModuleBytes(source, wranglerPath));
   const parsed = parseJsonc(text) as { main?: unknown; assets?: { directory?: unknown } };
   const prefix = v3UnitDirOf(wranglerPath);
   const baseDir = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
@@ -137,7 +114,7 @@ export function v3UnitWorkerPaths(
   if (!main) throw new Error(`unit Wrangler "${wranglerPath}" does not declare a resolvable main module`);
   const assetsRaw = parsed.assets && typeof parsed.assets === "object" ? (parsed.assets as { directory?: unknown }).directory : undefined;
   const assetsDir = typeof assetsRaw === "string" && assetsRaw ? resolveV3UnitRelative(baseDir, assetsRaw) : null;
-  const modules = source.files
+  const modules = (await source.access.listFiles())
     .filter((entry) => entry.path.startsWith(prefix) && entry.path !== wranglerPath && (assetsDir === null || !entry.path.startsWith(`${assetsDir}/`)) && (entry.path.endsWith(".mjs") || entry.path.endsWith(".js") || entry.path.endsWith(".wasm")))
     .map((entry) => entry.path)
     .sort();
@@ -146,11 +123,12 @@ export function v3UnitWorkerPaths(
 }
 // GitHub release downloads go through the installer (they send no CORS headers);
 // any other host is fetched by the browser itself and must allow that.
-export async function fetchReleaseBytes(url: string, csrf: string): Promise<Uint8Array> {
+export async function fetchReleaseBytes(url: string, csrf: string, signal?: AbortSignal): Promise<Uint8Array> {
   if (!checkPublicHttpsUrl(url, "release").ok) throw new Error("release URL must use HTTPS and not target a private/local host");
-  if (isRelayedDownloadHost(url)) return fetchViaInstaller(url, csrf);
+  if (isRelayedDownloadHost(url)) return fetchViaInstaller(url, csrf, signal);
   try {
     return await fetchBounded(url, {
+      ...(signal ? { signal } : {}),
       maxBytes: RELEASE_MAX_BYTES,
       accept: "application/zip, application/octet-stream",
       timeoutMs: RELEASE_FETCH_TIMEOUT_MS,
@@ -168,7 +146,7 @@ export async function fetchReleaseBytes(url: string, csrf: string): Promise<Uint
   }
 }
 
-async function fetchViaInstaller(url: string, csrf: string): Promise<Uint8Array> {
+async function fetchViaInstaller(url: string, csrf: string, signal?: AbortSignal): Promise<Uint8Array> {
   const timeout = AbortSignal.timeout(RELEASE_FETCH_TIMEOUT_MS);
   let res: Response;
   try {
@@ -176,7 +154,7 @@ async function fetchViaInstaller(url: string, csrf: string): Promise<Uint8Array>
       method: "POST",
       headers: { "Content-Type": "application/json", "x-tapdeploy-csrf": csrf },
       body: JSON.stringify({ url }),
-      signal: timeout,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
   } catch {
     throw new Error(timeout.aborted ? "release ZIP download timed out" : "could not reach the installer to download the release");

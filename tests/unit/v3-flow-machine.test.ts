@@ -2,9 +2,34 @@
 // table: release -> configure -> deploy -> done. Illegal jumps throw instead
 // of silently rendering a stale plan.
 import { describe, expect, it } from "vitest";
+import { pagesAssetHash } from "../../src/cloudflare/pages/manifest.js";
+import { createSourceStore } from "../../src/web/compute/source-store.js";
 import { V3FlowMachine } from "../../src/web/v3-flow-machine.js";
 
-const source = { bytes: new Uint8Array([1]), files: [], label: "release.zip" };
+const source = { blob: new Blob([new Uint8Array([1])]), access: createSourceStore([], async () => pagesAssetHash), label: "release.zip" };
+
+describe("V3FlowMachine scheduler hints", () => {
+  const hints = { version: 1, topoOrder: ["a"], dependencies: [] };
+  const toDeploy = () => {
+    const m = new V3FlowMachine();
+    m.setCoverage(true);
+    m.setSource(source, "proof", [{ unitId: "main", kind: "worker", name: "api" }]);
+    m.setInputs({}, "install");
+    return m;
+  };
+  it("keeps the plan's hints for the deploy step and drops them with the plan", () => {
+    const m = toDeploy();
+    m.setPlan({ graphPlan: { units: [] }, executionContext: "ctx", approval: "appr", schedulerHints: hints });
+    expect(m.snapshot().schedulerHints).toEqual(hints);
+    m.backToConfigure();
+    expect(m.snapshot().schedulerHints).toBeNull();
+  });
+  it("has no hints when the plan carried none", () => {
+    const m = toDeploy();
+    m.setPlan({ graphPlan: { units: [] }, executionContext: "ctx", approval: "appr" });
+    expect(m.snapshot().schedulerHints).toBeNull();
+  });
+});
 
 describe("V3FlowMachine", () => {
   it("walks release -> configure -> deploy -> done in order", () => {

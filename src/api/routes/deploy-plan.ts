@@ -395,6 +395,10 @@ async function planGraph(request: PlanRequest): Promise<Response> {
     // a missing/mismatched digest before any read); the digests alone prove
     // nothing about the bytes, which the server rehashes at dispatch.
     bundleDigests: Object.fromEntries(release.units.map((unit) => [String(unit.unitId), String(unit.bundleDigest)])),
+    // Non-secret dispatch-order advice: the unit edges already sealed into the
+    // execution context. Scheduling only; the step route still verifies every
+    // receipt, so a wrong or tampered hint can cost a refusal, never a write.
+    schedulerHints: { version: 1 as const, topoOrder: graph.topoOrder, dependencies: contextBase.dependencies },
     paidRisk: {
       operations: graphPlan.cost.operations,
       requiresConfirmation: graphPlan.cost.requiresConfirmation,

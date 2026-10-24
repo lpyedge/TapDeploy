@@ -249,9 +249,29 @@ describe("domains route (read-only custom-domain discovery)", () => {
         records: [{ name: "www.example.com", type: "A", content: "192.0.2.1" }],
         workerDomains: [{ hostname: "api.example.com", service: "api", zone: "example.com" }],
         pagesDomains: { site: ["docs.example.com"], "new-site": [] },
-        pagesDomainStatus: { site: { "docs.example.com": "pending" }, "new-site": {} },
       });
       expect(calls.every((call) => call.method === "GET")).toBe(true);
+    } finally { globalThis.fetch = origFetch; }
+  });
+});
+
+describe("pages-domain-status route (one read for the result page's watch)", () => {
+  it("answers the status Cloudflare reports for one domain with a single read, and 'missing' when it is not bound", async () => {
+    const app = createApp(env());
+    const session = await runConfigLogin(app, {});
+    const calls: string[] = [];
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return jsonResponse(envelope([{ id: "p1", name: "docs.example.com", status: "pending" }, { id: "p2", name: "site.pages.dev", status: "active" }]));
+    }) as typeof fetch;
+    try {
+      const ask = (hostname: string, project = "site") => app.request("/api/cloudflare/pages-domain-status", { method: "POST", headers: headers(session.sessionCookie, session.csrf), body: JSON.stringify({ accountId: ACCOUNT, project, hostname }) });
+      expect(await (await ask("Docs.Example.com")).json()).toEqual({ status: "pending" });
+      expect(await (await ask("other.example.com")).json()).toEqual({ status: "missing" });
+      expect(calls).toHaveLength(2);
+      expect((await ask("docs.example.com", "Bad Name")).status).toBe(400);
+      expect((await ask("not a host")).status).toBe(400);
     } finally { globalThis.fetch = origFetch; }
   });
 });

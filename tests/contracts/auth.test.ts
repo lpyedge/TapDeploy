@@ -230,6 +230,56 @@ describe("auth routes", () => {
     expect(tokenCall!.init?.headers).toMatchObject({ Authorization: `Basic ${btoa(`${CLIENT_ID}:${CLIENT_SECRET}`)}` });
   }, 15000);
 
+  // The session may not outlive the provider token it carries: Max-Age and the
+  // sealed expiresAt follow `expires_in` minus a clock-skew margin, capped at the
+  // existing 20 minutes. Absent or malformed values keep the 20-minute cap.
+  it.each([
+    ["30 s token", 30, 15],
+    ["20 minute token", 1200, 1185],
+    ["1 hour token (20 minute cap)", 3600, 1200],
+    ["absent expires_in (20 minute cap)", undefined, 1200],
+    ["malformed expires_in (20 minute cap)", "soon", 1200],
+  ])("callback session lifetime for a %s", async (_name, expiresIn, expectedSeconds) => {
+    const app = createApp(authEnv());
+    const startRes = await startReq(app);
+    const state = new URL((await startRes.json()).url).searchParams.get("state")!;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => String(input).includes("/oauth2/token")
+      ? jsonResponse({ access_token: "tok-abc", token_type: "Bearer", scope: CONFIG_SCOPES.join(" "), ...(expiresIn !== undefined ? { expires_in: expiresIn } : {}) })
+      : new Response(null, { status: 404 })) as typeof fetch;
+    try {
+      const before = Date.now();
+      const cb = await app.request(`/api/auth/callback?code=code-1&state=${encodeURIComponent(state)}`, { headers: { cookie: await getTxCookie(startRes) } });
+      expect(cb.status).toBe(302);
+      expect(cb.headers.get("location")).toContain("auth=success");
+      const session = await getSessionCookie(cb);
+      expect(session).toContain(`Max-Age=${expectedSeconds}`);
+      const body = await (await app.request("/api/auth/session", { headers: { cookie: session } })).json();
+      expect(body.expiresAt - before).toBeLessThanOrEqual(expectedSeconds * 1000 + 2000);
+      expect(body.expiresAt - before).toBeGreaterThan(expectedSeconds * 1000 - 2000);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  }, 15000);
+
+  it.each([["zero", 0], ["negative", -5], ["inside the clock-skew margin", 10]])("callback refuses a token that is already expired or about to be (%s) and sets no session", async (_name, expiresIn) => {
+    const app = createApp(authEnv());
+    const startRes = await startReq(app);
+    const state = new URL((await startRes.json()).url).searchParams.get("state")!;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => String(input).includes("/oauth2/token")
+      ? jsonResponse({ access_token: "tok-abc", token_type: "Bearer", scope: CONFIG_SCOPES.join(" "), expires_in: expiresIn })
+      : new Response(null, { status: 404 })) as typeof fetch;
+    try {
+      const cb = await app.request(`/api/auth/callback?code=code-1&state=${encodeURIComponent(state)}`, { headers: { cookie: await getTxCookie(startRes) } });
+      expect(cb.status).toBe(302);
+      expect(cb.headers.get("location")).toContain("auth=error&error=token_expired");
+      expect(findCookie(cb, "__Host-tapdeploy_session")).toBeUndefined();
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  }, 15000);
+
   it("callback rejects a mismatched state", async () => {
     const app = createApp(authEnv());
     const startRes = await startReq(app);

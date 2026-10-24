@@ -41,6 +41,7 @@ export interface V3MachineSnapshot {
   executionContext: unknown | null;
   approval: unknown | null;
   bundleDigests: Record<string, string> | undefined;
+  schedulerHints: unknown | null;
   deployOk: boolean | null;
   deployError: string | null;
   deployUrls: string[];
@@ -63,6 +64,7 @@ const initialSnapshot = (): V3MachineSnapshot => ({
   executionContext: null,
   approval: null,
   bundleDigests: undefined,
+  schedulerHints: null,
   deployOk: null,
   deployError: null,
   deployUrls: [],
@@ -141,7 +143,7 @@ export class V3FlowMachine {
   }
 
   /** Plan arrived: configure -> deploy (review lives on the deploy stage). */
-  setPlan(plan: { graphPlan: unknown; executionContext: unknown; approval: unknown; bundleDigests?: Record<string, string> }): V3MachineSnapshot {
+  setPlan(plan: { graphPlan: unknown; executionContext: unknown; approval: unknown; bundleDigests?: Record<string, string>; schedulerHints?: unknown }): V3MachineSnapshot {
     const to = assertTransition(this.snap.stage, "PLAN_READY");
     this.snap = {
       ...this.snap,
@@ -150,6 +152,7 @@ export class V3FlowMachine {
       executionContext: plan.executionContext,
       approval: plan.approval,
       bundleDigests: plan.bundleDigests ? { ...plan.bundleDigests } : undefined,
+      schedulerHints: plan.schedulerHints ?? null,
     };
     return this.snapshot();
   }
@@ -208,6 +211,7 @@ export class V3FlowMachine {
       executionContext: null,
       approval: null,
       bundleDigests: undefined,
+      schedulerHints: null,
       deployOk: null,
       deployError: null,
       deployUrls: [],

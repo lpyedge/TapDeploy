@@ -26,7 +26,7 @@ async function hash(value: unknown): Promise<string> {
 const dirname = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
 
 /** Builds all identities from verified ZIP bytes; no browser-supplied paths/hashes. */
-export async function buildPerUnitBundles(zip: PrebuiltZipResult, options: { resourceOnlyUnitIds?: string[]; unitDeclarations?: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string }> } = {}): Promise<PerUnitBundlesResult> {
+export async function buildPerUnitBundles(zip: PrebuiltZipResult, options: { resourceOnlyUnitIds?: string[]; unitDeclarations?: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string }>; /** Same digest, different engine (the browser passes its WASM hash); the server uses the default. */ pagesHash?: (path: string, bytes: Uint8Array) => string } = {}): Promise<PerUnitBundlesResult> {
   if (!zip.ok || !zip.files || !zip.manifest) return { ok: false, errors: ["ZIP_NOT_VERIFIED"] };
   const byPath = new Map(zip.files.map((file) => [file.path, file]));
   const configs = zip.files.filter((file) => file.path.endsWith("wrangler.jsonc")).sort((a, b) => a.path.localeCompare(b.path));
@@ -146,7 +146,7 @@ export async function buildPerUnitBundles(zip: PrebuiltZipResult, options: { res
       return { ok: false, errors: [`PLATFORM_BINDING_REQUIRES_WORKER:${file.path}`] };
     }
     if (assetFiles.some((asset) => config.kind === "pages" && pagesControlFileAtRoot(toPagesAssetPath(asset.path, assetDirectory)))) return { ok: false, errors: ["PAGES_CONTROL_FILE_UNSUPPORTED"] };
-    const assets = await Promise.all(assetFiles.map(async (candidate) => ({ path: candidate.path, sha256: candidate.sha256, size: candidate.size, ...(config.kind === "pages" ? { pagesHash: pagesAssetHash(candidate.path, candidate.bytes) } : { workersHash: await assetUploadHash(candidate.path, candidate.bytes) }) })));
+    const assets = await Promise.all(assetFiles.map(async (candidate) => ({ path: candidate.path, sha256: candidate.sha256, size: candidate.size, ...(config.kind === "pages" ? { pagesHash: (options.pagesHash ?? pagesAssetHash)(candidate.path, candidate.bytes) } : { workersHash: await assetUploadHash(candidate.path, candidate.bytes) }) })));
     assets.sort((a, b) => a.path.localeCompare(b.path));
     const declared = options.unitDeclarations?.filter((unit) => unit.wrangler === file.path);
     if (options.unitDeclarations?.length && (declared?.length !== 1 || declared[0]?.kind !== config.kind)) return { ok: false, errors: [`UNDECLARED_WRANGLER:${file.path}`] };

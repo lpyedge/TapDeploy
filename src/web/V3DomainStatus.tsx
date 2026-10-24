@@ -3,8 +3,8 @@
 // a manual re-check once the watch gives up.
 
 import { useEffect, useState } from "react";
-import { getDomains } from "./api.js";
-import { READINESS_POLL_MS, READINESS_WATCH_MS, pagesReadiness, probeHostname, type DomainReadiness } from "./domain-readiness.js";
+import { getPagesDomainStatus } from "./api.js";
+import { READINESS_WATCH_MS, pagesReadiness, probeHostname, readinessDelay, type DomainReadiness } from "./domain-readiness.js";
 import { Spinner } from "./Spinner.js";
 
 export interface DomainTarget {
@@ -23,11 +23,11 @@ export function V3DomainStatus({ csrf, accountId, domain }: { csrf: string; acco
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const started = Date.now();
+    let attempt = 0;
     setGaveUp(false);
     const check = async (): Promise<DomainReadiness> => {
       if (domain.kind === "pages" && domain.project) {
-        const facts = await getDomains(csrf, accountId, { pagesProjects: [domain.project] });
-        return pagesReadiness(facts.pagesDomainStatus?.[domain.project]?.[domain.hostname]);
+        return pagesReadiness(await getPagesDomainStatus(csrf, accountId, domain.project, domain.hostname));
       }
       return (await probeHostname(domain.hostname)) ? { state: "live" } : { state: "pending" };
     };
@@ -37,7 +37,7 @@ export function V3DomainStatus({ csrf, accountId, domain }: { csrf: string; acco
       setReadiness(next);
       if (next.state !== "pending") return;
       if (Date.now() - started >= READINESS_WATCH_MS) setGaveUp(true);
-      else timer = setTimeout(() => void tick(), READINESS_POLL_MS);
+      else timer = setTimeout(() => void tick(), readinessDelay(attempt++));
     };
     void tick();
     return () => {

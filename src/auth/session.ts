@@ -36,6 +36,23 @@ export interface SessionConfig {
   publicOrigin: string;
 }
 
+// Margin kept between a session's end and the provider token's own expiry, so a
+// slightly fast server clock cannot leave a session that outlives its token.
+export const TOKEN_CLOCK_SKEW_MS = 15_000;
+
+/**
+ * Session lifetime for a freshly issued provider token: never longer than
+ * `maxMs`, never past the token's own `expires_in` (minus the clock-skew margin).
+ * An absent or malformed `expires_in` keeps the conservative `maxMs`; a token
+ * that is already expired or about to be (nothing left after the margin) yields
+ * null: there is no session worth building on it.
+ */
+export function sessionTtlMs(expiresInSeconds: unknown, maxMs: number): number | null {
+  if (typeof expiresInSeconds !== "number" || !Number.isFinite(expiresInSeconds)) return maxMs;
+  const ttl = Math.min(maxMs, Math.floor(expiresInSeconds * 1000) - TOKEN_CLOCK_SKEW_MS);
+  return ttl > 0 ? ttl : null;
+}
+
 export async function createSession(
   key: CryptoKey,
   cfg: SessionConfig,

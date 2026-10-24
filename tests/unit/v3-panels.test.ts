@@ -105,21 +105,43 @@ describe("secretPromptsFor", () => {
 describe("panel markup from props alone", () => {
   const release = (overrides: Partial<Parameters<typeof V3ReleasePanel>[0]> = {}) =>
     renderToStaticMarkup(createElement(V3ReleasePanel, {
-      releaseMode: "url", onReleaseMode: noop, assetUrl: "", onAssetUrl: noop, source: null, fileKey: 0,
-      fileInputRef: { current: null }, busy: false, prepareDisabled: true, onFile: noop, onPrepare: noop, ...overrides,
+      assetUrl: "", onAssetUrl: noop, localFile: null, allowLocalZip: true, fileKey: 0,
+      fileInputRef: { current: null }, busy: false, prepareDisabled: true, stage: null, onCancel: noop, onFile: noop, onClearFile: noop, onPrepare: noop, ...overrides,
     }));
 
-  it("release: URL mode shows the URL box, file mode the picker; Verify follows prepareDisabled", () => {
+  it("release: a busy flow names its stage in a live region and offers Cancel; an idle one shows neither", () => {
+    const idle = release();
+    expect(idle).not.toContain("v3-release-cancel");
+    expect(idle).toMatch(/role="status"[^>]*data-testid="v3-release-stage"><\/p>/);
+    for (const [stage, text] of [["reading", "Downloading the ZIP…"], ["analyzing", "Checking the ZIP in your browser…"], ["verifying", "Verifying with the installer…"]] as const) {
+      const busy = release({ busy: true, stage });
+      expect(busy).toContain(text);
+      expect(busy).toContain('data-testid="v3-release-cancel"');
+      expect(busy).toContain('aria-busy="true"');
+      expect(busy).not.toMatch(/\d+\s?%/);
+    }
+  });
+
+  it("release: the link and the file picker share one page; a chosen file takes over, Verify follows prepareDisabled", () => {
     const url = release();
     expect(url).toContain('data-testid="v3-asset-url"');
-    expect(url).not.toContain('data-testid="v3-local-zip-browse"');
+    expect(url).toContain('data-testid="v3-local-zip-browse"');
+    expect(url).not.toContain('v3-local-zip-clear');
     expect(url).toMatch(/data-testid="v3-prepare"[^>]*>Verify release from link</);
     expect(url).toMatch(/<button[^>]*disabled=""[^>]*data-testid="v3-prepare"|<button[^>]*data-testid="v3-prepare"[^>]*disabled=""/);
-    const file = release({ releaseMode: "file", source: { label: "release.zip" }, prepareDisabled: false });
-    expect(file).toContain('data-testid="v3-local-zip-browse"');
-    expect(file).toContain('value="release.zip"');
+    const file = release({ localFile: { label: "release.zip" }, prepareDisabled: false });
+    expect(file).toMatch(/<input[^>]*disabled=""[^>]*data-testid="v3-asset-url"|<input[^>]*data-testid="v3-asset-url"[^>]*disabled=""/);
+    expect(file).toContain("Not used while a ZIP file is chosen.");
+    expect(file).toContain("release.zip");
+    expect(file).toContain('data-testid="v3-local-zip-clear"');
     expect(file).toContain("Verify release.zip");
     expect(file).not.toMatch(/disabled=""[^>]*data-testid="v3-prepare"/);
+  });
+
+  it("release: a config limited to its own link offers no file picker", () => {
+    const html = release({ allowLocalZip: false });
+    expect(html).toContain('data-testid="v3-asset-url"');
+    expect(html).not.toContain("v3-local-zip");
   });
 
   const configure = (overrides: Partial<Parameters<typeof V3ConfigurePanel>[0]> = {}) =>

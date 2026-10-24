@@ -1,7 +1,7 @@
 // Configure-step custom-domain drafts -> plan request (browser helpers).
 
 import { describe, expect, it } from "vitest";
-import { EMPTY_DRAFT, boundHostnames, domainRequest, draftErrors, draftHostname, existingSubdomains, hostnameOccupant, zoneOf, type HttpUnit } from "../../src/web/domain-choices.js";
+import { EMPTY_DRAFT, boundHostnames, boundStance, withStance, domainRequest, draftErrors, draftHostname, existingSubdomains, hostnameOccupant, zoneOf, type HttpUnit } from "../../src/web/domain-choices.js";
 import type { DomainsEnvelope } from "../../src/web/api.js";
 
 const facts: DomainsEnvelope = {
@@ -52,5 +52,26 @@ describe("domain drafts", () => {
     const zoneRecords = [{ name: "www.example.com" }, { name: "example.com" }, { name: "a.shop.example.com" }, { name: "*.example.com" }, { name: "other.net" }];
     expect(existingSubdomains("example.com", facts, zoneRecords)).toEqual(["", "a.shop", "api", "taken", "www"]);
     expect(existingSubdomains("", facts, zoneRecords)).toEqual([]);
+  });
+});
+
+describe("what to do with the domains bound today", () => {
+  const bound = ["api.example.com", "www.example.com"];
+
+  it("keep, replace and remove are one choice: replacing or removing unbinds them all, keeping touches none", () => {
+    const keep = EMPTY_DRAFT;
+    expect(boundStance(keep)).toBe("keep");
+    const replace = withStance({ ...keep, zone: "example.com", sub: "x" }, "replace", bound);
+    expect(replace).toMatchObject({ bind: true, remove: bound, sub: "", confirmRemove: false });
+    expect(boundStance(replace)).toBe("replace");
+    const remove = withStance(replace, "remove", bound);
+    expect(remove).toMatchObject({ bind: false, remove: bound });
+    expect(boundStance(remove)).toBe("remove");
+    expect(withStance({ ...remove, confirmRemove: true }, "keep", bound)).toMatchObject({ bind: false, remove: [], confirmRemove: false });
+  });
+
+  it("replacing needs the unbinding confirmed before the plan", () => {
+    const replace = { ...withStance({ ...EMPTY_DRAFT, zone: "example.com" }, "replace", bound), sub: "new" };
+    expect(draftErrors([{ unitId: "main", kind: "worker", target: "api" }], { main: replace }, null, {}, undefined)).toEqual({ main: "confirm the removal first" });
   });
 });

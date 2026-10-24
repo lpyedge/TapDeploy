@@ -88,9 +88,14 @@ for name in PUBLIC_ORIGIN OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET; do
 done
 ```
 
-The Workers Free plan allows 10 ms CPU per request; whether ZIP verification
-fits has not been measured, so use a Paid plan or Node/Docker if `prepare`
-fails.
+The Workers Free plan allows 10 ms CPU per request. Billed CPU on Cloudflare
+has not been measured, but `prepare` re-verifies the whole ZIP on the server
+(locally it takes hundreds of milliseconds for a release with large assets,
+about 225 ms for 5 MiB of assets in a workerd run), so treat the Free plan as
+**not cleared** for anything but tiny releases and use a Paid plan or
+Node/Docker if `prepare` fails. The browser does part of the work too (it
+checks the ZIP in a Worker), but the server still repeats it: that repetition
+is what makes the release proof.
 
 ## 3b. Deploy with Node.js or Docker
 

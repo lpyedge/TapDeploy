@@ -1,5 +1,5 @@
 import type { DomainsEnvelope } from "./api.js";
-import { EMPTY_DRAFT, boundHostnames, draftHostname, existingSubdomains, hostnameOccupant, type HttpUnit, type RecordsByZone, type UnitDomainDraft } from "./domain-choices.js";
+import { EMPTY_DRAFT, boundHostnames, boundStance, withStance, draftHostname, existingSubdomains, hostnameOccupant, type HttpUnit, type RecordsByZone, type UnitDomainDraft } from "./domain-choices.js";
 import { Disclosure } from "./Disclosure.js";
 import { Segmented } from "./Segmented.js";
 
@@ -75,6 +75,7 @@ interface UnitDomainsProps {
 function UnitDomains({ unit, mode, facts, records, draft, error, selfHostname, onDraft }: UnitDomainsProps) {
   const set = (patch: Partial<UnitDomainDraft>) => onDraft({ ...draft, ...patch });
   const bound = mode === "upgrade" || unit.kind === "pages" ? boundHostnames(unit, facts) : [];
+  const stance = boundStance(draft);
   const hostname = draft.bind ? draftHostname(draft) : null;
   const zoneRecords = records[draft.zone] ?? [];
   const occupant = hostname ? hostnameOccupant(hostname, unit, facts, zoneRecords) : null;
@@ -82,25 +83,25 @@ function UnitDomains({ unit, mode, facts, records, draft, error, selfHostname, o
   return (
     <div className="domain-unit" data-testid={`v3-domain-${unit.unitId}`}>
       <p className="m-0">{unit.kind === "pages" ? "Pages site" : "Worker"} <strong>{unit.target}</strong></p>
-      {mode === "upgrade" && (
-        <p className="meta m-0">{bound.length > 0 ? "Bound today — kept unless you untick it:" : "No custom domain is bound to it today."}</p>
-      )}
+      {mode === "upgrade" && bound.length === 0 && <p className="meta m-0">No custom domain is bound to it today.</p>}
       {bound.length > 0 && (
-        <ul className="m-0 list-none p-0" data-testid={`v3-domain-bound-${unit.unitId}`}>
-          {bound.map((name) => (
-            <li key={name}>
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!draft.remove.includes(name)}
-                  onChange={(e) => set({ remove: e.target.checked ? draft.remove.filter((item) => item !== name) : [...draft.remove, name], confirmRemove: false })}
-                  data-testid={`v3-domain-keep-${name}`}
-                />
-                <span className="break-all">{name}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="meta m-0">{mode === "upgrade" ? "Bound today:" : "Already bound to this site:"}</p>
+          <ul className="m-0 list-none p-0 break-all" data-testid={`v3-domain-bound-${unit.unitId}`}>
+            {bound.map((name) => <li key={name}>{name}</li>)}
+          </ul>
+          <Segmented
+            name={`v3-domain-stance-${unit.unitId}`}
+            label="What to do with the bound domain"
+            value={stance}
+            options={[
+              { value: "keep", label: "Keep", testId: `v3-domain-stance-keep-${unit.unitId}` },
+              { value: "replace", label: "Use another instead", testId: `v3-domain-stance-replace-${unit.unitId}` },
+              { value: "remove", label: "Remove", testId: `v3-domain-stance-remove-${unit.unitId}` },
+            ]}
+            onChange={(next) => onDraft(withStance(draft, next, bound))}
+          />
+        </>
       )}
       {draft.remove.length > 0 && (
         <label className="warn-block mt-2 flex items-start gap-2 text-sm text-amber-900">
@@ -108,10 +109,10 @@ function UnitDomains({ unit, mode, facts, records, draft, error, selfHostname, o
           <span>Unbind {draft.remove.join(", ")}: visitors of {draft.remove.length > 1 ? "these addresses" : "this address"} will no longer reach this app.</span>
         </label>
       )}
-      {facts.zones.length > 0 && (
+      {bound.length === 0 && facts.zones.length > 0 && (
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" checked={draft.bind} onChange={(e) => set({ bind: e.target.checked, confirmReplace: false })} data-testid={`v3-domain-bind-${unit.unitId}`} />
-          <span>Bind {bound.length > 0 ? "another" : "a"} domain</span>
+          <span>Bind a domain</span>
         </label>
       )}
       {draft.bind && (

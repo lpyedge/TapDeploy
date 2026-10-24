@@ -33,6 +33,19 @@ export interface UnitDomainDraft {
 
 export const EMPTY_DRAFT: UnitDomainDraft = { bind: false, zone: "", subMode: "new", sub: "", confirmReplace: false, remove: [], confirmRemove: false };
 
+/** What to do with the domains bound today: keep them, move to another one, or remove them. They are one choice, never combined. */
+export type BoundStance = "keep" | "replace" | "remove";
+
+export function boundStance(draft: Pick<UnitDomainDraft, "bind" | "remove">): BoundStance {
+  if (draft.remove.length === 0) return "keep";
+  return draft.bind ? "replace" : "remove";
+}
+
+/** The draft after choosing a stance: replacing or removing unbinds every domain bound today (the operator confirms that), keeping touches none. */
+export function withStance(draft: UnitDomainDraft, stance: BoundStance, bound: readonly string[]): UnitDomainDraft {
+  return { ...draft, bind: stance === "replace", remove: stance === "keep" ? [] : [...bound], confirmRemove: false, confirmReplace: false, sub: "" };
+}
+
 /** The hostname a draft would bind, or null when it is not a valid name in the zone. */
 export function draftHostname(draft: Pick<UnitDomainDraft, "zone" | "sub">): string | null {
   if (!draft.zone) return null;

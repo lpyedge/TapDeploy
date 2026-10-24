@@ -9,7 +9,10 @@ the browser.** English | [繁體中文](README.zh-TW.md)
 A publisher shares a link. The user opens it, signs in to Cloudflare once,
 reviews exactly what will be created, and confirms. TapDeploy deploys the
 publisher's prebuilt Workers and Pages release, with its storage and bindings,
-into the user's own account, on the user's own domain if they want one.
+into the user's own account, on the user's own domain if they want one. The
+workflow runs in the browser; every call to Cloudflare is made by the
+installer's server on the user's behalf (Cloudflare's API cannot be called from a
+page).
 
 > **Status: not release-ready.** Tests and CI pass and the main features have
 > run against a real account; hosting TapDeploy on Cloudflare Workers is being
@@ -74,8 +77,11 @@ step that the user cannot get wrong:
    the app, its release ZIP and the Cloudflare permissions it needs.
 2. **Sign in to Cloudflare once.** The consent page lists only those
    permissions; the token never reaches the page's JavaScript.
-3. **Pick the release ZIP** (the published URL or a local file). The server
-   verifies every byte; nothing is compiled.
+3. **Pick the release ZIP** (the published URL or a local file). Your browser
+   checks it first, so a bad file is refused before it is uploaded; the server
+   then verifies every byte and its check is the one that counts. Nothing is
+   compiled. Your files are processed in the browser, but every Cloudflare call
+   goes through the installer's server (Cloudflare's API allows no browser calls).
 4. **Configure:** new install or upgrade, then the form the config describes
    (what must be answered first, optional settings collapsed): its inputs, the name of every Worker, Pages site and resource (the
    publisher's names are suggestions), and an optional domain per Worker or

@@ -70,6 +70,15 @@ test.describe("dynamic installer UI", () => {
     }, text);
     await expect(page.getByTestId("config-input")).toHaveValue(text);
   });
+  test("choosing a local JSON file fills the textarea, and the hints say how", async ({ page }) => {
+    await mockApi(page, { session: { authenticated: false } });
+    await page.goto("/");
+    await expect(page.locator(".config-hints")).toContainText("Paste the link to a tapdeploy.config.json, or paste its content.");
+    await expect(page.locator(".config-hints")).toContainText("or drop it onto the box above");
+    const text = JSON.stringify({ schemaVersion: 3, app: { id: "pick/test", name: "Pick" }, source: { allowLocalZip: true }, capabilities: ["workers"] });
+    await page.getByTestId("config-file").setInputFiles({ name: "tapdeploy.config.json", mimeType: "application/json", buffer: Buffer.from(text) });
+    await expect(page.getByTestId("config-input")).toHaveValue(text);
+  });
   test("help tooltips open on tap and close with Escape", async ({ page }) => {
     await mockApi(page, { session: { authenticated: false } });
     await page.goto("/");

@@ -5,9 +5,11 @@
 // request is bounded so it fits an API isolate: the raw bytes of one request are
 // capped, which also caps the largest single asset the installer can upload.
 
-// A release ZIP, uploaded or downloaded (a download passes through the installer
-// as a stream and is cut off at this size).
-export const RELEASE_MAX_BYTES = 64 * 1024 * 1024;
+// The largest release ZIP the installer verifies and deploys. One number for the
+// whole path: a chosen file, a download (direct or relayed by the installer, cut
+// off at this size) and the server's own check, so nobody downloads more than can
+// be installed.
+export const RELEASE_MAX_BYTES = 8 * 1024 * 1024;
 
 // What the API accepts for one forwarded request (base64 payload + framing).
 export const ASSET_UPLOAD_MAX_BODY_BYTES = 16 * 1024 * 1024;

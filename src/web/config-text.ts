@@ -29,6 +29,11 @@ export function appDisplayName(text: string, fallback: string): string {
   return typeof name === "string" && name ? name : fallback;
 }
 
+/** Whether the user may pick a ZIP from their own computer (default yes; a config can limit it to its own link). */
+export function allowsLocalZip(text: string): boolean {
+  return record(parse(text)?.source)?.allowLocalZip !== false;
+}
+
 /** The release ZIP address the config suggests, or "". */
 export function defaultSourceUrl(text: string): string {
   const url = record(parse(text)?.source)?.defaultUrl;
