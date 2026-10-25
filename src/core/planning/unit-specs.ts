@@ -324,9 +324,9 @@ function buildUnitSpec(ctx: UnitContext, plan: UnitPlan, { config, manifestDiges
       // Nothing here is ever created: a missing config, store or secret
       // blocks the plan. A Vectorize index is created only by a resource-only
       // unit that declares its dimensions and metric.
-      hyperdrive: array("hyperdrive").flatMap((entry) => typeof entry.binding === "string" && typeof entry.id === "string" ? [{ binding: entry.binding, configName: entry.id, configId: entry.id, createIfMissing: false }] : []),
+      hyperdrive: array("hyperdrive").flatMap((entry) => typeof entry.binding === "string" && typeof entry.id === "string" ? [{ binding: entry.binding, configName: entry.id, configId: entry.id }] : []),
       vectorize: array("vectorize").flatMap((entry) => typeof entry.binding === "string" && typeof entry.indexName === "string" ? [{ binding: entry.binding, indexName: entry.indexName, createIfMissing: false }] : []),
-      secretsStore: array("secretsStoreSecrets").flatMap((entry) => typeof entry.binding === "string" && typeof entry.storeId === "string" && typeof entry.secretName === "string" ? [{ binding: entry.binding, storeName: entry.storeId, storeId: entry.storeId, createIfMissing: false, secretName: entry.secretName, secretCreateIfMissing: false }] : []),
+      secretsStore: array("secretsStoreSecrets").flatMap((entry) => typeof entry.binding === "string" && typeof entry.storeId === "string" && typeof entry.secretName === "string" ? [{ binding: entry.binding, storeName: entry.storeId, storeId: entry.storeId, secretName: entry.secretName }] : []),
       runtimeBindings: [
         ...(isBinding(wrangler.ai) ? [{ binding: wrangler.ai.binding, type: "ai" as const }] : []),
         ...(isBinding(wrangler.browser) ? [{ binding: wrangler.browser.binding, type: "browser-rendering" as const }] : []),

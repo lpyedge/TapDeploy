@@ -12,23 +12,7 @@ import type { VectorizeBindingSpec } from "../../core/deploy-spec.js";
 import type { VectorizeCreateRequest, VectorizeIndex } from "../models/index.js";
 import {
   ResourceConflictError,
-  type ResourceAdapter,
-  type ResourceSupport,
 } from "./types.js";
-
-export const VECTORIZE_SUPPORT: ResourceSupport = {
-  kind: "vectorize",
-  label: "Vectorize index",
-  install: "create-declared",
-  upgrade: "preserve",
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const vectorizeAdapter: ResourceAdapter = {
-  support: VECTORIZE_SUPPORT,
-  mutation: "ensureVectorizeIndex",
-};
 
 export type VectorizeAction =
   | { binding: string; indexName: string; action: "preserve"; id: string }

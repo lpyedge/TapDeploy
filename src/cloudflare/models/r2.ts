@@ -12,18 +12,6 @@ export interface R2Bucket {
   storage_class?: string;
 }
 
-export interface R2BucketListResult {
-  buckets: R2Bucket[];
-}
-
-export interface R2BucketListEnvelope {
-  result: R2Bucket[];
-}
-
-export interface R2BucketEnvelope {
-  result: R2Bucket;
-}
-
 // R2 bucket domain surfaces (managed r2.dev endpoint + custom domains).
 // These are policy/identity metadata reads only — never object contents.
 export interface R2ManagedDomain {

@@ -25,7 +25,7 @@ export interface PlanContext {
 
 // R2
 function planR2(c: PlanContext): void {
-  const { spec, snapshot, expected, isInstall, providedElsewhere, providedSkip, diffs, guards } = c;
+  const { spec, snapshot, expected, providedElsewhere, providedSkip, diffs, guards } = c;
   const snapshotBucket = new Map(snapshot.r2Buckets.map((b) => [b.name, b.id]));
   for (const binding of spec.cloudflare.r2) {
     const remoteId = snapshotBucket.get(binding.bucketName);
@@ -66,46 +66,6 @@ function planR2(c: PlanContext): void {
           code: "r2-drift",
           level: "block",
           detail: `R2 bucket "${name}" identity changed (${id} -> ${remoteId}); refuse to re-deploy onto a changed mapping`,
-        });
-      }
-    }
-  }
-
-  // binding identity. On upgrade, a declared binding that already
-  // exists on the deployed Worker must keep its bucket. A different bucket
-  // name for the same binding is an unapproved remap and blocks (fail closed),
-  // unless the config lets the user swap it (`onUpgrade: "change"`). Installs (no worker) and bindings with no deployed entry are unaffected.
-  // Missing scope yields an empty deployed map and therefore cannot verify;
-  // the later version upload still carries the declared bindings and the
-  // provider fails closed on permission errors.
-  if (!isInstall) {
-    const deployed = snapshot.workerR2Bindings ?? {};
-    for (const binding of spec.cloudflare.r2) {
-      const liveBucket = deployed[binding.binding];
-      if (liveBucket !== undefined && liveBucket !== binding.bucketName && !binding.changeOnUpgrade) {
-        guards.push({
-          code: "r2-drift",
-          level: "block",
-          detail: `R2 binding "${binding.binding}" currently maps to bucket "${liveBucket}"; refusing to remap to "${binding.bucketName}" without approval`,
-        });
-      }
-    }
-  }
-
-  // expected binding drift. When the plan reference carries the
-  // deployed map, an outside rebind between plan and write blocks even if the
-  // spec itself is unchanged. a previously-bound entry that is now GONE
-  // is drift as well (an outsider deleting it must not pass silently), so the
-  // comparison is `now !== bucket` and missing counts as a mismatch.
-  if (expected?.workerR2Bindings) {
-    const currentBindings = snapshot.workerR2Bindings ?? {};
-    for (const [binding, bucket] of Object.entries(expected.workerR2Bindings)) {
-      const now = currentBindings[binding];
-      if (now !== bucket) {
-        guards.push({
-          code: "r2-drift",
-          level: "block",
-          detail: `R2 binding "${binding}" identity changed (${bucket} -> ${now ?? "missing"}); refuse to re-deploy onto a changed mapping`,
         });
       }
     }
@@ -431,8 +391,7 @@ function planWorkflowDefinitions(c: PlanContext): void {
   }
 }
 
-// Hyperdrive configs. Preserve by identity; create only when declared +
-// permitted; conflict (missing + createIfMissing=false) blocks.
+// Hyperdrive configs. Preserve by identity; a missing config blocks (never created).
 function planHyperdrive(c: PlanContext): void {
   const { spec, snapshot, diffs, guards } = c;
   const snapshotHyperdrive = new Map(snapshot.hyperdriveConfigs.map((c) => [c.name, c.id]));
@@ -446,8 +405,6 @@ function planHyperdrive(c: PlanContext): void {
         before: remoteId,
         after: remoteId,
       });
-    } else if (binding.createIfMissing) {
-      diffs.push({ resource: "hyperdrive", action: "create", name: binding.configName });
     } else {
       diffs.push({
         resource: "hyperdrive",
@@ -501,8 +458,7 @@ function planVectorize(c: PlanContext): void {
   }
 }
 
-// Secrets Store stores. Preserve by identity; create only when declared +
-// permitted; conflict (missing + createIfMissing=false) blocks.
+// Secrets Store stores. Preserve by identity; a missing store blocks (never created).
 function planSecretsStore(c: PlanContext): void {
   const { spec, snapshot, diffs, guards } = c;
   const snapshotSecretsStore = new Map(snapshot.secretsStores.map((c) => [c.name, c.id]));
@@ -516,8 +472,6 @@ function planSecretsStore(c: PlanContext): void {
         before: remoteId,
         after: remoteId,
       });
-    } else if (binding.createIfMissing) {
-      diffs.push({ resource: "secrets-store", action: "create", name: binding.storeName });
     } else {
       diffs.push({
         resource: "secrets-store",
@@ -533,9 +487,8 @@ function planSecretsStore(c: PlanContext): void {
     }
   }
 
-  // Secrets Store secrets. A declared secret that is missing inside a
-  // present store is created when `secretCreateIfMissing` is set; otherwise it
-  // conflicts. The secret `value` is never part of any diff or plan field.
+  // Secrets Store secrets. A declared secret that is missing inside a present
+  // store conflicts: the installer never creates it (the value is the user's own).
   for (const binding of spec.cloudflare.secretsStore) {
     if (!binding.secretName) continue;
     const storeId = snapshotSecretsStore.get(binding.storeName);
@@ -549,12 +502,6 @@ function planSecretsStore(c: PlanContext): void {
         action: "preserve",
         name: `${binding.storeName}/${binding.secretName}`,
         before: secret.id,
-      });
-    } else if (binding.secretCreateIfMissing ?? true) {
-      diffs.push({
-        resource: "secrets-store",
-        action: "create",
-        name: `${binding.storeName}/${binding.secretName}`,
       });
     } else {
       diffs.push({

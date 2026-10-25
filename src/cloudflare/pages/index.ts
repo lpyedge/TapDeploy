@@ -15,12 +15,5 @@ export {
   checkPagesMissingHashes,
   uploadPagesAssets,
   upsertPagesHashes,
-  type PagesUploadFile,
-  type PagesUploadOptions,
-  type PagesUploadError,
-  type PagesUploadErrorKind,
 } from "./upload.js";
-export {
-  planPagesBuckets,
-  type PagesBucketEntry,
-} from "./batching.js";
+export { planPagesBuckets } from "./batching.js";

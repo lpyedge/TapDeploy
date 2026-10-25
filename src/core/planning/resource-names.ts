@@ -11,7 +11,7 @@
 import { plannedUnits, type ConfigV3 } from "../../manifest/config-v3.js";
 import type { DeploySpec } from "../deploy-spec.js";
 
-export type RenamableKind = "r2" | "d1" | "kv" | "queue" | "vectorize" | "pages";
+type RenamableKind = "r2" | "d1" | "kv" | "queue" | "vectorize" | "pages";
 
 export interface ReleaseResourceName {
   key: string;

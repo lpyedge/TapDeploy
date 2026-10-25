@@ -32,12 +32,9 @@ export interface WorkerVersionMeta {
   annotations?: Record<string, string>;
 }
 
-export interface WorkerDeploymentVersion {
+interface WorkerDeploymentVersion {
   version_id: string;
   percentage?: number;
-  // Deprecated mirror of version_id for older callers (steps/snapshot).
-  // New code must use version_id.
-  id?: string;
 }
 
 export interface WorkerDeployment {
@@ -66,10 +63,6 @@ export interface WorkerScheduleMetadata {
 export interface WorkerSubdomainState {
   enabled: boolean;
   previews_enabled: boolean;
-}
-
-export interface WorkerScheduleListResult {
-  schedules: { cron: string; created_on?: string; modified_on?: string }[];
 }
 
 export interface WorkerSettings {
@@ -186,7 +179,7 @@ export const WORKER_UPLOAD_MAX_TOTAL_BYTES = (WORKER_UPLOAD_MAX_ENCODED_BYTES / 
 export const WORKER_UPLOAD_MAX_MODULES = 128;
 const WORKER_UPLOAD_MAX_NAME_LENGTH = 256;
 
-export interface VersionUploadPart {
+interface VersionUploadPart {
   name: string;
   mime: string;
   bytes: Uint8Array<ArrayBuffer>;

@@ -1,6 +1,5 @@
 import type { DeploySpec } from "../deploy-spec.js";
 import type { TargetSnapshot } from "../planning/types.js";
-import { isSupportedHyperdriveOrigin, hyperdriveOriginMatches } from "../../cloudflare/resources/hyperdrive.js";
 import { vectorizeActionFor } from "../../cloudflare/resources/vectorize.js";
 
 // Preflight all declared families before ANY preparation, not only the family
@@ -23,11 +22,6 @@ export function resourceCapabilityIssues(spec: DeploySpec, snapshot: TargetSnaps
       if (matches.length > 1 || matches.some(item => !item.id)) issues.push(`${family} resource identity is ambiguous or unavailable`);
       if (spec.targetKind === "pages" && matches.length === 0) issues.push(`Pages requires an existing selected ${family} resource; provisioning is unavailable`);
     }
-  }
-  for (const binding of spec.cloudflare.hyperdrive) {
-    const existing = snapshot.hyperdriveConfigs?.find(config => config.name === binding.configName);
-    if (!existing && binding.createIfMissing && !isSupportedHyperdriveOrigin(binding.origin)) issues.push("Hyperdrive creation requires an explicit complete supported public origin");
-    if (existing && binding.origin && !hyperdriveOriginMatches(binding.origin, existing.origin)) issues.push("selected Hyperdrive public origin differs from the approved configuration");
   }
   for (const binding of spec.cloudflare.vectorize) {
     if (providedByOtherUnits?.has(`vectorize:${binding.indexName}`)) continue;

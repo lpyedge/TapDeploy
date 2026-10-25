@@ -8,13 +8,8 @@ import { buildDeployPlan } from "../../src/core/planning/plan.js";
 import {
   canonicalJson,
   computePlanDigest,
-  currentVersion,
   TAPDEPLOY_MANAGED_MARKER,
-  isManagedWorker,
-  isManagedWorkerForProject,
-  managedWorkerProjectId,
   resolveActiveOwnership,
-  versionOwnerProjectId,
 } from "../../src/core/planning/digest.js";
 import { detectDrift, planReference } from "../../src/core/planning/drift.js";
 import type { ExpectedTarget, TargetSnapshot } from "../../src/core/planning/types.js";
@@ -423,26 +418,9 @@ describe("buildDeployPlan", () => {
     expect(plan.guards.map((g) => g.code)).toContain("queue-drift");
   });
 
-  it("plans to create a missing Hyperdrive config when createIfMissing is set", async () => {
-    const base = specFor("minimal-worker");
-    base.cloudflare.hyperdrive = [{ binding: "HD", configName: "my-hd", createIfMissing: true, origin: { database: "app", host: "db.example.com", user: "app", password: "fake", port: 5432, scheme: "postgresql" } }];
-    base.wrangler.hyperdrive = [{ binding: "HD", id: "" }];
-    const plan = await buildDeployPlan(
-      { spec: base },
-      snapshot({ hyperdriveConfigs: [] }),
-      { salt: SALT },
-    );
-    expect(plan.blocked).toBe(false);
-    expect(plan.diffs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ resource: "hyperdrive", action: "create", name: "my-hd" }),
-      ]),
-    );
-  });
-
   it("preserves an existing Hyperdrive config by identity and binds it in the reference", async () => {
     const base = specFor("minimal-worker");
-    base.cloudflare.hyperdrive = [{ binding: "HD", configName: "my-hd", createIfMissing: true }];
+    base.cloudflare.hyperdrive = [{ binding: "HD", configName: "my-hd" }];
     base.wrangler.hyperdrive = [{ binding: "HD", id: "" }];
     const plan = await buildDeployPlan(
       { spec: base },
@@ -456,7 +434,7 @@ describe("buildDeployPlan", () => {
 
   it("blocks when a declared Hyperdrive config is missing and createIfMissing is false", async () => {
     const base = specFor("minimal-worker");
-    base.cloudflare.hyperdrive = [{ binding: "HD", configName: "my-hd", createIfMissing: false }];
+    base.cloudflare.hyperdrive = [{ binding: "HD", configName: "my-hd" }];
     base.wrangler.hyperdrive = [{ binding: "HD", id: "" }];
     const plan = await buildDeployPlan(
       { spec: base },
@@ -511,30 +489,16 @@ describe("buildDeployPlan", () => {
     expect(plan.guards.map((g) => g.code)).toContain("vectorize-drift");
   });
 
-  it("plans to create a missing Secrets Store store when createIfMissing is set", async () => {
-    const base = specFor("minimal-worker");
-    base.cloudflare.secretsStore = [{ binding: "SS", storeName: "my-store", createIfMissing: true, secretName: "token", secretCreateIfMissing: true }];
-    base.wrangler.secrets_store_secrets = [];
-    const plan = await buildDeployPlan(
-      { spec: base },
-      snapshot({ secretsStores: [] }),
-      { salt: SALT },
-    );
-    expect(plan.blocked).toBe(false);
-    expect(plan.diffs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ resource: "secrets-store", action: "create", name: "my-store" }),
-      ]),
-    );
-  });
-
   it("preserves an existing Secrets Store store by identity and binds it in the reference", async () => {
     const base = specFor("minimal-worker");
-    base.cloudflare.secretsStore = [{ binding: "SS", storeName: "my-store", createIfMissing: true, secretName: "token", secretCreateIfMissing: true }];
+    base.cloudflare.secretsStore = [{ binding: "SS", storeName: "my-store", secretName: "token" }];
     base.wrangler.secrets_store_secrets = [];
     const plan = await buildDeployPlan(
       { spec: base },
-      snapshot({ secretsStores: [{ name: "my-store", id: "store-1" }] }),
+      snapshot({
+        secretsStores: [{ name: "my-store", id: "store-1" }],
+        secretsStoreSecrets: [{ secretName: "token", id: "secret-1", store_id: "store-1" }],
+      }),
       { salt: SALT },
     );
     expect(plan.blocked).toBe(false);
@@ -542,9 +506,9 @@ describe("buildDeployPlan", () => {
     expect(reference.secretsStoreIds).toEqual({ "my-store": "store-1" });
   });
 
-  it("blocks when a declared Secrets Store store is missing and createIfMissing is false", async () => {
+  it("blocks when a declared Secrets Store store is missing (it is never created)", async () => {
     const base = specFor("minimal-worker");
-    base.cloudflare.secretsStore = [{ binding: "SS", storeName: "my-store", createIfMissing: false }];
+    base.cloudflare.secretsStore = [{ binding: "SS", storeName: "my-store" }];
     base.wrangler.secrets_store_secrets = [];
     const plan = await buildDeployPlan(
       { spec: base },
@@ -555,38 +519,18 @@ describe("buildDeployPlan", () => {
     expect(plan.guards.map((g) => g.code)).toContain("secrets-store-drift");
   });
 
-  it("plans to create a missing Secrets Store secret inside a present store and preserves an existing one", async () => {
+  it("blocks when a declared Secrets Store secret is missing in a present store (it is never created)", async () => {
     const base = specFor("minimal-worker");
-    base.cloudflare.secretsStore = [
-      {
-        binding: "SS",
-        storeName: "my-store",
-        createIfMissing: true,
-        secretName: "api-token",
-        secretCreateIfMissing: true,
-      },
-    ];
-    base.wrangler.secrets_store_secrets = [
-      { binding: "SS", store_id: "", secret_name: "api-token" },
-    ];
+    base.cloudflare.secretsStore = [{ binding: "SS", storeName: "my-store", secretName: "api-token" }];
+    base.wrangler.secrets_store_secrets = [{ binding: "SS", store_id: "", secret_name: "api-token" }];
     const plan = await buildDeployPlan(
       { spec: base },
-      snapshot({
-        secretsStores: [{ name: "my-store", id: "store-1" }],
-        secretsStoreSecrets: [],
-      }),
+      snapshot({ secretsStores: [{ name: "my-store", id: "store-1" }], secretsStoreSecrets: [] }),
       { salt: SALT },
     );
-    expect(plan.blocked).toBe(false);
-    expect(plan.diffs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resource: "secrets-store",
-          action: "create",
-          name: "my-store/api-token",
-        }),
-      ]),
-    );
+    expect(plan.blocked).toBe(true);
+    expect(plan.guards.map((g) => g.code)).toContain("secrets-store-drift");
+    expect(plan.diffs.some((d) => d.resource === "secrets-store" && d.action === "create")).toBe(false);
   });
 
   it("preserves a declared Secrets Store secret by identity and never leaks its value", async () => {
@@ -595,10 +539,7 @@ describe("buildDeployPlan", () => {
       {
         binding: "SS",
         storeName: "my-store",
-        createIfMissing: true,
         secretName: "api-token",
-        secretCreateIfMissing: true,
-        secretValue: "s3cr3t",
       },
     ];
     base.wrangler.secrets_store_secrets = [
@@ -767,51 +708,6 @@ describe("digest helpers", () => {
     expect(canonicalJson({ drop: undefined })).toBe(`{}`);
   });
 
-  it("isManagedWorker detects the installer marker in any version message", () => {
-    expect(isManagedWorker([{ id: "1", message: TAPDEPLOY_MANAGED_MARKER }])).toBe(true);
-    expect(isManagedWorker([{ id: "1", message: "plain" }])).toBe(false);
-    expect(isManagedWorker([])).toBe(false);
-  });
-
-  it("managedWorkerProjectId extracts the project id from the version message", () => {
-    expect(managedWorkerProjectId([{ id: "1", message: `fixture/minimal-worker v0.1.0 ${TAPDEPLOY_MANAGED_MARKER}` }])).toBe("fixture/minimal-worker");
-    expect(managedWorkerProjectId([{ id: "1", message: TAPDEPLOY_MANAGED_MARKER }])).toBeUndefined();
-    expect(managedWorkerProjectId([])).toBeUndefined();
-  });
-
-  it("isManagedWorkerForProject requires the marker AND a matching project id", () => {
-    const same = [{ id: "1", message: `fixture/minimal-worker v0.1.0 ${TAPDEPLOY_MANAGED_MARKER}` }];
-    const other = [{ id: "1", message: `fixture/other v0.1.0 ${TAPDEPLOY_MANAGED_MARKER}` }];
-    expect(isManagedWorkerForProject(same, "fixture/minimal-worker")).toBe(true);
-    expect(isManagedWorkerForProject(same, "fixture/other")).toBe(false);
-    expect(isManagedWorkerForProject(other, "fixture/minimal-worker")).toBe(false);
-    // Unknown project id falls back to the generic marker check (any managed worker).
-    expect(isManagedWorkerForProject(same, undefined)).toBe(true);
-    expect(isManagedWorkerForProject([{ id: "1", message: "plain" }], "fixture/minimal-worker")).toBe(false);
-  });
-
-  it("versionOwnerProjectId + currentVersion read ownership from a single/current version", () => {
-    expect(versionOwnerProjectId({ id: "1", message: `app/A v1 ${TAPDEPLOY_MANAGED_MARKER}` })).toBe("app/A");
-    expect(versionOwnerProjectId({ id: "1", message: TAPDEPLOY_MANAGED_MARKER })).toBeUndefined();
-    expect(versionOwnerProjectId({ id: "1", message: "plain" })).toBeUndefined();
-    const history = [
-      { id: "new", number: 2, message: `app/B v2 ${TAPDEPLOY_MANAGED_MARKER}` },
-      { id: "old", number: 1, message: `app/A v1 ${TAPDEPLOY_MANAGED_MARKER}` },
-    ];
-    expect(currentVersion(history)?.id).toBe("new");
-    expect(managedWorkerProjectId(history)).toBe("app/B");
-  });
-
-  it("a HISTORICAL owner marker must not authorize an upgrade", () => {
-    const history = [
-      { id: "new", number: 2, message: `app/B v2 ${TAPDEPLOY_MANAGED_MARKER}` },
-      { id: "old", number: 1, message: `app/A v1 ${TAPDEPLOY_MANAGED_MARKER}` },
-    ];
-    // The old app/A marker is historical; the current deployment is app/B.
-    expect(isManagedWorkerForProject(history, "app/A")).toBe(false);
-    expect(isManagedWorkerForProject(history, "app/B")).toBe(true);
-  });
-
   it("resolveActiveOwnership uses only the active deployment version(s)", () => {
     const history = [
       { id: "new", number: 2, message: `app/B v2 ${TAPDEPLOY_MANAGED_MARKER}` },
@@ -862,8 +758,6 @@ describe("digest helpers", () => {
         } as never,
         accountId: ACCOUNT,
         workerName: "w",
-        activeDeploymentId: "dep-1",
-        diffSummary: [{ resource: "worker", action: "create" }],
         inputs: { secretInput: "super-secret-value" },
       },
       SALT,
@@ -955,14 +849,6 @@ describe("binding disappearance is blocking drift", () => {
 
   const cases: DriftCase[] = [
     {
-      label: "workerR2Bindings",
-      ref: { accountId: ACCOUNT, workerName: "w", workerR2Bindings: { BUCKET: "bucket-a" } },
-      missing: snapshot({ workerName: "w", workerR2Bindings: {} }),
-      changed: snapshot({ workerName: "w", workerR2Bindings: { BUCKET: "bucket-b" } }),
-      same: snapshot({ workerName: "w", workerR2Bindings: { BUCKET: "bucket-a" } }),
-      reason: /R2 binding "BUCKET" identity changed \(bucket-a -> missing\)/,
-    },
-    {
       label: "deployedBindings.r2",
       ref: { accountId: ACCOUNT, workerName: "w", deployedBindings: { r2: { BUCKET: "bucket-a" } } },
       missing: snapshot({ workerName: "w", deployedBindings: { r2: {} } }),
@@ -1043,8 +929,7 @@ describe("binding disappearance is blocking drift", () => {
 
 describe("plan-level blocking: a missing approved binding blocks before write", () => {
   const planCases: { label: string; code: string; expected: Partial<ExpectedTarget> }[] = [
-    { label: "r2 via workerR2Bindings", code: "r2-drift", expected: { workerR2Bindings: { BUCKET: "bucket-a" } } },
-    { label: "r2 via deployedBindings", code: "r2-drift", expected: { deployedBindings: { r2: { BUCKET: "bucket-a" } } } },
+    { label: "r2", code: "r2-drift", expected: { deployedBindings: { r2: { BUCKET: "bucket-a" } } } },
     { label: "d1", code: "d1-drift", expected: { deployedBindings: { d1: { DB: "db-1" } } } },
     { label: "kv", code: "kv-drift", expected: { deployedBindings: { kv: { KV: "ns-1" } } } },
     { label: "queue", code: "queue-drift", expected: { deployedBindings: { queue: { Q: "q-1" } } } },
@@ -1085,7 +970,7 @@ describe("plan-level blocking: a missing approved binding blocks before write", 
     it(`${c.label}: unchanged binding still plans clean`, async () => {
       const spec = specFor("minimal-worker");
       const live: Partial<TargetSnapshot> = {};
-      if (c.expected.workerR2Bindings) live.workerR2Bindings = c.expected.workerR2Bindings;
+      if (c.expected.deployedBindings) live.deployedBindings = c.expected.deployedBindings;
       if (c.expected.deployedBindings) live.deployedBindings = c.expected.deployedBindings;
       const plan = await buildDeployPlan(
         { spec },
@@ -1209,7 +1094,7 @@ describe("secrets/bindings upgrade", () => {
         activeDeploymentId: "dep-1",
         activeDeploymentVersionIds: ["version-1"],
         r2Buckets: [{ name: "tapdeploy-test-placeholder", id: "bucket-1" }],
-        workerR2Bindings: { FILES: "tapdeploy-test-placeholder" },
+        deployedBindings: { r2: { FILES: "tapdeploy-test-placeholder" } },
       }),
       { salt: SALT },
     );
@@ -1232,7 +1117,7 @@ describe("secrets/bindings upgrade", () => {
           { name: "tapdeploy-test-placeholder", id: "bucket-1" },
           { name: "evil-bucket", id: "bucket-evil" },
         ],
-        workerR2Bindings: { FILES: "tapdeploy-test-placeholder" },
+        deployedBindings: { r2: { FILES: "tapdeploy-test-placeholder" } },
       }),
       { salt: SALT },
     );
@@ -1241,7 +1126,7 @@ describe("secrets/bindings upgrade", () => {
     expect(plan.guards.map((g) => g.detail).join("\n")).toMatch(/FILES.*tapdeploy-test-placeholder.*evil-bucket/);
   });
 
-  it("blocks an outside binding rebind via expected workerR2Bindings", async () => {
+  it("blocks an outside R2 binding rebind via the expected deployedBindings", async () => {
     const spec = specFor("assets-r2-worker");
     const baseSnap = snapshot({
       workerName: "tapdeploy-fixture-assets-r2",
@@ -1251,12 +1136,12 @@ describe("secrets/bindings upgrade", () => {
       activeDeploymentId: "dep-1",
       activeDeploymentVersionIds: ["version-1"],
       r2Buckets: [{ name: "tapdeploy-test-placeholder", id: "bucket-1" }],
-      workerR2Bindings: { FILES: "tapdeploy-test-placeholder" },
+      deployedBindings: { r2: { FILES: "tapdeploy-test-placeholder" } },
     });
     const base = await buildDeployPlan({ spec }, baseSnap, { salt: SALT });
     expect(base.blocked).toBe(false);
     const reference = planReference(base, baseSnap);
-    expect(reference.workerR2Bindings).toEqual({ FILES: "tapdeploy-test-placeholder" });
+    expect(reference.deployedBindings?.r2).toEqual({ FILES: "tapdeploy-test-placeholder" });
     // Outside actor rebinds FILES to another bucket behind our back.
     const drifted = await buildDeployPlan(
       { spec },
@@ -1271,7 +1156,7 @@ describe("secrets/bindings upgrade", () => {
           { name: "tapdeploy-test-placeholder", id: "bucket-1" },
           { name: "evil-bucket", id: "bucket-evil" },
         ],
-        workerR2Bindings: { FILES: "evil-bucket" },
+        deployedBindings: { r2: { FILES: "evil-bucket" } },
       }),
       { salt: SALT, expected: reference },
     );

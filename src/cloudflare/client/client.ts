@@ -14,7 +14,6 @@ import type {
   DnsRecordCreateRequest,
   DnsRecordUpdateRequest,
   HyperdriveConfig,
-  HyperdriveCreateRequest,
   KvNamespace,
   KvNamespaceCreateRequest,
   PagesDeployment,
@@ -31,9 +30,7 @@ import type {
   R2CustomDomain,
   R2ManagedDomain,
   SecretsStore,
-  SecretsStoreCreateRequest,
   SecretsStoreSecret,
-  SecretsStoreSecretCreateRequest,
   VectorizeCreateRequest,
   VectorizeIndex,
   VersionCreateRequest,
@@ -85,13 +82,10 @@ import {
   parseWorkflowList,
   normalizeWorkflowEntry,
   parseHyperdriveConfigList,
-  normalizeHyperdriveConfig,
   parseVectorizeIndexList,
   normalizeVectorizeIndex,
   parseSecretsStoreList,
-  normalizeSecretsStore,
   parseSecretsStoreSecretList,
-  normalizeSecretsStoreSecret,
 } from "./parse-resources.js";
 import {
   parsePagesProjectList,
@@ -208,22 +202,15 @@ export interface CloudflareApiClient {
   listWorkflows(): Promise<Workflow[]>;
   getWorkflow(workflowName: string): Promise<Workflow>;
   updateWorkflow(workflowName: string, request: WorkflowUpdateRequest): Promise<Workflow>;
-  // Cloudflare Hyperdrive configs (read + create only; no delete path).
+  // Cloudflare Hyperdrive configs (read only: they hold the user's own database credentials).
   listHyperdriveConfigs(): Promise<HyperdriveConfig[]>;
-  createHyperdriveConfig(request: HyperdriveCreateRequest): Promise<HyperdriveConfig>;
   // Cloudflare Vectorize indexes (read + create only; no update/delete path,
   // dimension/metric configuration is immutable on the live resource).
   listVectorizeIndexes(): Promise<VectorizeIndex[]>;
   createVectorizeIndex(request: VectorizeCreateRequest): Promise<VectorizeIndex>;
-  // Cloudflare central Secrets Store (stores + secrets; read + create only).
-  // The secret `value` is write-only and is never read back or echoed.
+  // Cloudflare central Secrets Store (read only: stores and secrets belong to the user).
   listSecretsStores(): Promise<SecretsStore[]>;
-  createSecretsStore(request: SecretsStoreCreateRequest): Promise<SecretsStore>;
   listSecretsStoreSecrets(storeId: string): Promise<SecretsStoreSecret[]>;
-  createSecretsStoreSecret(
-    storeId: string,
-    request: SecretsStoreSecretCreateRequest,
-  ): Promise<SecretsStoreSecret>;
   // Cloudflare Pages projects (read-only target discovery — no mutation here).
   listPages(): Promise<PagesProjectSummary[]>;
   // Pages project management + deployment lifecycle (Pages direct upload).
@@ -477,9 +464,6 @@ export function createCloudflareClient(
     listHyperdriveConfigs: () =>
       withAccountId(accountId, "listHyperdriveConfigs", undefined, parseHyperdriveConfigList, fetcher, options.accessToken) as Promise<HyperdriveConfig[]>,
 
-    createHyperdriveConfig: (request) =>
-      withAccountId(accountId, "createHyperdriveConfig", request, (env) => normalizeHyperdriveConfig(env.result), fetcher, options.accessToken) as Promise<HyperdriveConfig>,
-
     // Cloudflare Vectorize index management (read + create only).
     listVectorizeIndexes: () =>
       withAccountId(accountId, "listVectorizeIndexes", undefined, parseVectorizeIndexList, fetcher, options.accessToken) as Promise<VectorizeIndex[]>,
@@ -487,19 +471,12 @@ export function createCloudflareClient(
     createVectorizeIndex: (request) =>
       withAccountId(accountId, "createVectorizeIndex", request, (env) => normalizeVectorizeIndex(env.result), fetcher, options.accessToken) as Promise<VectorizeIndex>,
 
-    // Cloudflare central Secrets Store (stores + secrets; read + create
-    // only). The secret `value` is write-only and is never read back or echoed.
+    // Cloudflare central Secrets Store (read only).
     listSecretsStores: () =>
       withAccountId(accountId, "listSecretsStores", undefined, parseSecretsStoreList, fetcher, options.accessToken) as Promise<SecretsStore[]>,
 
-    createSecretsStore: (request) =>
-      withAccountId(accountId, "createSecretsStore", request, (env) => normalizeSecretsStore(env.result), fetcher, options.accessToken) as Promise<SecretsStore>,
-
     listSecretsStoreSecrets: (storeId) =>
       withAccountId(accountId, "listSecretsStoreSecrets", undefined, parseSecretsStoreSecretList, fetcher, options.accessToken, { storeId }) as Promise<SecretsStoreSecret[]>,
-
-    createSecretsStoreSecret: (storeId, request) =>
-      withAccountId(accountId, "createSecretsStoreSecret", request, (env) => normalizeSecretsStoreSecret(env.result), fetcher, options.accessToken, { storeId }) as Promise<SecretsStoreSecret>,
 
     // Cloudflare Pages projects list (read-only discovery).
     listPages: () =>

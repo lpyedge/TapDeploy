@@ -6,7 +6,7 @@
 // `queue_name` into `name` so callers have a consistent identity across
 // resources (the R2/D1/KV convention).
 
-export interface QueueSettings {
+interface QueueSettings {
   delivery_delay?: number;
   delivery_paused?: boolean;
   message_retention_period?: number;

@@ -74,13 +74,8 @@ export function planReference(plan: DeployPlan, snapshot?: TargetSnapshot): Expe
         .filter((d) => d.resource === "secrets-store" && d.action === "preserve" && d.name && !d.name.includes("/") && d.before)
         .map((d) => [d.name!, d.before!]),
     ),
-    // carry the verified deployed binding map when the caller
-    // supplies the snapshot the plan was built from. Older single-arg callers
-    // stay compatible (field undefined, drift check skips it).
-    ...(snapshot?.workerR2Bindings ? { workerR2Bindings: { ...snapshot.workerR2Bindings } } : {}),
     // carry the full deployed binding map so a rebind of any family
-    // between plan and write blocks. The R2 subset is also carried above for
-    // backward compatibility with older references.
+    // between plan and write blocks.
     ...(snapshot?.deployedBindings
       ? { deployedBindings: cloneDeployedBindings(snapshot.deployedBindings) }
       : {}),
@@ -187,23 +182,6 @@ export function detectDrift(
       }
     }
   }
-  // deployed binding map drift (binding -> bucket). Only checked
-  // when the reference carries it; older references without the field stay
-  // compatible and skip this check (spec-vs-snapshot in plan.ts still guards).
-  // a binding that was bound at plan time and is now GONE counts as
-  // external drift too. An outsider deleting an approved binding must never
-  // pass silently; only an explicitly approved removal (not implemented yet)
-  // would hand the caller a post-approval reference without the entry.
-  if (reference.workerR2Bindings) {
-    const currentBindings = current.workerR2Bindings ?? {};
-    for (const [binding, bucket] of Object.entries(reference.workerR2Bindings)) {
-      const now = currentBindings[binding];
-      if (now !== bucket) {
-        reasons.push(`R2 binding "${binding}" identity changed (${bucket} -> ${now ?? "missing"})`);
-      }
-    }
-  }
-
   // full deployed binding map drift. When the reference carries it,
   // an outside rebind of any family (R2/D1/KV/Queue/Hyperdrive/Vectorize/Secrets
   // Store) between plan and write blocks. An own write that legitimately changes
@@ -307,40 +285,6 @@ export function resourceBaselineDrift(reference: ExpectedTarget, current: Target
     if (canonicalJson(current.vectorizeIndexes.find(index => index.name === name)?.config) !== canonicalJson(config)) reasons.push(`Vectorize immutable schema for "${name}" changed`);
   }
   return reasons;
-}
-
-// aggregate pre-write drift for a
-// multi-unit graph plan. Each unit is compared against ITS OWN fresh snapshot;
-// a unit whose snapshot is missing cannot be verified and therefore drifts
-// closed. Any changed live identity (account/target/resource/binding) blocks the
-// whole write — a multi-unit release is never a partial, best-effort write.
-export interface GraphDriftResult extends DriftResult {
-  /** Per-unit drift reasons (empty arrays omitted). */
-  units: Record<string, string[]>;
-}
-
-export function detectGraphDrift(
-  references: Readonly<Record<string, ExpectedTarget>>,
-  snapshots: Readonly<Record<string, TargetSnapshot>>,
-): GraphDriftResult {
-  const reasons: string[] = [];
-  const units: Record<string, string[]> = {};
-  for (const [unitId, reference] of Object.entries(references)) {
-    const current = snapshots[unitId];
-    if (!current) {
-      reasons.push(`unit "${unitId}" has no fresh snapshot; refusing to write from an unverifiable plan`);
-      units[unitId] = ["missing fresh snapshot"];
-      continue;
-    }
-    const result = detectDrift(reference, current);
-    if (result.drifted) {
-      units[unitId] = result.reasons;
-      for (const reason of result.reasons) {
-        reasons.push(`unit "${unitId}": ${reason}`);
-      }
-    }
-  }
-  return { drifted: reasons.length > 0, reasons, units };
 }
 
 function cloneDeployedBindings(bindings: DeployedBindingMap): DeployedBindingMap {

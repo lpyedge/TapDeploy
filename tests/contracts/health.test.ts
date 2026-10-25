@@ -6,7 +6,7 @@ const runtimeEnvs = [
   { name: "workers", env: { RUNTIME: "workers" as const } },
 ];
 
-describe("api health/capabilities contract", () => {
+describe("api health contract", () => {
   for (const { name, env } of runtimeEnvs) {
     it(`serves /api/health on ${name} runtime`, async () => {
       const app = createApp(env);
@@ -16,18 +16,6 @@ describe("api health/capabilities contract", () => {
       expect(body.ok).toBe(true);
       expect(body.runtime).toBe(name);
       expect(body.schemaVersion).toBe(SUPPORTED_SCHEMA_VERSION);
-    });
-
-    it(`serves /api/capabilities on ${name} runtime`, async () => {
-      const app = createApp(env);
-      const res = await app.request("/api/capabilities");
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.schemaVersion).toBe(SUPPORTED_SCHEMA_VERSION);
-      expect(body.runtime).toBe(name);
-      expect(body.resourceKinds).toContain("worker");
-      expect(body.bindings.staticAssets).toBe(true);
-      expect(body.bindings.rateLimit).toBe(false);
     });
   }
 });

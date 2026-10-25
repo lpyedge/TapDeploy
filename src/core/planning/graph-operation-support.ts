@@ -1,31 +1,6 @@
-// single authoritative graph operation coverage gate.
-//
-// One pure, dependency-free table mapping every emitted graph diff
-// (unitKind, resource, action) to its exact step phase(s) and readback — or to
-// an explicit UNSUPPORTED_GRAPH_OPERATION refusal. The server plan preflight
-// (buildGraphDeployPlan) and the browser mapper (graphPhaseForDiff) both
-// consult this catalog; there is no browser-only fallback table.
-//
-// A plan containing a dispatchable but unsupported diff is BLOCKED before any
-// approval is sealed, so no provider write can follow. The refusal code is
-// stable: UNSUPPORTED_GRAPH_OPERATION(unitId,resource,action[,field]).
-//
-// Secret actions other than create/update stay UNSUPPORTED (only create,
-// update and the preserve/skip no-ops are addressable); secrets are bound into
-// the version upload, never a standalone PUT. Queue producers are version
-// bindings covered by the worker create/update action; consumers are a
-// provider trigger registration on the queue's consumers subresource, their
-// own action after the cutover.
 
-// Unit kinds that can appear in a graph plan unit. Kept as strings (not the
-// deploy-graph enum) so browser and server share the module with no cycle.
-export type GraphOperationUnitKind =
-  | "worker"
-  | "pages-static"
-  | "pages-functions"
-  | "resource-only";
 
-export interface GraphSupportedOperation {
+interface GraphSupportedOperation {
   readonly supported: true;
   // Exact step phases in execution order. Length > 1 (worker static-assets)
   // means the single graph action executes as an ordered phase pair.
@@ -34,7 +9,7 @@ export interface GraphSupportedOperation {
   readonly readback: string;
 }
 
-export interface GraphUnsupportedOperation {
+interface GraphUnsupportedOperation {
   readonly supported: false;
   readonly code: "UNSUPPORTED_GRAPH_OPERATION";
   readonly detail: string;
@@ -68,9 +43,7 @@ const ACCOUNT_RESOURCE_CREATE_PHASES: Readonly<Record<string, string>> = {
   d1: "create-d1-databases",
   kv: "create-kv-namespaces",
   queue: "create-queues",
-  hyperdrive: "create-hyperdrive-configs",
   vectorize: "create-vectorize-indexes",
-  "secrets-store": "create-secrets-stores",
 };
 
 /** True for the only actions a sealed plan may dispatch (never preserve/skip/conflict/detach). */
@@ -338,7 +311,7 @@ export function exactGraphPhase(input: {
   return resolution.supported ? resolution.phases[0] : undefined;
 }
 
-export interface GraphDiffLike {
+interface GraphDiffLike {
   readonly resource: string;
   readonly action: string;
   readonly name?: string;

@@ -4,7 +4,7 @@
 
 export type WranglerV3Kind = "worker" | "pages";
 
-export type WranglerV3IssueCode =
+type WranglerV3IssueCode =
   | "INVALID_JSONC"
   | "INVALID_SHAPE"
   | "UNKNOWN_WRANGLER_FIELD"

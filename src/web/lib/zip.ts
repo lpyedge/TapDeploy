@@ -4,8 +4,6 @@ export { extractZipAsync } from "../../release/zip.js";
 // load releases through this extractor.
 export {
   extractPrebuiltZip,
-  type PrebuiltFileKind,
-  type PrebuiltZipEntry,
   type PrebuiltZipFile,
   type PrebuiltZipManifest,
   type PrebuiltZipOptions,

@@ -9,13 +9,13 @@ import { buildPagesManifest, toPagesAssetPath, type PagesAssetRef } from "../../
 import type { ExtractedFile } from "../../release/zip.js";
 import { UploadHashCache, uploadHashExtension } from "./hash-cache.js";
 
-export interface SourceFileInfo {
+interface SourceFileInfo {
   path: string;
   size: number;
   sha256: string;
 }
 
-export interface SourceHashedFile {
+interface SourceHashedFile {
   hash: string;
   size: number;
 }

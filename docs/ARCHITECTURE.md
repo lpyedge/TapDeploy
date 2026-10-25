@@ -141,7 +141,10 @@ The browser does real work, but none of it is authority.
   caps the bytes (16 MiB), drops a stalled sender, forwards the exact bytes and
   content type, and cancels the upstream request when the browser cancels. It is
   buffered after that point; streaming upstream is not enabled (not live
-  verified).
+  verified). The browser retries a batch once after a transient failure (429,
+  5xx, network; also a 30 s timeout for Worker assets), waiting for the provider's `Retry-After` or a short
+  back-off (at most 10 s); 401/403 are never retried, and uploads are keyed by
+  content hash, so a repeat is safe.
 - **Dispatch order.** The plan response also carries non-secret
   `schedulerHints` (the unit dependency edges already sealed in the context).
   The driver uses them to avoid asking for work whose prerequisites are
@@ -166,7 +169,8 @@ and never past the provider token it carries (`expires_in` minus 15 s; a token
 that is already expiring ends the callback with `token_expired`). A provider
 401 reaches the browser as 401 (sign in again for the same config), a provider
 403 as 403 (the account lacks a permission: signing in again will not help),
-and only a missing target is 404. The
+and only a missing target is 404. *Sign out* (hidden while a deploy runs) calls
+`/api/auth/logout`: the server revokes the provider token and clears the cookie. The
 scopes requested are exactly the config's; the client registration is the
 only upper bound (Cloudflare answers `invalid_scope` beyond it).
 

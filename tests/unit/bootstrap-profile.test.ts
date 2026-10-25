@@ -10,12 +10,9 @@ import {
   BOOTSTRAP_PROFILE_KIND,
   DEFAULT_BOOTSTRAP_READINESS_PATH,
   assessBootstrapPrivacy,
-  bootstrapReadinessProblems,
-  bootstrapRetrievalSteps,
   checkBootstrapRace,
   clientBootstrapRunner,
   decideBootstrapMode,
-  fetchBootstrapReadiness,
   inspectBootstrapTarget,
   parseBootstrapDirective,
   planBootstrapSecrets,
@@ -62,7 +59,6 @@ function facts(overrides: Partial<BootstrapTargetFacts> = {}): BootstrapTargetFa
   return {
     workerExists: false,
     hasRoot: false,
-    hasLegacySetupPassword: false,
     bucketExists: false,
     ownerExists: false,
     markerExists: false,
@@ -233,7 +229,6 @@ describe("bootstrap profile — validation and limited state table", () => {
       expect(present.value).toEqual({
         workerExists: true,
         hasRoot: true,
-        hasLegacySetupPassword: false,
         bucketExists: true,
         ownerExists: false,
         markerExists: true,
@@ -402,87 +397,9 @@ describe("bootstrap profile — proof gate, race, secret planning", () => {
       expect(upgrade.value.uploaded).toEqual([]);
     }
   });
-
-  it("keeps the secret canary out of readiness problems and retrieval steps", () => {
-    const CANARY = "CANARY_ROOT_VALUE_9f3";
-    const problems = bootstrapReadinessProblems({
-      methods: { setup: "ready", methods: { password: { enabled: true } } },
-      ownerExists: true,
-      credentialExists: true,
-      firstSetup: true,
-      ownerKey: "auth/owner.json",
-      initialPasswordKey: "auth/initial-owner-password.txt",
-    });
-    expect(problems).toEqual([]);
-    const steps = bootstrapRetrievalSteps({
-      siteUrl: "https://app.example.workers.dev",
-      bucketName: BUCKET,
-      initialPasswordKey: "auth/initial-owner-password.txt",
-    });
-    const serialized = JSON.stringify({ problems, steps });
-    expect(serialized).not.toContain(CANARY);
-    expect(serialized).not.toContain("JWT_SECRET");
-    expect(serialized).toContain("auth/initial-owner-password.txt");
-  });
 });
 
-describe("bootstrap profile — readiness and directive parsing", () => {
-  it("is not ready when the sign-in status is pending, disabled or unreadable", () => {
-    const base = {
-      methods: { setup: "ready", methods: { password: { enabled: true } } },
-      ownerExists: true,
-      credentialExists: true,
-      firstSetup: false,
-      ownerKey: "auth/owner.json",
-      initialPasswordKey: "auth/initial-owner-password.txt",
-    };
-    expect(bootstrapReadinessProblems(base)).toEqual([]);
-    const pending = bootstrapReadinessProblems({ ...base, methods: { setup: "pending", methods: { password: { enabled: true } } } });
-    expect(pending.join(" ")).toContain('the setup state is "pending"');
-    const disabled = bootstrapReadinessProblems({ ...base, methods: { setup: "ready", methods: { password: { enabled: false } } } });
-    expect(disabled.join(" ")).toContain("not enabled");
-    const unreadable = bootstrapReadinessProblems({ ...base, methods: null });
-    expect(unreadable.join(" ")).toContain("could not be read");
-    const missingOwner = bootstrapReadinessProblems({ ...base, ownerExists: false });
-    expect(missingOwner.join(" ")).toContain("auth/owner.json");
-    const firstSetupMissing = bootstrapReadinessProblems({ ...base, firstSetup: true, credentialExists: false });
-    expect(firstSetupMissing.join(" ")).toContain("auth/initial-owner-password.txt");
-    expect(bootstrapReadinessProblems({ ...base, firstSetup: true, credentialExists: false }).length).toBe(1);
-  });
-
-  it("fetches readiness on the deployed origin only; failures are unreadable", async () => {
-    const urls: string[] = [];
-    const ready = await fetchBootstrapReadiness(
-      (url) => {
-        urls.push(url);
-        return Promise.resolve(Response.json({ setup: "ready", methods: { password: { enabled: true } } }));
-      },
-      { origin: "https://app.example.workers.dev", readinessPath: "/api/auth/methods" },
-    );
-    expect(urls).toEqual(["https://app.example.workers.dev/api/auth/methods"]);
-    expect(ready.ok).toBe(true);
-
-    const denied = await fetchBootstrapReadiness(
-      () => Promise.resolve(new Response("nope", { status: 503 })),
-      { origin: "https://app.example.workers.dev", readinessPath: "/api/auth/methods" },
-    );
-    expect(denied.ok).toBe(false);
-    if (!denied.ok) expect(denied.detail).toContain("HTTP 503");
-
-    const network = await fetchBootstrapReadiness(
-      () => Promise.reject(new Error("timeout")),
-      { origin: "https://app.example.workers.dev", readinessPath: "/api/auth/methods" },
-    );
-    expect(network.ok).toBe(false);
-
-    const foreign = await fetchBootstrapReadiness(
-      () => Promise.resolve(Response.json({})),
-      { origin: "https://app.example.workers.dev", readinessPath: "https://evil.example/x" },
-    );
-    expect(foreign.ok).toBe(false);
-    if (!foreign.ok) expect(foreign.detail).toContain("must stay on the deployed Worker origin");
-  });
-
+describe("bootstrap profile — directive parsing", () => {
   it("parses the step-arg directive strictly and re-validates the proof", () => {
     const valid = parseBootstrapDirective(verifiedDirective());
     expect(valid.ok).toBe(true);

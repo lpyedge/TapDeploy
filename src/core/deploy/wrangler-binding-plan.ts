@@ -1,177 +1,14 @@
-// Pure plan-time adapters from the normalized Wrangler V3 config to verified
-// account actions and Worker version metadata: resource (R2/D1/KV) planning,
-// carrier (workflow/Durable Object/service) planning and the single migration
-// validator. No provider access and no secrets; the effectful steps that act on
-// these plans live in bindings.ts and steps.ts.
 
-import {
-  plannedBucketActionFor,
-  plannedDatabaseActionFor,
-  plannedNamespaceActionFor,
-} from "../../cloudflare/resources/index.js";
 import type {
   ServiceBindingMetadata,
   WorkflowBindingMetadata,
 } from "../../cloudflare/models/workers.js";
-import type { TargetSnapshot } from "../planning/types.js";
 import type {
-  WranglerV3D1Database,
   WranglerV3DurableObjectBinding,
-  WranglerV3KvNamespace,
   WranglerV3Migration,
-  WranglerV3R2Bucket,
   WranglerV3ServiceBinding,
   WranglerV3Workflow,
 } from "../../manifest/wrangler-v3.js";
-
-// ---------------------------------------------------------------------------
-// V3 Wrangler resource plan. The final Wrangler config is the only
-// resource declaration for a unit (no duplicated config.resources clause).
-// Declaration -> verified account action:
-//   - create only a verified-missing R2 bucket / D1 database when the unit
-//     approves provisioning ("ensure"); "bind-existing" never creates;
-//   - an existing resource is reused only through its unique live identity read
-//     back from the account snapshot, never from the config verbatim;
-//   - a declared provider id (D1 database_id / KV namespace id) is an identity
-//     claim: present in the account -> verified reuse; absent -> conflict
-//     (creation by name only ever happens without a declared id, and KV
-//     namespaces are never created from a wrangler binding: no title handle);
-//   - any conflict fails the whole plan (ok:false); no partial provisioning and
-//     no declared binding is ever dropped from the plan.
-// The result carries the provider binding type + verified identity so the
-// Worker/Pages metadata builder can bind exactly the verified resource. The
-// input is expected to be normalizeWranglerV3 output; binding-name and
-// resource-target collisions are refused there before planning.
-// ---------------------------------------------------------------------------
-
-export type WranglerResourceMode = "ensure" | "bind-existing";
-
-export interface WranglerResourceProjection {
-  r2Buckets: ReadonlyArray<WranglerV3R2Bucket>;
-  d1Databases: ReadonlyArray<WranglerV3D1Database>;
-  kvNamespaces: ReadonlyArray<WranglerV3KvNamespace>;
-}
-
-export interface PlannedR2BucketBinding {
-  binding: string;
-  providerType: "r2_bucket";
-  bucketName: string;
-  action: "create" | "preserve";
-  /** Verified live identity; present exactly when the action is preserve. */
-  id?: string;
-}
-
-export interface PlannedD1DatabaseBinding {
-  binding: string;
-  providerType: "d1";
-  databaseName: string;
-  action: "create" | "preserve";
-  /** Verified live identity; present exactly when the action is preserve. */
-  id?: string;
-}
-
-export interface PlannedKvNamespaceBinding {
-  binding: string;
-  providerType: "kv_namespace";
-  /** Verified live provider id (the value bound as `namespace_id`). */
-  namespaceId: string;
-  /** Live namespace name, so the binding spec can select it by name. */
-  namespaceName: string;
-  action: "preserve";
-}
-
-export interface WranglerResourcePlan {
-  r2Buckets: PlannedR2BucketBinding[];
-  d1Databases: PlannedD1DatabaseBinding[];
-  kvNamespaces: PlannedKvNamespaceBinding[];
-}
-
-export type WranglerResourcePlanResult =
-  | { ok: true; plan: WranglerResourcePlan }
-  | { ok: false; issues: string[] };
-
-export function planWranglerResourceActions(
-  projection: WranglerResourceProjection,
-  snapshot: Pick<TargetSnapshot, "r2Buckets" | "d1Databases" | "kvNamespaces">,
-  mode: WranglerResourceMode,
-): WranglerResourcePlanResult {
-  const issues: string[] = [];
-  const r2Buckets: PlannedR2BucketBinding[] = [];
-  for (const declared of projection.r2Buckets) {
-    const action = plannedBucketActionFor(declared, snapshot.r2Buckets, {
-      createIfMissing: mode === "ensure",
-    });
-    if (action.action === "conflict") {
-      issues.push(action.detail);
-      continue;
-    }
-    r2Buckets.push(
-      action.action === "preserve"
-        ? {
-            binding: action.binding,
-            providerType: "r2_bucket",
-            bucketName: action.bucketName,
-            action: "preserve",
-            id: action.id,
-          }
-        : {
-            binding: action.binding,
-            providerType: "r2_bucket",
-            bucketName: action.bucketName,
-            action: "create",
-          },
-    );
-  }
-  const d1Databases: PlannedD1DatabaseBinding[] = [];
-  for (const declared of projection.d1Databases) {
-    const action = plannedDatabaseActionFor(declared, snapshot.d1Databases, {
-      createIfMissing: mode === "ensure",
-    });
-    if (action.action === "conflict") {
-      issues.push(action.detail);
-      continue;
-    }
-    d1Databases.push(
-      action.action === "preserve"
-        ? {
-            binding: action.binding,
-            providerType: "d1",
-            databaseName: action.databaseName,
-            action: "preserve",
-            id: action.id,
-          }
-        : {
-            binding: action.binding,
-            providerType: "d1",
-            databaseName: action.databaseName,
-            action: "create",
-          },
-    );
-  }
-  const kvNamespaces: PlannedKvNamespaceBinding[] = [];
-  for (const declared of projection.kvNamespaces) {
-    const action = plannedNamespaceActionFor(declared, snapshot.kvNamespaces);
-    if (action.action !== "preserve") {
-      issues.push(
-        action.action === "conflict"
-          ? action.detail
-          : `KV namespace for binding "${declared.binding}" cannot be created from a wrangler binding`,
-      );
-      continue;
-    }
-    kvNamespaces.push({
-      binding: action.binding,
-      providerType: "kv_namespace",
-      namespaceId: action.id,
-      namespaceName: action.namespaceName,
-      action: "preserve",
-    });
-  }
-  if (issues.length > 0) {
-    return { ok: false, issues };
-  }
-  return { ok: true, plan: { r2Buckets, d1Databases, kvNamespaces } };
-}
 
 // ---------------------------------------------------------------------------
 // carrier features — Workflow / Service / Durable Objects. The final
@@ -209,7 +46,7 @@ export interface WranglerCarrierProjection {
   services: ReadonlyArray<WranglerV3ServiceBinding>;
 }
 
-export type WranglerCarrierIssueCode =
+type WranglerCarrierIssueCode =
   | "UNSUPPORTED_EXTERNAL_WORKFLOW"
   | "UNSUPPORTED_EXTERNAL_DO"
   | "UNSUPPORTED_DO_ENVIRONMENT"
@@ -221,12 +58,12 @@ export type WranglerCarrierIssueCode =
   | "DO_CLASS_UNBOUND"
   | "UNSUPPORTED_SERVICE_BINDING_TARGET";
 
-export interface WranglerCarrierIssue {
+interface WranglerCarrierIssue {
   code: WranglerCarrierIssueCode;
   detail: string;
 }
 
-export interface PlannedWorkflowBinding {
+interface PlannedWorkflowBinding {
   binding: string;
   workflowName: string;
   className: string;
@@ -242,7 +79,7 @@ export interface PlannedWorkflowBinding {
   metadata: WorkflowBindingMetadata;
 }
 
-export interface WranglerCarrierPlan {
+interface WranglerCarrierPlan {
   workflows: PlannedWorkflowBinding[];
   durableObjects: PlannedDurableObjectBinding[];
   /**
@@ -262,14 +99,14 @@ export interface WranglerCarrierPlan {
 }
 
 /** a strictly-bound Durable Object binding (own script, exported class, exact migration cover). */
-export interface PlannedDurableObjectBinding {
+interface PlannedDurableObjectBinding {
   binding: string;
   className: string;
   /** Exact provider version-metadata binding. */
   metadata: DurableObjectBindingMetadata;
 }
 
-export type DurableObjectBindingMetadata = {
+type DurableObjectBindingMetadata = {
   name: string;
   type: "durable_object_namespace";
   class_name: string;

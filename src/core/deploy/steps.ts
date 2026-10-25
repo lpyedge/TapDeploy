@@ -32,10 +32,7 @@ import {
   createQueues,
   registerQueueConsumers,
   applyWorkflows,
-  createHyperdriveConfigs,
   createVectorizeIndexes,
-  createSecretsStores,
-  ensureSecretsStoreSecrets,
   reconcileRateLimits,
   stepOk as ok,
   stepFail as fail,
@@ -62,10 +59,7 @@ export const DEPLOY_STEP_NAMES = [
   "create-queues",
   // the Workers sequence puts apply-secrets after the worker/version
   // exist and register-queue-consumers after the cutover.
-  "create-hyperdrive-configs",
   "create-vectorize-indexes",
-  "create-secrets-stores",
-  "ensure-secrets-store-secrets",
   "create-worker",
   "create-version",
   "apply-secrets",
@@ -113,35 +107,23 @@ export interface DeployStepContext {
   accessToken: string;
 }
 
-export interface DeployStepFail {
+interface DeployStepFail {
   ok: false;
   error: { kind: string; retryAfterSeconds?: number; detail: string };
 }
 
-export interface DeployStepOk {
+interface DeployStepOk {
   ok: true;
   result: unknown;
 }
 
 export type DeployStepOutcome = DeployStepOk | DeployStepFail;
 
-export type RegisterAssetsResult = AssetSessionStartResult;
+type RegisterAssetsResult = AssetSessionStartResult;
 
-export interface CompleteAssetsResult {
+interface CompleteAssetsResult {
   jwt: string;
 }
-
-export interface CreateVersionResult {
-  versionId: string;
-  number?: number;
-}
-
-export interface ActivateResult {
-  alreadyActive: boolean;
-  deploymentId: string;
-}
-
-export type ExecuteDeployStep = typeof executeDeployStep;
 export function isDeployStepForTarget(target: "workers" | "pages", step: DeployStepName): boolean {
   return target === "pages" ? ["pages-create-project", "pages-register-assets", "pages-deploy", "pages-postcheck", "reconcile-domains"].includes(step) : !step.startsWith("pages-");
 }
@@ -208,8 +190,7 @@ export async function executeDeployStep(
   // preparatory write, including resources/assets created before the upload.
   const preparation = new Set<DeployStepName>([
     "register-assets", "create-r2-buckets", "create-d1-databases", "create-kv-namespaces",
-    "create-queues", "create-hyperdrive-configs", "create-vectorize-indexes",
-    "create-secrets-stores", "ensure-secrets-store-secrets", "create-version",
+    "create-queues", "create-vectorize-indexes", "create-version",
   ]);
   if (preparation.has(step) || step === "create-worker" || step === "pages-create-project" || step === "pages-deploy") {
     const issues = resourceCapabilityIssues(ctx.spec, ctx.snapshot);
@@ -257,14 +238,8 @@ export async function executeDeployStep(
       return registerQueueConsumers(ctx, args);
     case "apply-workflows":
       return applyWorkflows(ctx, args);
-    case "create-hyperdrive-configs":
-      return createHyperdriveConfigs(ctx, args);
     case "create-vectorize-indexes":
       return createVectorizeIndexes(ctx, args);
-    case "create-secrets-stores":
-      return createSecretsStores(ctx, args);
-    case "ensure-secrets-store-secrets":
-      return ensureSecretsStoreSecrets(ctx, args);
     case "apply-secrets":
       return applySecrets(ctx, args);
     case "reconcile-schedules":
@@ -521,7 +496,7 @@ async function createWorker(
     if (active?.length !== 1 || active[0]?.percentage !== 100) {
       return fail("wrong-version", "first upload serving version could not be resolved unambiguously");
     }
-    const version = versions.find(v => v.id === (active[0]?.version_id ?? active[0]?.id));
+    const version = versions.find(v => v.id === active[0]?.version_id);
     if (!version || version.message !== versionMessage(ctx.spec)) {
       return fail("wrong-version", "first upload serving version does not match the approved project/release");
     }
@@ -868,12 +843,12 @@ function buildVersionMetadata(
   return { ok: true, value: metadata };
 }
 
-function deploymentVersionIds(versions: { version_id?: string; id?: string }[] | undefined): string[] {
-  return (versions ?? []).map((v) => v.version_id ?? v.id ?? "").filter((s) => s.length > 0);
+function deploymentVersionIds(versions: { version_id: string }[] | undefined): string[] {
+  return (versions ?? []).map((v) => v.version_id).filter((s) => s.length > 0);
 }
 
-function exclusivelyActive(versions: { version_id?: string; id?: string; percentage?: number }[] | undefined, expected: string): boolean {
-  return versions?.length === 1 && (versions[0]?.version_id ?? versions[0]?.id) === expected && versions[0]?.percentage === 100;
+function exclusivelyActive(versions: { version_id: string; percentage?: number }[] | undefined, expected: string): boolean {
+  return versions?.length === 1 && versions[0]?.version_id === expected && versions[0]?.percentage === 100;
 }
 
 async function activate(
@@ -938,7 +913,7 @@ async function reconcileSchedules(
   }
 }
 
-export interface PublishWorkersDevResult {
+interface PublishWorkersDevResult {
   published: boolean;
   skipped?: boolean;
   // "no-account-subdomain": the account has no `<name>.workers.dev` yet.

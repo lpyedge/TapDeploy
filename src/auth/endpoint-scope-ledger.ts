@@ -29,9 +29,9 @@ export const ENDPOINT_SCOPE_LEDGER: Record<string, EndpointScopeEntry> = {
   // Workflows ride the Worker admin scope (V3_CAPABILITY_META.workflows);
   // no separate Workflows OAuth scope exists.
   listWorkflows: entry("worker-admin"), getWorkflowDetails: entry("worker-admin"), updateWorkflow: entry("worker-admin"),
-  listHyperdriveConfigs: entry("hyperdrive-write"), createHyperdriveConfig: entry("hyperdrive-write", false),
+  listHyperdriveConfigs: entry("hyperdrive-write"),
   listVectorizeIndexes: entry("vectorize-write"), createVectorizeIndex: entry("vectorize-write"),
-  listSecretsStores: entry("secrets-store-write"), createSecretsStore: entry("secrets-store-write", false), listSecretsStoreSecrets: entry("secrets-store-write", false), createSecretsStoreSecret: entry("secrets-store-write", false),
+  listSecretsStores: entry("secrets-store-write"), listSecretsStoreSecrets: entry("secrets-store-write", false),
   listPages: entry("page-write"), getPagesProject: entry("page-write"), updatePagesProject: entry("page-write"), createPagesProject: entry("page-write"), getPagesUploadToken: entry("page-write"), createPagesDeployment: entry("page-write"), getPagesDeployment: entry("page-write"), listPagesDeployments: entry("page-write"),
   listZones: entry("zone-read"), listDnsRecords: entry("dns-write"), createDnsRecord: entry("dns-write"), updateDnsRecord: entry("dns-write"), deleteDnsRecord: entry("dns-write"),
   listWorkerRoutes: entry("workers-routes-write"), createWorkerRoute: entry("workers-routes-write"), updateWorkerRoute: entry("workers-routes-write"), deleteWorkerRoute: entry("workers-routes-write", false),

@@ -16,7 +16,7 @@ import { zipSync } from "fflate";
 import { createHash } from "node:crypto";
 
 import { buildValidZip } from "../unit/zip-builder.js";
-import { graphActionsForPlan, graphPhaseForDiff, runGraphDeploy } from "../../src/web/graph-deploy-runner.js";
+import { graphActionsForPlan, runGraphDeploy } from "../../src/web/graph-deploy-runner.js";
 import {
   v3ModuleBytes,
   v3UnitWorkerPaths,
@@ -300,6 +300,23 @@ test.describe("prebuilt UI flow", () => {
     expect(mocks.prepareBodies).toEqual([]);
     expect(mocks.planBodies).toEqual([]);
     expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  test("Sign out asks the server to revoke the Cloudflare sign-in and returns to the config entry", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    const logouts: Array<{ method: string; csrf: string | undefined }> = [];
+    await page.route("**/api/auth/logout", (route) => {
+      logouts.push({ method: route.request().method(), csrf: route.request().headers()["x-tapdeploy-csrf"] });
+      return route.fulfill({ status: 200, contentType: "text/plain", body: "OK" });
+    });
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-sign-out").click();
+    await expect(page.getByTestId("config-step")).toBeVisible();
+    await expect(page.getByTestId("v3-flow")).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "Signed out" })).toBeVisible();
+    expect(logouts).toEqual([{ method: "POST", csrf: CSRF }]);
   });
 
   for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["mobile", { width: 390, height: 844 }]] as const) {
@@ -1330,32 +1347,6 @@ test.describe("prebuilt UI flow", () => {
 });
 
 test.describe("bridge contracts (no browser)", () => {
-  test("phase mapping is exact and fail-closed", () => {
-    expect(graphPhaseForDiff("worker", "r2", "create")).toBe("create-r2-buckets");
-    expect(graphPhaseForDiff("worker", "worker", "create")).toBe("create-worker");
-    expect(graphPhaseForDiff("worker", "worker", "update")).toBe("create-version");
-    expect(graphPhaseForDiff("worker", "deployment", "create")).toBe("activate");
-    expect(graphPhaseForDiff("worker", "schedule", "create")).toBe("reconcile-schedules");
-    // one worker static-assets action addresses the sealed register +
-    // complete pair (first phase returned; the driver executes both inline).
-    expect(graphPhaseForDiff("worker", "static-assets", "create")).toBe("register-assets");
-    expect(graphPhaseForDiff("worker", "static-assets", "update")).toBe("register-assets");
-    // one worker workers-dev action addresses the provider-verified
-    // publish step (first phase returned; the driver executes it inline).
-    expect(graphPhaseForDiff("worker", "workers-dev", "create")).toBe("publish-workers-dev");
-    expect(graphPhaseForDiff("pages-static", "pages-project", "create")).toBe("pages-create-project");
-    expect(graphPhaseForDiff("pages-static", "static-assets", "update")).toBe("pages-register-assets");
-    expect(graphPhaseForDiff("pages-static", "deployment", "create")).toBe("pages-deploy");
-    for (const [kind, resource, action] of [
-      ["worker", "worker", "conflict"],
-      ["worker", "hyperdrive", "update"],
-      ["worker", "r2", "update"],
-      ["pages-static", "deployment", "update"],
-      ["worker", "mystery", "create"],
-    ] as const) {
-      expect(() => graphPhaseForDiff(kind, resource, action)).toThrow();
-    }
-  });
 
   test("plan expansion skips preserve and addresses every safe diff", () => {
     const actions = graphActionsForPlan({

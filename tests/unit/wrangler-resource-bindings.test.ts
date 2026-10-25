@@ -7,7 +7,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  plannedBucketActionFor,
   plannedDatabaseActionFor,
   plannedNamespaceActionFor,
 } from "../../src/cloudflare/resources/index.js";
@@ -25,8 +24,6 @@ import {
   registerQueueConsumers,
 } from "../../src/core/deploy/bindings.js";
 import {
-  planWranglerResourceActions,
-  type WranglerResourceProjection,
 } from "../../src/core/deploy/wrangler-binding-plan.js";
 import type { DeploySpec } from "../../src/core/deploy-spec.js";
 import type { DeployStepContext } from "../../src/core/deploy/steps.js";
@@ -54,7 +51,7 @@ function codes(result: WranglerV3Result): string[] {
   return result.issues.map((issue) => issue.code);
 }
 
-function projectionFrom(overrides: Record<string, unknown>): WranglerResourceProjection {
+function projectionFrom(overrides: Record<string, unknown>): WranglerV3Config {
   const result = normalizeWranglerV3(config(overrides));
   expect(result.issues).toEqual([]);
   expect(result.ok).toBe(true);
@@ -298,48 +295,6 @@ describe("Wrangler resource projection", () => {
 });
 
 describe("verified resource actions against live state", () => {
-  it("preserves an existing R2 bucket only through its unique live identity", () => {
-    const action = plannedBucketActionFor(
-      { binding: "MEDIA", bucketName: BUCKET },
-      [{ name: BUCKET, id: `${BUCKET}@2026-01-01T00:00:00.000Z` }],
-      { createIfMissing: true },
-    );
-    expect(action).toEqual({
-      binding: "MEDIA",
-      bucketName: BUCKET,
-      action: "preserve",
-      id: `${BUCKET}@2026-01-01T00:00:00.000Z`,
-    });
-  });
-
-  it("creates only a verified-missing R2 bucket when provisioning is approved", () => {
-    expect(
-      plannedBucketActionFor({ binding: "MEDIA", bucketName: BUCKET }, [], { createIfMissing: true }),
-    ).toMatchObject({ action: "create" });
-    expect(
-      plannedBucketActionFor({ binding: "MEDIA", bucketName: BUCKET }, [], { createIfMissing: false }),
-    ).toMatchObject({ action: "conflict" });
-  });
-
-  it("refuses ambiguous or identity-less live R2 matches", () => {
-    const ambiguous = plannedBucketActionFor(
-      { binding: "MEDIA", bucketName: BUCKET },
-      [
-        { name: BUCKET, id: "one" },
-        { name: BUCKET, id: "two" },
-      ],
-      { createIfMissing: true },
-    );
-    expect(ambiguous).toMatchObject({ action: "conflict" });
-    expect(ambiguous.action === "conflict" && ambiguous.detail).toContain("refusing to guess");
-
-    const noId = plannedBucketActionFor(
-      { binding: "MEDIA", bucketName: BUCKET },
-      [{ name: BUCKET, id: "" }],
-      { createIfMissing: true },
-    );
-    expect(noId).toMatchObject({ action: "conflict" });
-  });
 
   it("verifies a declared D1 database_id against the live account", () => {
     const preserved = plannedDatabaseActionFor(
@@ -413,85 +368,6 @@ describe("verified resource actions against live state", () => {
   });
 });
 
-describe("planWranglerResourceActions", () => {
-  it("plans verified preserves and approved creates with provider binding types", () => {
-    const projection = projectionFrom({
-      r2_buckets: [
-        { binding: "MEDIA", bucket_name: "media-bucket" },
-        { binding: "ARCHIVE", bucket_name: "archive-bucket" },
-      ],
-      d1_databases: [{ binding: "DB", database_name: "app-db" }],
-      kv_namespaces: [{ binding: "CACHE", id: "ns-live-1" }],
-    });
-    const snapshot = {
-      r2Buckets: [{ name: "media-bucket", id: "media-bucket@2026-01-01" }],
-      d1Databases: [{ name: "app-db", id: "db-live-1" }],
-      kvNamespaces: [{ name: "cache-prod", id: "ns-live-1" }],
-    };
-    const planned = planWranglerResourceActions(projection, snapshot, "ensure");
-    if (!planned.ok) {
-      throw new Error(`expected ok plan: ${planned.issues.join("; ")}`);
-    }
-    expect(planned.plan.r2Buckets).toEqual([
-      {
-        binding: "MEDIA",
-        providerType: "r2_bucket",
-        bucketName: "media-bucket",
-        action: "preserve",
-        id: "media-bucket@2026-01-01",
-      },
-      { binding: "ARCHIVE", providerType: "r2_bucket", bucketName: "archive-bucket", action: "create" },
-    ]);
-    expect(planned.plan.d1Databases).toEqual([
-      { binding: "DB", providerType: "d1", databaseName: "app-db", action: "preserve", id: "db-live-1" },
-    ]);
-    expect(planned.plan.kvNamespaces).toEqual([
-      {
-        binding: "CACHE",
-        providerType: "kv_namespace",
-        namespaceId: "ns-live-1",
-        namespaceName: "cache-prod",
-        action: "preserve",
-      },
-    ]);
-  });
-
-  it("fails the whole plan in bind-existing mode instead of creating a missing resource", () => {
-    const projection = projectionFrom({
-      r2_buckets: [{ binding: "MEDIA", bucket_name: "media-bucket" }],
-    });
-    const planned = planWranglerResourceActions(
-      projection,
-      { r2Buckets: [], d1Databases: [], kvNamespaces: [] },
-      "bind-existing",
-    );
-    expect(planned.ok).toBe(false);
-    if (planned.ok) {
-      throw new Error("expected a fail-closed plan");
-    }
-    expect(planned.issues[0]).toContain("createIfMissing=false");
-  });
-
-  it("fails closed on stale D1/KV identities and never drops a binding", () => {
-    const projection = projectionFrom({
-      d1_databases: [{ binding: "DB", database_name: "app-db", database_id: "db-from-old-env" }],
-      kv_namespaces: [{ binding: "CACHE", id: "ns-from-old-env" }],
-    });
-    const planned = planWranglerResourceActions(
-      projection,
-      { r2Buckets: [], d1Databases: [], kvNamespaces: [] },
-      "ensure",
-    );
-    expect(planned.ok).toBe(false);
-    if (planned.ok) {
-      throw new Error("expected a fail-closed plan");
-    }
-    expect(planned.issues).toHaveLength(2);
-    expect(planned.issues.join(" ")).toContain("never recreated");
-    expect(planned.issues.join(" ")).toContain("never recreated from a wrangler binding");
-  });
-});
-
 describe("provider denial and duplicate handling (R2 step)", () => {
   it("treats a 403 on create as a denial, never as an absent resource", async () => {
     const { calls, client } = trackedClient(() => cfError(403, "Authentication error"));
@@ -559,40 +435,6 @@ describe("provider denial and duplicate handling (R2 step)", () => {
         needs: { r2: true, domains: false },
       }),
     ).rejects.toMatchObject({ kind: "not-found" });
-  });
-
-  it("keeps an optional undeclared R2 read lenient, then fails the create closed with the real denial", async () => {
-    const fetcher: Fetcher = async (input) => {
-      const url = String(input);
-      return url.includes("/workers/scripts")
-        ? cfError(404, "script not found")
-        : cfError(403, "Authentication error");
-    };
-    const client = createCloudflareClient({ accessToken: "t", accountId: ACCOUNT, fetcher });
-    // Legacy compatibility: an *undeclared* (optional) read may be empty; the
-    // declared-resource path must mark its needs required (wiring), and the
-    // actual create still fails closed with the real provider denial (below).
-    const snapshot = await snapshotTarget(client, {
-      accountId: ACCOUNT,
-      workerName: "demo-worker",
-      needs: { domains: false },
-    });
-    expect(snapshot.r2Buckets).toEqual([]);
-    const planned = planWranglerResourceActions(
-      { r2Buckets: [{ binding: "MEDIA", bucketName: BUCKET }], d1Databases: [], kvNamespaces: [] },
-      snapshot,
-      "ensure",
-    );
-    if (!planned.ok) {
-      throw new Error(`expected ok plan: ${planned.issues.join("; ")}`);
-    }
-    expect(planned.plan.r2Buckets).toEqual([
-      { binding: "MEDIA", providerType: "r2_bucket", bucketName: BUCKET, action: "create" },
-    ]);
-    const { calls, client: stepClient } = trackedClient(() => cfError(403, "Authentication error"));
-    const outcome = await createR2Buckets(r2StepContext(stepClient, snapshot.r2Buckets), {});
-    expect(outcome).toMatchObject({ ok: false, error: { kind: "forbidden" } });
-    expect(calls.some((call) => call.method === "POST")).toBe(true);
   });
 
   it("preserves an existing bucket from the verified create response identity", async () => {
@@ -780,11 +622,6 @@ describe("V3 KV/D1 provider-id identity (never an id-titled create)", () => {
     expect(calls).toEqual([]);
   });
 });
-
-// The projection type must accept a normalized WranglerV3Config directly so the
-// plan can be built without a second, duplicated resource declaration.
-const _typeCheck: (cfg: WranglerV3Config) => WranglerResourceProjection = (cfg) => cfg;
-void _typeCheck;
 
 // ---------------------------------------------------------------------------
 // Queue producer/consumer graph. Producers are Worker version bindings;

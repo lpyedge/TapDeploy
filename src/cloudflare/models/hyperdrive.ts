@@ -7,9 +7,9 @@
 // `password` / `access_client_secret` values, so the installer must never log
 // them and must only ever carry them in a create/edit request.
 
-export type HyperdriveScheme = "postgres" | "postgresql" | "mysql";
+type HyperdriveScheme = "postgres" | "postgresql" | "mysql";
 
-export interface HyperdriveOrigin {
+interface HyperdriveOrigin {
   database: string;
   host?: string;
   port?: number;
@@ -22,7 +22,7 @@ export interface HyperdriveOrigin {
   access_client_secret?: string;
 }
 
-export interface HyperdriveCaching {
+interface HyperdriveCaching {
   disabled?: boolean;
   max_age?: number;
   stale_while_revalidate?: number;
@@ -35,10 +35,4 @@ export interface HyperdriveConfig {
   origin?: HyperdriveOrigin;
   created_on?: string;
   modified_on?: string;
-}
-
-export interface HyperdriveCreateRequest {
-  name: string;
-  origin: HyperdriveOrigin;
-  caching?: HyperdriveCaching;
 }

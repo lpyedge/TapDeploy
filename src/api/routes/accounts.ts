@@ -4,14 +4,10 @@
 
 import type { Context, Hono } from "hono";
 import type { AppEnv, TapDeployEnv } from "../app.js";
-import { parseCookies } from "../../auth/cookies.js";
-import { validateCsrf, validateOrigin } from "../../auth/csrf.js";
-import { sessionCookieName, readSession } from "../../auth/session.js";
 import {
   createCloudflareClient,
   type CloudflareApiError,
 } from "../../cloudflare/client/index.js";
-import { loadKey } from "./auth.js";
 import { authenticate } from "../session-guard.js";
 
 export function attachAccountsRoutes(app: Hono<AppEnv>, env: TapDeployEnv): void {
@@ -96,23 +92,9 @@ async function hyperdriveHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise
 }
 
 async function accountsHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
-  const publicOrigin = env.PUBLIC_ORIGIN ?? "";
-  const origin = c.req.header("origin");
-  const csrf = c.req.header("x-tapdeploy-csrf");
-
-  const cookies = parseCookies(c.req.raw.headers.get("cookie"));
-  const raw = cookies[sessionCookieName(publicOrigin)];
-  const key = raw ? await loadKey(env).catch(() => null) : null;
-  if (!key || !raw) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-  const payload = await readSession(key, raw);
-  if (!payload) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-  if (!validateOrigin(publicOrigin, origin) || !validateCsrf(payload, csrf)) {
-    return c.json({ error: "csrf/origin check failed" }, 403);
-  }
+  const auth = await authenticate(c, env);
+  if ("denied" in auth) return auth.denied;
+  const payload = auth.session;
 
   const client = createCloudflareClient({ accessToken: payload.accessToken });
   try {
@@ -133,23 +115,9 @@ async function accountsHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<R
 // upgrade target. Do not query undeclared products. A denied granted capability
 // is an upstream failure, never an empty verified list.
 async function targetsHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
-  const publicOrigin = env.PUBLIC_ORIGIN ?? "";
-  const origin = c.req.header("origin");
-  const csrf = c.req.header("x-tapdeploy-csrf");
-
-  const cookies = parseCookies(c.req.raw.headers.get("cookie"));
-  const raw = cookies[sessionCookieName(publicOrigin)];
-  const key = raw ? await loadKey(env).catch(() => null) : null;
-  if (!key || !raw) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-  const payload = await readSession(key, raw);
-  if (!payload) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-  if (!validateOrigin(publicOrigin, origin) || !validateCsrf(payload, csrf)) {
-    return c.json({ error: "csrf/origin check failed" }, 403);
-  }
+  const auth = await authenticate(c, env);
+  if ("denied" in auth) return auth.denied;
+  const payload = auth.session;
 
   let accountId: string;
   try {

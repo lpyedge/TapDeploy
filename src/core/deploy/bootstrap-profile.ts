@@ -34,8 +34,6 @@ import { randomBase64Url } from "../../auth/crypto.js";
 // ---------------------------------------------------------------------------
 
 export const BOOTSTRAP_PROFILE_KIND = "private-r2-owner-bootstrap/v1";
-/** Set on older installations; the installer never sets it and never reads it. */
-const BOOTSTRAP_LEGACY_SETUP_PASSWORD = "ADMIN_BOOTSTRAP_PASSWORD";
 export const DEFAULT_BOOTSTRAP_READINESS_PATH = "/api/auth/methods";
 
 const PROFILE_FIELDS = [
@@ -61,7 +59,7 @@ const BUCKET_NAME_RE = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 // Result / refusal vocabulary
 // ---------------------------------------------------------------------------
 
-export type BootstrapRefusalCode =
+type BootstrapRefusalCode =
   | "INVALID_PROFILE"
   | "INSPECT_FAILED"
   | "UNVERIFIED_OAUTH"
@@ -74,7 +72,7 @@ export type BootstrapRefusalCode =
   | "BUCKET_CREATE_FAILED"
   | "READINESS_NOT_READY";
 
-export interface BootstrapRefusal {
+interface BootstrapRefusal {
   code: BootstrapRefusalCode;
   detail: string;
 }
@@ -216,7 +214,6 @@ export function validateBootstrapProfile(
 export interface BootstrapTargetFacts {
   workerExists: boolean;
   hasRoot: boolean;
-  hasLegacySetupPassword: boolean;
   bucketExists: boolean;
   ownerExists: boolean;
   markerExists: boolean;
@@ -302,7 +299,6 @@ export async function inspectBootstrapTarget(
     value: {
       workerExists: secrets.value !== null,
       hasRoot: names.has(input.profile.rootSecret),
-      hasLegacySetupPassword: names.has(BOOTSTRAP_LEGACY_SETUP_PASSWORD),
       bucketExists: bucket.value,
       ownerExists,
       markerExists,
@@ -517,117 +513,6 @@ export function planBootstrapSecrets(
     uploaded.push(profile.armSecret);
   }
   return { ok: true, value: { create, uploaded } };
-}
-
-// ---------------------------------------------------------------------------
-// Post-deploy readiness (same-origin `/api/auth/methods`; paths only)
-// ---------------------------------------------------------------------------
-
-export type BootstrapReadinessFetcher = (
-  input: string,
-  init?: RequestInit,
-) => Promise<Response>;
-
-export interface BootstrapReadinessFetchInput {
-  /** Deployed Worker origin (scheme + host; the readiness path is resolved against it). */
-  origin: string;
-  readinessPath: string;
-  timeoutMs?: number;
-}
-
-/**
- * Fetch the app's own readiness endpoint — the profile's relative
- * `readinessPath` resolved on the deployed origin (never an arbitrary foreign
- * URL). Any network/timeout/HTTP/JSON failure is "could not be read", never a
- * silently-passing check.
- */
-export async function fetchBootstrapReadiness(
-  fetcher: BootstrapReadinessFetcher,
-  input: BootstrapReadinessFetchInput,
-): Promise<{ ok: true; methods: unknown } | { ok: false; detail: string }> {
-  let url: URL;
-  try {
-    const origin = new URL(input.origin);
-    url = new URL(input.readinessPath, origin);
-    if (url.origin !== origin.origin) {
-      return { ok: false, detail: "the readiness path must stay on the deployed Worker origin" };
-    }
-  } catch {
-    return { ok: false, detail: "the deployed origin is not a valid URL" };
-  }
-  const controller = new AbortController();
-  const timeoutMs = input.timeoutMs ?? 10_000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetcher(url.toString(), { signal: controller.signal });
-    if (!response.ok) {
-      return { ok: false, detail: `the sign-in status returned HTTP ${response.status}` };
-    }
-    try {
-      return { ok: true, methods: await response.json() };
-    } catch {
-      return { ok: false, detail: "the sign-in status is not valid JSON" };
-    }
-  } catch {
-    return { ok: false, detail: "the sign-in status could not be read from the Worker URL" };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-export interface BootstrapReadinessInput {
-  /** Parsed `/api/auth/methods` answer, or null when it could not be read. */
-  methods: unknown;
-  ownerExists: boolean;
-  credentialExists: boolean;
-  firstSetup: boolean;
-  ownerKey: string;
-  initialPasswordKey: string;
-}
-
-/**
- * Reference-identical readiness verdict: empty problems = ready. A pending or
- * blank page, a disabled password method, a missing Owner record or (on a
- * first setup) a missing first password object are all NOT ready.
- */
-export function bootstrapReadinessProblems(input: BootstrapReadinessInput): string[] {
-  const problems: string[] = [];
-  const methods = input.methods;
-  if (methods === null || typeof methods !== "object" || Array.isArray(methods)) {
-    problems.push("the sign-in status could not be read from the Worker URL");
-  } else {
-    const m = methods as { setup?: unknown; methods?: { password?: { enabled?: unknown } } };
-    if (m.setup !== "ready") {
-      problems.push(`the setup state is "${String(m.setup)}", not "ready"`);
-    }
-    if (m.methods?.password?.enabled !== true) {
-      problems.push("the password sign-in method is not enabled");
-    }
-  }
-  if (!input.ownerExists) {
-    problems.push(`the Owner record ${input.ownerKey} is missing from the bucket`);
-  }
-  if (input.firstSetup && !input.credentialExists) {
-    problems.push(
-      `the first password object ${input.initialPasswordKey} is missing (retrieve it before it is gone, or sign in if you already changed it)`,
-    );
-  }
-  return problems;
-}
-
-/** The lines a person needs after a successful first install. Never contains a password. */
-export function bootstrapRetrievalSteps(input: {
-  siteUrl: string;
-  bucketName: string;
-  initialPasswordKey: string;
-}): string[] {
-  return [
-    `Site: ${input.siteUrl}/upload/`,
-    `Bucket: ${input.bucketName}`,
-    `Your first Owner password is in the R2 bucket, object key: ${input.initialPasswordKey}`,
-    "To read it: Cloudflare dashboard > R2 > open the bucket above > Objects > open that key > Download. Use it to sign in.",
-    "Then change it in the site (Security settings). The stored copy is removed automatically after a successful change.",
-  ];
 }
 
 // ---------------------------------------------------------------------------

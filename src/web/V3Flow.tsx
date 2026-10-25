@@ -55,6 +55,7 @@ export interface V3FlowProps {
   appId: string;
   sourceLabel: string;
   onExit: () => void;
+  onSignOut: () => void;
   onExpired: () => void;
   onStage?: (stage: V3Stage) => void;
   /** Re-authorize for the current config: persists first, then OAuth. */
@@ -390,6 +391,8 @@ export function V3Flow(props: V3FlowProps) {
     }
   };
 
+  // Signing out mid-deploy would end the session under the running steps.
+  const deploying = snap.stage === "deploy" && snap.deployOk === null && statuses.length > 0;
   const graphPlan = (snap.graphPlan ?? null) as GraphPlan | null;
   // The confirmation is sealed into the plan approval, so toggling it re-plans;
   // the checkbox stays visible (checked) once the confirmed plan arrives.
@@ -405,7 +408,10 @@ export function V3Flow(props: V3FlowProps) {
           <h2 className="m-0 outline-none" ref={headingRef} tabIndex={-1}>Install {appDisplayName(configText, props.appId)}</h2>
           <p className="meta m-0 break-all">{props.appId} · config from {props.sourceLabel}</p>
         </div>
-        <button type="button" className="link text-sm" onClick={props.onExit} data-testid="v3-exit">Use another config</button>
+        <div className="flex shrink-0 gap-4">
+          <button type="button" className="link text-sm" onClick={props.onExit} data-testid="v3-exit">Use another config</button>
+          {!deploying && <button type="button" className="link text-sm" onClick={props.onSignOut} data-testid="v3-sign-out">Sign out</button>}
+        </div>
       </div>
       {props.accounts.length > 1 && !accountId && (
         <p className="notice" data-testid="v3-account-required">Choose the Cloudflare account to install into (top right).</p>

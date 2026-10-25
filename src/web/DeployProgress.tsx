@@ -136,7 +136,7 @@ export function GraphProgress({ plan, statuses, checks = [], finished = false, t
               {item.name ? <strong className="step-target"> {item.name}</strong> : null}
             </span>
             <span className="step-state">{STEP_STATE_LABEL[item.state]}{item.state === "done" && item.verified ? " · verified" : ""}</span>
-            {item.detail && item.state !== "done" ? <span className="step-detail">{item.detail}</span> : null}
+            {item.detail && item.state !== "done" && !(finished && item.state === "error") ? <span className="step-detail">{item.detail}</span> : null}
           </li>
         ))}
       </ol>

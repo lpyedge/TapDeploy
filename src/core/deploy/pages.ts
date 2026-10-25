@@ -103,14 +103,14 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
 // the publisher-declared 32-hex Pages upload hash (computed from the released
 // bytes at manifest derivation time) plus the release content SHA-256/size. The
 // browser-supplied deployment manifest must match THIS set exactly.
-export interface ApprovedPagesAsset {
+interface ApprovedPagesAsset {
   path: string;
   sha256: string;
   size: number;
   pagesHash: string;
 }
 
-export type PagesPayloadCheckResult =
+type PagesPayloadCheckResult =
   | {
       ok: true;
       manifest: Record<string, string>;

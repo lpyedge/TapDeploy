@@ -6,7 +6,6 @@
 
 import type { DeploySpec } from "../deploy-spec.js";
 import type { TargetSnapshot } from "../planning/types.js";
-import { hyperdriveOriginMatches } from "../../cloudflare/resources/hyperdrive.js";
 import { vectorizeConfigMatches } from "../../cloudflare/resources/vectorize.js";
 
 export interface BindingVerification {
@@ -60,7 +59,6 @@ export function verifyDeployedBindings(spec: DeploySpec, snapshot: TargetSnapsho
   }
   for (const b of spec.cloudflare.hyperdrive) {
     checkById("hyperdrive", b.binding, live.hyperdrive?.[b.binding], snapshot.hyperdriveConfigs, b.configName, "config");
-    if (b.origin && !hyperdriveOriginMatches(b.origin, snapshot.hyperdriveConfigs.find(config => config.name === b.configName)?.origin)) mismatches.push(`hyperdrive binding "${b.binding}" origin differs from approved public connection fields`);
   }
   for (const b of spec.cloudflare.vectorize) {
     check("vectorize", b.binding, live.vectorize?.[b.binding], b.indexName);

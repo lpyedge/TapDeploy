@@ -16,9 +16,7 @@ import { pagesCnameTarget } from "../../core/deploy/custom-domains.js";
 import type { Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { AppEnv, TapDeployEnv } from "../app.js";
-import { parseCookies } from "../../auth/cookies.js";
-import { validateCsrf, validateOrigin } from "../../auth/csrf.js";
-import { sessionCookieName, readSession, type SessionPayload } from "../../auth/session.js";
+import type { SessionPayload } from "../../auth/session.js";
 import type { DeploySpec } from "../../core/deploy-spec.js";
 import type { DeployBundle } from "../../release/deploy-bundle.js";
 import {
@@ -27,8 +25,7 @@ import {
   type CloudflareApiClient,
 } from "../../cloudflare/client/index.js";
 import { snapshotAccountResources, snapshotTarget } from "../../core/planning/snapshot.js";
-import type { GraphDeployPlan, GraphPlanUnitPlan } from "../../core/planning/plan.js";
-import { graphActionId, isManagedWorkerForProject } from "../../core/planning/digest.js";
+import type { GraphDeployPlan } from "../../core/planning/plan.js";
 import type { ExpectedTarget, TargetSnapshot } from "../../core/planning/types.js";
 import {
   DEPLOY_STEP_NAMES,
@@ -40,6 +37,7 @@ import {
   type DeployStepName,
 } from "../../core/deploy/steps.js";
 import { loadKey } from "./auth.js";
+import { authenticate } from "../session-guard.js";
 import { openSeal, type SealedEnvelope } from "../../auth/keys.js";
 import { detectDrift, withAuthenticatedCreates } from "../../core/planning/drift.js";
 import { verifyGraphPlanApproval } from "../../core/planning/plan-approval.js";
@@ -51,116 +49,6 @@ import { exactGraphDispatchSpec } from "../../core/deploy/graph-dispatch.js";
 import { assessBootstrapPrivacy, BootstrapObjectReadUnverifiedError, checkBootstrapRace, clientBootstrapRunner, decideBootstrapMode, inspectBootstrapTarget, validateBootstrapProfile, type BootstrapDirective } from "../../core/deploy/bootstrap-profile.js";
 import { evaluateR2Privacy } from "../../core/deploy/r2-private-guard.js";
 import { readR2PrivacyFacts } from "../../cloudflare/resources/r2.js";
-
-const POST_ACTIVATE_WRITES = new Set<DeployStepName>([
-  "reconcile-schedules", "reconcile-rate-limits", "register-queue-consumers", "apply-workflows", "reconcile-domains", "publish-workers-dev",
-]);
-interface ProgressReceipt {
-  kind: "tapdeploy-version-progress";
-  nonce: string;
-  accountId: string;
-  planDigest: string;
-  versionId: string;
-  expiresAt: number;
-  baseActiveDeploymentId?: string;
-  baseActiveVersionIds?: string[];
-  bindingProof?: Array<Record<string, unknown>>;
-  runtimeProof?: RuntimeProof;
-}
-async function verifiedProgress(key: CryptoKey, envelope: unknown, expected: Pick<ProgressReceipt, "nonce" | "accountId" | "planDigest" | "versionId">): Promise<ProgressReceipt | undefined> {
-  if (!envelope || typeof envelope !== "object") return undefined;
-  const proof = await openSeal<ProgressReceipt>(key, envelope as SealedEnvelope);
-  if (!proof || proof.kind !== "tapdeploy-version-progress" || typeof proof.expiresAt !== "number" || !Number.isFinite(proof.expiresAt) || proof.expiresAt <= Date.now()) return undefined;
-  return proof.nonce === expected.nonce && proof.accountId === expected.accountId &&
-    proof.planDigest === expected.planDigest && proof.versionId === expected.versionId ? proof : undefined;
-}
-export async function verifyProgressReceipt(key: CryptoKey, envelope: unknown, expected: Pick<ProgressReceipt, "nonce" | "accountId" | "planDigest" | "versionId">): Promise<string | undefined> {
-  return (await verifiedProgress(key, envelope, expected))?.versionId;
-}
-
-// graph execution authorization is intentionally server-shaped and pure
-// enough to be shared by Node/Workers handlers.  The browser may choose which
-// *approved* action to request, but it cannot replay another unit's approval,
-// substitute a diff, provide a different bundle, or turn a preserve/conflict
-// into a mutation. The route re-snapshots before dispatch; this gate is the
-// immutable/sealed half of that boundary.
-export interface GraphStepAuthorizationInput {
-  key: CryptoKey;
-  approval: unknown;
-  nonce: string;
-  configHash?: string;
-  accountId: string;
-  graphPlan: GraphDeployPlan;
-  references: Record<string, ExpectedTarget>;
-  unitId: string;
-  actionId: string;
-  step: DeployStepName;
-  /** Exact bundle digest supplied for a bundle-consuming unit. */
-  bundleDigest?: string;
-}
-
-export type GraphStepAuthorization =
-  | { ok: true; unit: GraphPlanUnitPlan; action: { resource: string; action: string; name?: string } }
-  | { ok: false; detail: string };
-
-export async function authorizeGraphStep(
-  input: GraphStepAuthorizationInput,
-): Promise<GraphStepAuthorization> {
-  const { graphPlan } = input;
-  if (graphPlan.blocked || !graphPlan.ok) {
-    return { ok: false, detail: "the graph plan is blocked; no action may be dispatched" };
-  }
-  if (graphPlan.accountId !== input.accountId) {
-    return { ok: false, detail: "the graph plan belongs to a different account" };
-  }
-  if (!await verifyGraphPlanApproval(input.key, input.approval, {
-    nonce: input.nonce,
-    configHash: input.configHash,
-    accountId: input.accountId,
-    digest: graphPlan.digest,
-    references: input.references,
-  })) {
-    return { ok: false, detail: "the sealed graph approval is absent, expired or belongs to another session/account/plan" };
-  }
-  const unit = graphPlan.units.find((candidate) => candidate.unitId === input.unitId);
-  if (!unit) return { ok: false, detail: "the requested unit is not in the approved graph" };
-  if (unit.requiresBundle) {
-    if (!graphPlan.bundleDigest || input.bundleDigest !== graphPlan.bundleDigest) {
-      return { ok: false, detail: "the exact approved bundle proof is required for this unit" };
-    }
-  } else if (input.bundleDigest !== undefined) {
-    return { ok: false, detail: "a resource-only unit must not receive an unrelated bundle proof" };
-  }
-  const action = unit.diffs.find((diff) =>
-    graphActionId({
-      unitId: unit.unitId,
-      resource: diff.resource,
-      action: diff.action,
-      ...(diff.name !== undefined ? { name: diff.name } : {}),
-    }) === input.actionId,
-  );
-  if (!action) return { ok: false, detail: "the requested action is not an exact approved unit diff" };
-  if (!isDispatchableGraphAction(action.action)) {
-    return { ok: false, detail: `approved diff ${action.resource}:${action.action} is not a dispatchable safe mutation` };
-  }
-  if (!isGraphActionStepAllowed({
-    unitKind: unit.kind,
-    step: input.step,
-    resource: action.resource,
-    action: action.action,
-  })) {
-    return { ok: false, detail: "the requested step is not valid for this approved unit action" };
-  }
-  return {
-    ok: true,
-    unit,
-    action: {
-      resource: action.resource,
-      action: action.action,
-      ...(action.name !== undefined ? { name: action.name } : {}),
-    },
-  };
-}
 
 interface DeployStepBody {
   accountId?: string;
@@ -195,24 +83,10 @@ export function attachDeployStepRoutes(
 }
 
 async function stepHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
-  const publicOrigin = env.PUBLIC_ORIGIN ?? "";
-  const origin = c.req.header("origin");
-  const csrf = c.req.header("x-tapdeploy-csrf");
-
-  const cookies = parseCookies(c.req.raw.headers.get("cookie"));
-  const raw = cookies[sessionCookieName(publicOrigin)];
-  const key = raw ? await loadKey(env).catch(() => null) : null;
-  if (!key || !raw) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-  const payload = await readSession(key, raw);
-  if (!payload) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-
-  if (!validateOrigin(publicOrigin, origin) || !validateCsrf(payload, csrf)) {
-    return c.json({ error: "csrf/origin check failed" }, 403);
-  }
+  const auth = await authenticate(c, env);
+  if ("denied" in auth) return auth.denied;
+  const payload = auth.session;
+  const key = await loadKey(env);
 
   let body: DeployStepBody;
   try {
@@ -779,94 +653,6 @@ function upstreamResponse(c: Context<AppEnv>, error: CloudflareApiError): Respon
   return c.json({ error: "upstream", upstream: error.kind }, status);
 }
 
-// own writes advance expected state; outside writes fail safely.
-// - Mutating post-activate steps require exact attested version ownership.
-//   Resource identity is independently checked in the handler. Only read-only
-//   postcheck can tolerate drift without a progress proof.
-// - Idempotent retry of a completed activate (same versionId already live)
-//   must stay green on the frozen plan instead of yielding plan_stale.
-// - Fresh-install window: between our own create-worker (which makes the
-//   remote worker exist, stamping the managed marker on the created version)
-//   and the first activate there is no active deployment yet, so active
-//   ownership cannot be resolved and the plan reports unrelated-worker. Own
-//   continuous progress through that window (create-worker idempotent retry,
-//   create-version, apply-secrets, activate) is provable when the CURRENT
-//   version carries this project's managed marker AND the active set is still
-//   empty; any active deployment that appears (own or outside) resolves
-//   ownership normally, so those later steps stay strict.
-// Any other blocking guard (account, ownership, R2/secret identity, stale
-// version) still fails closed, and all other pre-activate steps stay strict
-// so an outside deployment before the cutover blocks.
-export function isOwnProgressRetry(
-  step: DeployStepName,
-  plan: { guards: { code: string; level: string }[] },
-  snapshot: {
-    activeDeploymentVersionIds?: string[];
-    activeDeploymentId?: string;
-    versions: { id: string; number?: number; message?: string }[];
-  },
-  args: Record<string, unknown>,
-  projectId: string | undefined,
-  attestedVersionId?: string,
-  progress?: Pick<ProgressReceipt, "baseActiveDeploymentId" | "baseActiveVersionIds">,
-): boolean {
-  const blocking = plan.guards.filter((g) => g.level === "block");
-  if (blocking.length === 0) {
-    return false;
-  }
-  // the fresh-install create-worker -> activate window. The remote worker
-  // exists (our own first write or an idempotent retry) but no deployment is
-  // active yet, so active ownership is unresolved and every step in the window
-  // would see unrelated-worker. Tolerate only when the current version proves
-  // own progress (managed marker for this project) and no active deployment has
-  // appeared; otherwise fail closed exactly like any outside adoption.
-  if (blocking.every((g) => g.code === "unrelated-worker")) {
-    if (
-      (step === "create-worker" ||
-        step === "create-version" ||
-        step === "apply-secrets" ||
-        step === "activate") &&
-      (snapshot.activeDeploymentVersionIds ?? []).length === 0 &&
-      !!attestedVersionId && snapshot.versions[0]?.id === attestedVersionId &&
-      isManagedWorkerForProject(snapshot.versions.filter(v => v.id === attestedVersionId), projectId)
-    ) {
-      return true;
-    }
-    return false;
-  }
-  if (!blocking.every((g) => g.code === "remote-drift")) {
-    return false;
-  }
-  if (
-    step === "postcheck" ||
-    // Pages own progress is idempotent; re-running pages-postcheck after
-    // our own deployment create must not be treated as an outside drift.
-    step === "pages-postcheck"
-  ) {
-    return true;
-  }
-  if (["create-worker", "create-version", "apply-secrets", "activate"].includes(step) || POST_ACTIVATE_WRITES.has(step)) {
-    const versionId = args.versionId;
-    if (typeof versionId !== "string" || versionId.length === 0) {
-      return false;
-    }
-    // Only the idempotent case: the requested version is already live.
-    // An outside cutover to a different version still blocks (plan_stale)
-    // instead of being silently overwritten.
-    const active = snapshot.activeDeploymentVersionIds ?? [];
-    // On first install, script PUT already served the complete initial version
-    // before create-version staged its successor. The latter receipt seals that
-    // exact predecessor; it cannot excuse a later external cutover.
-    if (step === "activate" && attestedVersionId === versionId && active.length === 1 &&
-        progress?.baseActiveVersionIds?.length === 1 && progress.baseActiveVersionIds[0] === active[0] &&
-        progress.baseActiveDeploymentId === snapshot.activeDeploymentId &&
-        isManagedWorkerForProject(snapshot.versions.filter(v => v.id === active[0]), projectId)) return true;
-    return attestedVersionId === versionId && active.length === 1 && active[0] === versionId &&
-      isManagedWorkerForProject(snapshot.versions.filter(v => v.id === versionId), projectId);
-  }
-  return false;
-}
-
 function stepFailureResponse(
   c: Context<AppEnv>,
   error: { kind: string; retryAfterSeconds?: number; detail: string },
@@ -925,7 +711,6 @@ function stepFailureResponse(
     status as ContentfulStatusCode,
   );
 }
-
 
 function isUpstreamError(error: unknown): error is CloudflareApiError {
   return typeof error === "object" && error !== null && "kind" in error;

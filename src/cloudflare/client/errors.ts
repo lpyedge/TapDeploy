@@ -13,7 +13,7 @@ export type CloudflareErrorKind =
   | "invalid-response"
   | "unknown";
 
-export interface CloudflareErrorDetail {
+interface CloudflareErrorDetail {
   code?: number;
   message?: string;
 }

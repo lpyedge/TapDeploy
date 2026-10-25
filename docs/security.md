@@ -62,6 +62,9 @@
   uncompiled sources and `wrangler.toml` are rejected at the prepare boundary,
   before planning; the browser runs the same checks first so a bad file is
   refused before it is uploaded (advice only, the server check is the proof).
+  Each entry is inflated to exactly the size its ZIP header declares and the
+  decoder stops the moment it would exceed it, so a header that understates the
+  content is refused (not truncated) and cannot make the installer inflate a bomb.
 - Browser WebAssembly (BLAKE3 for Pages hashes) is a same-origin asset loaded
   only when needed; the app asks for no `unsafe-eval`, and if a deployment's CSP
   blocks WebAssembly (it would need `script-src 'wasm-unsafe-eval'`) the same hash

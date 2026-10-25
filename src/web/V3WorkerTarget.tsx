@@ -50,7 +50,7 @@ export function V3WorkerTarget({ mode, onMode, renameAllowed, nameDef, name, onN
           <input
             id="v3-input-workerName"
             type="text"
-            className="flex-1"
+            className="min-w-[12rem] flex-1"
             aria-label="Worker name"
             value={name}
             placeholder={nameDef?.placeholder ?? "my-worker"}
@@ -60,7 +60,7 @@ export function V3WorkerTarget({ mode, onMode, renameAllowed, nameDef, name, onN
         ) : (
           <select
             id="v3-upgrade-target"
-            className="flex-1"
+            className="min-w-[12rem] flex-1"
             aria-label="Existing Worker to upgrade"
             value={name}
             onChange={(e) => onName(e.target.value)}

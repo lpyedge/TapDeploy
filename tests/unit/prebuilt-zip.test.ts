@@ -6,7 +6,6 @@ import {
   PREBUILT_ZIP_MAX_ARCHIVE_BYTES,
   computePrebuiltManifestDigest,
   extractPrebuiltZip,
-  verifyPrebuiltZipFiles,
 } from "../../src/release/prebuilt-zip.js";
 import { DEFAULT_ZIP_BOUNDS } from "../../src/release/zip.js";
 import { extractPrebuiltZip as webExtractPrebuiltZip } from "../../src/web/lib/zip.js";
@@ -55,28 +54,6 @@ function setCentralEncryptedFlag(zip: Uint8Array): Uint8Array {
     }
   }
   throw new Error("central directory header not found");
-}
-
-// Flip one byte of the stored data of the first entry carrying `name`
-// (local header 30 bytes + name + data layout used by buildCraftedZip).
-function flipFirstDataByte(zip: Uint8Array, name: string): Uint8Array {
-  const nameBytes = enc.encode(name);
-  for (let i = 0; i + nameBytes.length <= zip.length; i++) {
-    let match = true;
-    for (let j = 0; j < nameBytes.length; j++) {
-      if (zip[i + j] !== nameBytes[j]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
-      const out = zip.slice();
-      const dataStart = i + nameBytes.length;
-      out[dataStart] = (out[dataStart] ?? 0) ^ 0xff;
-      return out;
-    }
-  }
-  throw new Error(`entry "${name}" not found`);
 }
 
 describe("extractPrebuiltZip — V3 layout", () => {
@@ -398,54 +375,6 @@ describe("prebuilt ZIP identities and re-verification", () => {
     expect(changed.manifest!.manifestDigest).not.toBe(
       a.manifest!.manifestDigest,
     );
-  });
-
-  it("verifies extracted files against a sealed entry list", async () => {
-    const res = await extractPrebuiltZip(v3Zip());
-    expect(res.ok).toBe(true);
-    const files = res.files!;
-    const entries = res.manifest!.entries;
-
-    expect(verifyPrebuiltZipFiles(files, entries).ok).toBe(true);
-
-    const drifted = entries.map((e) =>
-      e.path === "worker/main.mjs" ? { ...e, sha256: "0".repeat(64) } : e,
-    );
-    const drift = verifyPrebuiltZipFiles(files, drifted);
-    expect(drift.ok).toBe(false);
-    expect(drift.errors.some((e) => e.startsWith("HASH_DRIFT"))).toBe(true);
-
-    const missing = verifyPrebuiltZipFiles(files.slice(1), entries);
-    expect(missing.errors.some((e) => e.startsWith("MISSING_FILE"))).toBe(true);
-
-    const extra = verifyPrebuiltZipFiles(
-      [...files, { path: "undeclared.txt", size: 1, sha256: "a".repeat(64) }],
-      entries,
-    );
-    expect(extra.errors.some((e) => e.startsWith("UNDECLARED_FILE"))).toBe(true);
-
-    const malformed = verifyPrebuiltZipFiles(files, [
-      { path: "worker/main.mjs", size: 1, sha256: "not-hex" },
-    ]);
-    expect(malformed.errors.some((e) => e.startsWith("HASH_DRIFT"))).toBe(true);
-  });
-
-  it("detects mutated archive bytes via the sealed hashes", async () => {
-    const zip = crafted([
-      { name: "wrangler.jsonc", content: bytes(WRANGLER) },
-      { name: "worker/main.mjs", content: bytes(MAIN_MJS) },
-    ]);
-    const original = await extractPrebuiltZip(zip);
-    expect(original.ok).toBe(true);
-
-    const mutated = flipFirstDataByte(zip, "worker/main.mjs");
-    const res = await extractPrebuiltZip(mutated);
-    if (res.ok) {
-      const check = verifyPrebuiltZipFiles(res.files!, original.manifest!.entries);
-      expect(check.ok).toBe(false);
-    } else {
-      expect(res.errors[0]?.startsWith("INVALID_ZIP")).toBe(true);
-    }
   });
 
   it("re-exports the V3 extractor through the web zip lib", () => {

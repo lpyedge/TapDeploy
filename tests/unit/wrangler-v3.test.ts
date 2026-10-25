@@ -9,9 +9,9 @@ import {
   WRANGLER_V3_SUPPORTED_FIELDS,
   WRANGLER_V3_UNSUPPORTED_FIELDS,
   normalizeWranglerV3,
-  resolveZipRelativePath,
   type WranglerV3Result,
 } from "../../src/manifest/wrangler-v3.js";
+import { resolveZipRelativePath } from "../../src/manifest/wrangler-v3-keys.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, "../fixtures/prebuilt-v3/wrangler");

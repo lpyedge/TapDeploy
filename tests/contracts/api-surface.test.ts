@@ -8,7 +8,6 @@ import { createApp } from "../../src/api/app.js";
 const EXPECTED = [
   "GET /api/auth/callback",
   "GET /api/auth/session",
-  "GET /api/capabilities",
   "GET /api/cloudflare/accounts",
   "GET /api/health",
   "POST /api/auth/check-config",

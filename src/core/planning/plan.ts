@@ -43,7 +43,7 @@ import type {
 import type { UnitResourceKind } from "./deployment-units.js";
 import type { DeployBundle } from "../../release/deploy-bundle.js";
 
-export interface BuildPlanOptions {
+interface BuildPlanOptions {
   salt: string;
   // A frozen baseline (the reference of an approved plan) the live state is
   // compared with: any difference is drift.
@@ -188,12 +188,6 @@ export async function buildDeployPlan(
       spec,
       accountId: snapshot.accountId,
       workerName: spec.cloudflare.workerName,
-      activeDeploymentId: snapshot.activeDeploymentId,
-      diffSummary: diffs.map((d) => ({
-        resource: d.resource,
-        action: d.action,
-        name: d.name,
-      })),
       inputs: spec.inputs,
     },
     opts.salt,
@@ -307,8 +301,6 @@ async function buildPagesDeployPlan(
       spec,
       accountId: snapshot.accountId,
       workerName: projectName,
-      activeDeploymentId: snapshot.pagesActiveDeploymentId,
-      diffSummary: diffs.map((d) => ({ resource: d.resource, action: d.action, name: d.name })),
       inputs: spec.inputs,
     },
     opts.salt,
@@ -380,7 +372,7 @@ function blockedPlan(
 // back another unit's existing resources; the caller re-plans from live state.
 // ---------------------------------------------------------------------------
 
-export type GraphPlanGuardCode =
+type GraphPlanGuardCode =
   | "graph-blocked"
   | "unit-blocked"
   | "scope-underdeclared"
@@ -394,28 +386,28 @@ export type GraphPlanGuardCode =
   | "bundle-missing"
   | "bundle-mismatch";
 
-export interface GraphPlanGuard {
+interface GraphPlanGuard {
   code: GraphPlanGuardCode;
   level: "block" | "warn";
   detail: string;
   unitId?: string;
 }
 
-export interface GraphPlanCostOperation {
+interface GraphPlanCostOperation {
   unitId: string;
   resource: string;
   action: string;
   name?: string;
 }
 
-export interface GraphPlanCost {
+interface GraphPlanCost {
   operations: GraphPlanCostOperation[];
   requiresConfirmation: boolean;
   confirmed: boolean;
   blockedUnknownCost: boolean;
 }
 
-export interface GraphPlanUnitPlan {
+interface GraphPlanUnitPlan {
   unitId: string;
   kind: GraphUnitKind;
   identity: GraphIdentityKind;
@@ -451,7 +443,7 @@ export interface GraphDeployPlan {
   resourceIdentities: GraphPlanResourceIdentity[];
 }
 
-export interface GraphCostPolicy {
+interface GraphCostPolicy {
   mode?: "free-preferred" | "block-unknown-cost";
   requireExplicitPaidConfirmation?: boolean;
 }

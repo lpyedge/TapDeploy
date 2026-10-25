@@ -85,7 +85,7 @@ describe("workers runtime package", () => {
       RUNTIME: "node",
     });
 
-    for (const path of ["/api/health", "/api/capabilities"]) {
+    for (const path of ["/api/health"]) {
       const req = () => new Request(`https://installer.example${path}`);
       const nodeRes = await nodeApp.fetch(req());
       const workerRes = await worker.fetch(req(), BINDINGS);

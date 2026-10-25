@@ -9,7 +9,10 @@ import {
   WORKER_UPLOAD_MAX_TOTAL_BYTES,
   type VersionCreateRequest,
 } from "../../src/cloudflare/models/workers.js";
-import { JS_MODULE_MIME, WASM_MODULE_MIME, type DeployBundle, type DeployBundleModule } from "../../src/release/deploy-bundle.js";
+import type { DeployBundle, DeployBundleModule } from "../../src/release/deploy-bundle.js";
+
+const JS_MODULE_MIME = "application/javascript+module";
+const WASM_MODULE_MIME = "application/wasm";
 import type { CloudflareApiClient } from "../../src/cloudflare/client/index.js";
 import type { DeploySpec } from "../../src/core/deploy-spec.js";
 

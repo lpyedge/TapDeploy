@@ -37,7 +37,7 @@ export async function verifyPrebuiltRelease(bytes: Uint8Array, policy: PrebuiltR
   return { ok: true, manifest: result.manifest, files: result.files ?? [], perUnit };
 }
 
-export interface ReleaseUnitSummary {
+interface ReleaseUnitSummary {
   unitId: string;
   kind: "worker" | "pages" | "resources";
   name: string;

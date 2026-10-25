@@ -21,7 +21,7 @@ import {
 //   - reject uncompiled TypeScript sources (TS-only packages)
 //   - reject executable/script hooks (.sh/.bat/.ps1/.exe/...)
 //   - reject paths that only differ by case (case-insensitive collisions)
-//   - reject v2 clean ZIPs (no embedded `wrangler.jsonc`) with a specific error
+//   - reject a ZIP without an embedded `wrangler.jsonc` (`NO_WRANGLER_CONFIG`)
 //   - reject `wrangler.toml` (only JSONC is accepted; convert and repackage)
 //   - verify declared central-directory sizes against extracted bytes, plus a
 //     per-file SHA-256 of the actual decompressed bytes and an archive SHA-256
@@ -34,9 +34,9 @@ import {
 // before parsing.
 export const PREBUILT_ZIP_MAX_ARCHIVE_BYTES = 67108864; // 64 MiB
 
-export type PrebuiltFileKind = "wrangler" | "esm" | "wasm" | "asset";
+type PrebuiltFileKind = "wrangler" | "esm" | "wasm" | "asset";
 
-export interface PrebuiltZipEntry {
+interface PrebuiltZipEntry {
   path: string;
   size: number;
   sha256: string;
@@ -169,52 +169,6 @@ export async function computePrebuiltManifestDigest(
     })),
   });
   return sha256Hex(new TextEncoder().encode(canonical));
-}
-
-// Compare extracted (actual-bytes) files against an expected sealed entry list
-// (e.g. a re-checked plan): every expected entry must exist with the exact
-// size and SHA-256, and no undeclared file may appear.
-export function verifyPrebuiltZipFiles(
-  files: ReadonlyArray<{ path: string; size: number; sha256: string }>,
-  expected: ReadonlyArray<{ path: string; size: number; sha256: string }>,
-): { ok: boolean; errors: string[] } {
-  const errors: string[] = [];
-  const byPath = new Map<string, { path: string; size: number; sha256: string }>();
-  for (const f of files) {
-    byPath.set(f.path, f);
-  }
-
-  const expectedPaths = new Set<string>();
-  for (const spec of expected) {
-    expectedPaths.add(spec.path);
-    if (!/^[0-9a-f]{64}$/.test(spec.sha256)) {
-      errors.push(
-        `HASH_DRIFT: expected entry "${spec.path}" has a malformed sha256`,
-      );
-      continue;
-    }
-    const actual = byPath.get(spec.path);
-    if (!actual) {
-      errors.push(`MISSING_FILE: "${spec.path}" is not present`);
-      continue;
-    }
-    if (actual.size !== spec.size) {
-      errors.push(
-        `SIZE_MISMATCH: "${spec.path}" expected ${spec.size} bytes, got ${actual.size}`,
-      );
-    }
-    if (actual.sha256 !== spec.sha256) {
-      errors.push(`HASH_DRIFT: "${spec.path}" sha256 does not match`);
-    }
-  }
-
-  for (const f of files) {
-    if (!expectedPaths.has(f.path)) {
-      errors.push(`UNDECLARED_FILE: "${f.path}" is not in the sealed entry list`);
-    }
-  }
-
-  return { ok: errors.length === 0, errors };
 }
 
 export async function extractPrebuiltZip(

@@ -11,7 +11,7 @@ export type SecretPolicy =
   // Upgrade: the user supplies a new value that replaces the existing secret.
   | "replace";
 
-export interface ReleaseFile {
+interface ReleaseFile {
   path: string;
   size: number;
   sha256: string;
@@ -28,19 +28,6 @@ export interface ReleaseFile {
 // How the Worker uses a queue: "producer" binds it, "consumer" registers the
 // Worker as the queue's consumer, "both" does both on the same queue.
 export type QueueRole = "producer" | "consumer" | "both";
-
-// Connection origin fields the installer forwards only when creating a
-// hyperdrive config. Never logged; write-only secrets are stripped on any read.
-export interface HyperdriveOriginInput {
-  database: string;
-  host?: string;
-  port?: number;
-  scheme?: "postgres" | "postgresql" | "mysql";
-  user?: string;
-  password?: string;
-  access_client_id?: string;
-  access_client_secret?: string;
-}
 
 export interface R2BindingSpec {
   binding: string;
@@ -90,7 +77,7 @@ export interface KvBindingSpec {
 // the declared consumer settings for the trigger registration.
 // Structural mirror of resources/queues `DeclaredQueueConsumer` so this pure
 // spec module stays dependency-free.
-export interface QueueConsumerSpec {
+interface QueueConsumerSpec {
   queue: string;
   type: "worker";
   max_batch_size?: number;
@@ -117,7 +104,7 @@ export interface QueueBindingSpec {
 // (class_name + the exact direct schedule set) is applied through the
 // Workflows API after the carrier version is active. `className` must be
 // exported by the unit's entry module (verified before release sealing).
-export interface WorkflowBindingSpec {
+interface WorkflowBindingSpec {
   binding: string;
   name: string;
   className: string;
@@ -125,15 +112,12 @@ export interface WorkflowBindingSpec {
   schedules: string[];
 }
 
-// Hyperdrive config binding spec resolved from a manifest declaration +
-// input. `configName` is the authoritative chosen name; `createIfMissing` allows
-// the installer to create an absent config (never rotate credentials). `origin`
-// is applied only on create and never logged.
-export interface HyperdriveBindingSpec {
+// Hyperdrive config binding spec. The installer never creates a Hyperdrive
+// configuration (it holds the user's own database credentials): `configName` is
+// the account's existing config the operator picked.
+interface HyperdriveBindingSpec {
   binding: string;
   configName: string;
-  createIfMissing: boolean;
-  origin?: HyperdriveOriginInput;
   // Wrangler `id` from the release: an identity claim about the publisher's
   // account, resolved to a live config (or the operator's choice) at plan time.
   configId?: string;
@@ -161,31 +145,15 @@ export interface VectorizeIndexInputConfig {
   preset?: string;
 }
 
-// Secrets Store binding spec resolved from a manifest declaration + input.
-// `storeName` is the authoritative chosen store; `createIfMissing` allows the
-// installer to create an absent store. A Worker binds a specific secret inside
-// the store by `secretName`; `value` is write-only and is applied only on the
-// first create, never read back or logged.
-export interface SecretsStoreBindingSpec {
+// Secrets Store binding spec. The installer never creates a store or a store
+// secret: `storeName` is an existing store of the account and the Worker binds
+// the secret inside it by `secretName`.
+interface SecretsStoreBindingSpec {
   binding: string;
   storeName: string;
-  createIfMissing: boolean;
   secretName?: string;
-  secretCreateIfMissing?: boolean;
-  secretScopes?: string[];
-  // Write-only secret value, forwarded only on create. Never logged/persisted.
-  secretValue?: string;
   // Wrangler `store_id` from the release (identity claim, resolved at plan time).
   storeId?: string;
-}
-
-export interface SecretsStoreSecretSpec {
-  binding: string;
-  secretName: string;
-  storeId: string;
-  storeName: string;
-  secretCreateIfMissing: boolean;
-  secretScopes?: string[];
 }
 
 // Runtime-binding kinds (Workers AI / Browser Rendering). These are NOT
@@ -193,13 +161,13 @@ export interface SecretsStoreSecretSpec {
 // create/preserve lifecycle, no account list to verify, and no provision scope
 // beyond the enclosing Worker target's admin scope. A config kind maps to a
 // canonical runtime-binding type which emits a specific Worker binding shape.
-export type RuntimeBindingType = "ai" | "browser-rendering";
+type RuntimeBindingType = "ai" | "browser-rendering";
 
 // Resolved runtime binding on the DeploySpec / WranglerProjection. `type` is the
 // canonical runtime-binding kind; the deploy step maps it to the official
 // Worker binding shape (`ai` -> {type:"ai",name}, `browser-rendering` ->
 // {type:"browser",name}).
-export interface RuntimeBindingSpec {
+interface RuntimeBindingSpec {
   binding: string;
   type: RuntimeBindingType;
 }
@@ -240,7 +208,7 @@ export interface DomainEntrySpec {
   updateAction?: DomainUpdateAction;
 }
 
-export interface AssetConfig {
+interface AssetConfig {
   directory: string;
   binding?: string;
   run_worker_first?: boolean | string[];
@@ -248,7 +216,7 @@ export interface AssetConfig {
   not_found_handling?: string;
 }
 
-export interface WranglerProjection {
+interface WranglerProjection {
   name: string;
   services?: Array<{ binding: string; service: string; entrypoint?: string }>;
   // a Workers release always has a worker entrypoint (`main`). A Pages

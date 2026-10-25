@@ -20,8 +20,9 @@ import {
 } from "../client/index.js";
 import { PAGES_UPLOAD_HASH_RE } from "./constants.js";
 import { base64String } from "../../core/encoding/base64-ascii.js";
+import { parseRetryAfter, waitBeforeRetry } from "../upload-retry.js";
 
-export type PagesUploadErrorKind =
+type PagesUploadErrorKind =
   | "token-expired"
   | "forbidden"
   | "rate-limited"
@@ -30,7 +31,7 @@ export type PagesUploadErrorKind =
   | "network"
   | "server";
 
-export interface PagesUploadError {
+interface PagesUploadError {
   kind: PagesUploadErrorKind;
   detail: string;
   retryAfterSeconds?: number;
@@ -101,13 +102,7 @@ export async function checkPagesMissingHashes(
     body: JSON.stringify({ hashes }),
   });
   if (!res.ok) {
-    const mapped = mapStatusToError(res.status);
-    if (mapped.kind === "token-expired" || mapped.kind === "forbidden") {
-      throw mapped;
-    }
-    // check-missing may be unavailable (older accounts); fall back to treating
-    // every hash as missing so upload still works.
-    throw mapped;
+    throw mapStatusToError(res.status);
   }
   const body = (await readJsonSafe(res)) as { result?: unknown };
   const result = body?.result;
@@ -142,24 +137,39 @@ export async function uploadPagesAssets(
   });
   const doFetch = opts.fetcher ?? fetch;
   const url = buildPagesAssetsUploadUrl();
-  const res = await doFetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${opts.jwt}`,
-    },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const mapped = mapStatusToError(res.status);
-    if (mapped.kind === "token-expired" || mapped.kind === "forbidden") {
+  const maxAttempts = opts.maxAttempts ?? 2;
+  // Uploads are keyed by content hash, so repeating a batch is safe.
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await doFetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opts.jwt}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      if (attempt < maxAttempts) {
+        await waitBeforeRetry(attempt);
+        continue;
+      }
+      throw uploadError("network", `Pages upload failed: ${String(error)}`);
+    }
+    if (!res.ok) {
+      const mapped = mapStatusToError(res.status, parseRetryAfter(res.headers));
+      if ((mapped.kind === "rate-limited" || mapped.kind === "server") && attempt < maxAttempts) {
+        await waitBeforeRetry(attempt, mapped.retryAfterSeconds);
+        continue;
+      }
       throw mapped;
     }
-    throw mapped;
-  }
-  const body = (await readJsonSafe(res)) as { success?: unknown };
-  if (body?.success !== true) {
-    throw uploadError("invalid-response", "Pages upload response success=false");
+    const body = (await readJsonSafe(res)) as { success?: unknown };
+    if (body?.success !== true) {
+      throw uploadError("invalid-response", "Pages upload response success=false");
+    }
+    return;
   }
 }
 

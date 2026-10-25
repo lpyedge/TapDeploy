@@ -10,7 +10,7 @@ import { V3InputField } from "./V3InputField.js";
 import { V3WorkerTarget, type V3WorkerTargetProps } from "./V3WorkerTarget.js";
 import { inputRequiredIn, type InputMode } from "../manifest/input-validation.js";
 
-export type V3ModeIntent = InputMode;
+type V3ModeIntent = InputMode;
 
 export interface V3ConfigurePanelProps {
   /** Label of the sealed release source and its prepared units (names are release-declared). */

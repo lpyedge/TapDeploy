@@ -22,28 +22,17 @@ import {
   registerQueueConsumer,
   consumerRequestFor,
   declaredQueueConsumerMatches,
-  hyperdriveActionFor,
-  ensureHyperdriveConfig,
-  isSupportedHyperdriveOrigin,
   vectorizeActionFor,
   ensureVectorizeIndex,
-  secretsStoreActionFor,
-  ensureSecretsStore,
-  ensureSecretsStoreSecret,
-  validateSecretsStoreScope,
   type BucketAction,
   type DatabaseAction,
   type NamespaceAction,
   type QueueAction,
-  type HyperdriveAction,
   type VectorizeAction,
-  type SecretsStoreAction,
 } from "../../cloudflare/resources/index.js";
 import type { DeploySpec, VectorizeIndexInputConfig } from "../deploy-spec.js";
-import type { SecretsStoreSecretScope } from "../../cloudflare/models/secrets-store.js";
 import type { TargetSnapshot } from "../planning/types.js";
 import type { DeployStepContext } from "./steps.js";
-
 
 export interface DeployStepFail {
   ok: false;
@@ -112,15 +101,6 @@ export function toStepFailure(error: unknown): DeployStepFail {
   };
 }
 
-export type {
-  BucketAction,
-  DatabaseAction,
-  NamespaceAction,
-  QueueAction,
-  HyperdriveAction,
-  VectorizeAction,
-  SecretsStoreAction,
-};
 
 // Pure: what would happen to each declared D1 binding, given the live databases.
 export function planDatabaseActions(
@@ -132,7 +112,7 @@ export function planDatabaseActions(
   );
 }
 
-export interface CreateD1DatabasesResult {
+interface CreateD1DatabasesResult {
   databases: {
     binding: string;
     databaseName: string;
@@ -202,7 +182,7 @@ export function planNamespaceActions(
   );
 }
 
-export interface CreateKvNamespacesResult {
+interface CreateKvNamespacesResult {
   namespaces: {
     binding: string;
     namespaceName: string;
@@ -264,7 +244,7 @@ export function planBucketActions(
   );
 }
 
-export interface CreateR2BucketsResult {
+interface CreateR2BucketsResult {
   buckets: {
     binding: string;
     bucketName: string;
@@ -350,7 +330,7 @@ export function planQueueActions(
   );
 }
 
-export interface CreateQueuesResult {
+interface CreateQueuesResult {
   queues: {
     binding?: string;
     queueName: string;
@@ -495,7 +475,7 @@ export async function registerQueueConsumers(
 // script owns is updated to exactly the declared set.
 // ---------------------------------------------------------------------------
 
-export interface ApplyWorkflowsResult {
+interface ApplyWorkflowsResult {
   workflows: Array<{
     binding: string;
     name: string;
@@ -612,74 +592,6 @@ export async function applyWorkflows(
   }
 }
 
-// Hyperdrive configs. Pure: what would happen to each declared config
-// binding given the live configs.
-export function planHyperdriveConfigActions(
-  spec: DeploySpec,
-  snapshot: TargetSnapshot,
-): HyperdriveAction[] {
-  return spec.cloudflare.hyperdrive.map((binding) =>
-    hyperdriveActionFor(binding, snapshot.hyperdriveConfigs),
-  );
-}
-
-export interface CreateHyperdriveConfigsResult {
-  configs: {
-    binding: string;
-    configName: string;
-    action: "create" | "preserve";
-    id: string;
-  }[];
-}
-
-// Create explicitly-declared missing hyperdrive configs; preserve existing ones.
-// The connection `origin` (with any credential) is forwarded only on create and
-// is never logged; an existing config is preserved without touching it.
-export async function createHyperdriveConfigs(
-  ctx: DeployStepContext,
-  _args: Record<string, unknown>,
-): Promise<DeployStepOutcome> {
-  if (ctx.spec.cloudflare.hyperdrive.length === 0) {
-    return stepOk({ skipped: true, configs: [] } satisfies { skipped: true; configs: CreateHyperdriveConfigsResult["configs"] });
-  }
-  const actions = planHyperdriveConfigActions(ctx.spec, ctx.snapshot);
-  if (actions.some(action => action.action === "create" && !isSupportedHyperdriveOrigin(ctx.spec.cloudflare.hyperdrive.find(binding => binding.binding === action.binding)?.origin))) return stepFail("validation", "Hyperdrive create requires a complete explicit supported origin; no account mutation performed");
-  const conflict = actions.find((a) => a.action === "conflict");
-  if (conflict && conflict.action === "conflict") {
-    return stepFail("conflict", conflict.detail);
-  }
-  try {
-    const configs: CreateHyperdriveConfigsResult["configs"] = [];
-    for (const action of actions) {
-      if (action.action === "preserve") {
-        configs.push({
-          binding: action.binding,
-          configName: action.configName,
-          action: "preserve",
-          id: action.id,
-        });
-        continue;
-      }
-      const declared = ctx.spec.cloudflare.hyperdrive.find((h) => h.binding === action.binding);
-      const created = await ensureHyperdriveConfig(ctx.client, {
-        configName: action.configName,
-        createIfMissing: true,
-        knownConfigs: ctx.snapshot.hyperdriveConfigs,
-        createRequest: { name: action.configName, origin: declared!.origin! },
-      });
-      configs.push({
-        binding: action.binding,
-        configName: action.configName,
-        action: created.action,
-        id: created.id,
-      });
-    }
-    return stepOk({ configs } satisfies CreateHyperdriveConfigsResult);
-  } catch (error) {
-    return toStepFailure(error);
-  }
-}
-
 // An index configuration is complete when it names a preset or both dimensions and metric.
 function isCompleteVectorizeConfig(config: VectorizeIndexInputConfig | undefined): config is VectorizeIndexInputConfig {
   return config !== undefined && (config.preset !== undefined || (config.dimensions !== undefined && config.metric !== undefined));
@@ -696,7 +608,7 @@ export function planVectorizeIndexActions(
   );
 }
 
-export interface CreateVectorizeIndexesResult {
+interface CreateVectorizeIndexesResult {
   indexes: {
     binding: string;
     indexName: string;
@@ -755,130 +667,6 @@ export async function createVectorizeIndexes(
       });
     }
     return stepOk({ indexes } satisfies CreateVectorizeIndexesResult);
-  } catch (error) {
-    return toStepFailure(error);
-  }
-}
-
-// Secrets Store. Pure: what would happen to each declared store binding
-// given the live stores.
-export function planSecretsStoreActions(
-  spec: DeploySpec,
-  snapshot: TargetSnapshot,
-): SecretsStoreAction[] {
-  return spec.cloudflare.secretsStore.map((binding) =>
-    secretsStoreActionFor(binding, snapshot.secretsStores),
-  );
-}
-
-export interface CreateSecretsStoresResult {
-  stores: {
-    binding: string;
-    storeName: string;
-    action: "create" | "preserve";
-    id: string;
-  }[];
-}
-
-// Create explicitly-declared missing Secrets Store stores; preserve existing
-// ones. The secret inside a store is handled by ensureSecretsStoreSecrets
-// (see below). No secret `value` is ever read back or echoed.
-export async function createSecretsStores(
-  ctx: DeployStepContext,
-  _args: Record<string, unknown>,
-): Promise<DeployStepOutcome> {
-  if (ctx.spec.cloudflare.secretsStore.length === 0) {
-    return stepOk({ skipped: true, stores: [] } satisfies { skipped: true; stores: CreateSecretsStoresResult["stores"] });
-  }
-  const actions = planSecretsStoreActions(ctx.spec, ctx.snapshot);
-  const conflict = actions.find((a) => a.action === "conflict");
-  if (conflict && conflict.action === "conflict") {
-    return stepFail("conflict", conflict.detail);
-  }
-  try {
-    const stores: CreateSecretsStoresResult["stores"] = [];
-    for (const action of actions) {
-      if (action.action === "preserve") {
-        stores.push({
-          binding: action.binding,
-          storeName: action.storeName,
-          action: "preserve",
-          id: action.id,
-        });
-        continue;
-      }
-      const created = await ensureSecretsStore(ctx.client, {
-        storeName: action.storeName,
-        createIfMissing: true,
-        knownStores: ctx.snapshot.secretsStores,
-      });
-      stores.push({
-        binding: action.binding,
-        storeName: action.storeName,
-        action: created.action,
-        id: created.id,
-      });
-    }
-    return stepOk({ stores } satisfies CreateSecretsStoresResult);
-  } catch (error) {
-    return toStepFailure(error);
-  }
-}
-
-export interface CreateSecretsStoreSecretsResult {
-  secrets: {
-    binding: string;
-    secretName: string;
-    action: "create" | "preserve";
-    id: string;
-  }[];
-}
-
-// Ensure the named secret exists inside a declared store. Uses the live snapshot
-// identity after the store step; the secret `value` is write-only and is only
-// forwarded when the secret is actually created.
-export async function ensureSecretsStoreSecrets(
-  ctx: DeployStepContext,
-  _args: Record<string, unknown>,
-): Promise<DeployStepOutcome> {
-  const declared = ctx.spec.cloudflare.secretsStore.filter((s) => s.secretName);
-  if (declared.length === 0) {
-    return stepOk({ skipped: true, secrets: [] } satisfies { skipped: true; secrets: CreateSecretsStoreSecretsResult["secrets"] });
-  }
-  try {
-    const secrets: CreateSecretsStoreSecretsResult["secrets"] = [];
-    for (const binding of declared) {
-      const store = ctx.snapshot.secretsStores.find((s) => s.name === binding.storeName);
-      if (!store) {
-        return stepFail(
-          "conflict",
-          `Secrets Store "${binding.storeName}" for binding "${binding.binding}" is not present`,
-        );
-      }
-      const storeSecrets = ctx.snapshot.secretsStoreSecrets
-        .filter((s) => s.store_id === store.id)
-        .map((s) => ({ name: s.secretName, id: s.id, store_id: s.store_id }));
-      const created = await ensureSecretsStoreSecret(ctx.client, {
-        secretName: binding.secretName!,
-        createIfMissing: binding.secretCreateIfMissing ?? true,
-        storeId: store.id,
-        knownSecrets: storeSecrets,
-        createRequest: {
-          name: binding.secretName!,
-          scopes: (binding.secretScopes ?? ["workers"]).filter(
-            validateSecretsStoreScope,
-          ) as SecretsStoreSecretScope[],
-          value: binding.secretValue ?? "",
-        },
-      });
-      secrets.push({
-        binding: binding.binding,
-        secretName: binding.secretName!,
-        action: created.action,
-        id: created.id,
-      });
-    }
-    return stepOk({ secrets } satisfies CreateSecretsStoreSecretsResult);
   } catch (error) {
     return toStepFailure(error);
   }

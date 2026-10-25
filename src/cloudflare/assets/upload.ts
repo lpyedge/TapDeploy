@@ -16,8 +16,9 @@
 import { base64String } from "../../core/encoding/base64-ascii.js";
 import { buildWorkerAssetsUploadUrl } from "../client/index.js";
 import { ASSET_UPLOAD_HASH_RE, guessAssetContentType } from "./manifest.js";
+import { parseRetryAfter, waitBeforeRetry } from "../upload-retry.js";
 
-export type AssetUploadErrorKind =
+type AssetUploadErrorKind =
   | "token-expired"
   | "forbidden"
   | "rate-limited"
@@ -26,7 +27,7 @@ export type AssetUploadErrorKind =
   | "network"
   | "server";
 
-export interface AssetUploadError {
+interface AssetUploadError {
   kind: AssetUploadErrorKind;
   detail: string;
   retryAfterSeconds?: number;
@@ -51,22 +52,6 @@ export interface UploadBucketResult {
 
 function uploadError(kind: AssetUploadErrorKind, detail: string): AssetUploadError {
   return { kind, detail };
-}
-
-function parseRetryAfter(headers: Headers): number | undefined {
-  const raw = headers.get("retry-after");
-  if (!raw) {
-    return undefined;
-  }
-  const value = Number(raw);
-  if (Number.isFinite(value) && value >= 0) {
-    return Math.ceil(value);
-  }
-  const parsed = Date.parse(raw);
-  if (Number.isFinite(parsed)) {
-    return Math.max(1, Math.ceil((parsed - Date.now()) / 1000));
-  }
-  return undefined;
 }
 
 function mapStatusToError(status: number, retryAfter?: number): AssetUploadError {
@@ -145,6 +130,7 @@ export async function uploadAssetBucket(
         lastError = uploadError("network", `asset bucket upload failed: ${String(error)}`);
       }
       if (attempt < maxAttempts) {
+        await waitBeforeRetry(attempt);
         continue;
       }
       throw lastError;
@@ -172,6 +158,7 @@ export async function uploadAssetBucket(
     }
     lastError = mapped;
     if (attempt < maxAttempts) {
+      await waitBeforeRetry(attempt, retryAfter);
       continue;
     }
     throw lastError;

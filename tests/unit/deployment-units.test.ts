@@ -291,9 +291,7 @@ describe("resolveDeploymentUnits", () => {
         {
           binding: "STORE_SECRET",
           storeName: "ops-store",
-          createIfMissing: false,
           secretName: "rotation-key",
-          secretValue: "store-secret-456",
         },
       ],
     });

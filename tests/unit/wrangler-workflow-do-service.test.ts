@@ -49,7 +49,7 @@ import {
   normalizeWranglerV3,
   type WranglerV3Config,
 } from "../../src/manifest/wrangler-v3.js";
-import { JS_MODULE_MIME } from "../../src/release/deploy-bundle.js";
+const JS_MODULE_MIME = "application/javascript+module";
 
 const ACCOUNT_ID = "a".repeat(32);
 const MAIN_NAME = "worker/main.mjs";

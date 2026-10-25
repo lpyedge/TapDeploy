@@ -305,7 +305,7 @@ export function parseHyperdriveConfigList(env: CloudflareEnvelope<unknown>): Hyp
   return result.map((item) => normalizeHyperdriveConfig(item));
 }
 
-export function normalizeHyperdriveConfig(item: unknown): HyperdriveConfig {
+function normalizeHyperdriveConfig(item: unknown): HyperdriveConfig {
   if (typeof item !== "object" || item === null) {
     throw makeInvalidResponseError("Hyperdrive config is not an object");
   }
@@ -403,7 +403,7 @@ export function parseSecretsStoreList(env: CloudflareEnvelope<unknown>): Secrets
   return result.map((item) => normalizeSecretsStore(item));
 }
 
-export function normalizeSecretsStore(item: unknown): SecretsStore {
+function normalizeSecretsStore(item: unknown): SecretsStore {
   if (typeof item !== "object" || item === null) {
     throw makeInvalidResponseError("Secrets Store is not an object");
   }
@@ -433,7 +433,7 @@ export function parseSecretsStoreSecretList(env: CloudflareEnvelope<unknown>): S
   return result.map((item) => normalizeSecretsStoreSecret(item));
 }
 
-export function normalizeSecretsStoreSecret(item: unknown): SecretsStoreSecret {
+function normalizeSecretsStoreSecret(item: unknown): SecretsStoreSecret {
   if (typeof item !== "object" || item === null) {
     throw makeInvalidResponseError("Secrets Store secret is not an object");
   }

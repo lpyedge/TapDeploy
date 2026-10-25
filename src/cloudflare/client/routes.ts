@@ -3,9 +3,9 @@
 // there is no generic endpoint proxy. This table is the interception seam
 // and the basis of the scope matrix in docs/cloudflare-scope-matrix.md.
 
-export type ApiHttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+type ApiHttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-export interface ApiRouteContext {
+interface ApiRouteContext {
   accountId?: string;
   scriptName?: string;
   bucketName?: string;
@@ -368,21 +368,13 @@ export const ROUTES: Record<string, ApiRoute> = {
     path: (c) =>
       `/accounts/${prop(c.accountId ?? "")}/workflows/${prop(c.workflowName ?? "")}`,
   },
-  // Official Cloudflare Hyperdrive config endpoints. List + Create are the
-  // only config routes used for resource provisioning; there is no delete path
-  // and connection credentials are never echoed back by the provider.
+  // Official Cloudflare Hyperdrive config list: read only (the configs hold the
+  // user's own database credentials, which the provider never echoes back).
   listHyperdriveConfigs: {
     id: "listHyperdriveConfigs",
     label: "List Hyperdrive configs",
     method: "GET",
     category: "read",
-    path: (c) => `/accounts/${prop(c.accountId ?? "")}/hyperdrive/configs`,
-  },
-  createHyperdriveConfig: {
-    id: "createHyperdriveConfig",
-    label: "Create Hyperdrive config",
-    method: "POST",
-    category: "write",
     path: (c) => `/accounts/${prop(c.accountId ?? "")}/hyperdrive/configs`,
   },
   // Official Cloudflare Vectorize index endpoints (v2). List + Create are
@@ -403,10 +395,8 @@ export const ROUTES: Record<string, ApiRoute> = {
     category: "write",
     path: (c) => `/accounts/${prop(c.accountId ?? "")}/vectorize/v2/indexes`,
   },
-  // Official Cloudflare Secrets Store endpoints. Two levels are managed:
-  // account stores (list/create) plus the secrets inside a given store (list/
-  // create, no delete and no value read-back). The secret `value` is write-only
-  // and is never fetched or echoed by the provider.
+  // Official Cloudflare Secrets Store endpoints, read only: the account's stores
+  // and the secret names inside one (secret values are never fetched).
   listSecretsStores: {
     id: "listSecretsStores",
     label: "List Secrets Store stores",
@@ -414,26 +404,11 @@ export const ROUTES: Record<string, ApiRoute> = {
     category: "read",
     path: (c) => `/accounts/${prop(c.accountId ?? "")}/secrets_store/stores`,
   },
-  createSecretsStore: {
-    id: "createSecretsStore",
-    label: "Create Secrets Store store",
-    method: "POST",
-    category: "write",
-    path: (c) => `/accounts/${prop(c.accountId ?? "")}/secrets_store/stores`,
-  },
   listSecretsStoreSecrets: {
     id: "listSecretsStoreSecrets",
     label: "List Secrets Store secrets",
     method: "GET",
     category: "read",
-    path: (c) =>
-      `/accounts/${prop(c.accountId ?? "")}/secrets_store/stores/${prop(c.storeId ?? "")}/secrets`,
-  },
-  createSecretsStoreSecret: {
-    id: "createSecretsStoreSecret",
-    label: "Create Secrets Store secret",
-    method: "POST",
-    category: "write",
     path: (c) =>
       `/accounts/${prop(c.accountId ?? "")}/secrets_store/stores/${prop(c.storeId ?? "")}/secrets`,
   },

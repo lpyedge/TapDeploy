@@ -57,7 +57,9 @@ relay) or an HTTPS link that sends CORS headers, at most 8 MiB / 24 MiB expanded
 
 ## Refused before any write
 
-- Building source code: releases must be prebuilt (`UNCOMPILED_ENTRYPOINT`).
+- Building source code: releases must be prebuilt (`UNCOMPILED_ENTRYPOINT`). A
+  Worker's `main` must be a built `.js`/`.mjs` module, so TypeScript, Python,
+  Rust and other source entry points are not supported.
 - Pages Functions (`_worker.js`, `functions/`) — `PAGES_FUNCTIONS_UNSUPPORTED`.
 - Cron, queues, Workflows, Durable Objects, routes or platform bindings on a
   Pages site.
@@ -68,3 +70,28 @@ relay) or an HTTPS link that sends CORS headers, at most 8 MiB / 24 MiB expanded
 - Anything the config's `capabilities` do not cover
   (`DEVELOPER_SCOPE_UNDERDECLARED`).
 - Providers other than Cloudflare.
+
+## When something goes wrong
+
+Nothing is rolled back and nothing is deleted behind your back, so after a
+failure the account holds exactly what the finished steps wrote. **Start over**
+(*Deploy another release* on the result card): the new plan reads the account again, reuses
+what the interrupted run already created and only does what is missing.
+
+| What you see | Meaning | What to do |
+|---|---|---|
+| Sign-in expired, or "sign in again" | the session lasts at most 20 minutes (or the Cloudflare token's life) | sign in again for the same config; nothing is written before you confirm a new plan |
+| "Cloudflare denied this action" (403) | the signed-in account lacks a permission the install needs | signing in again will not help: use an account with the right role |
+| `invalid_scope` after sign-in | the instance's OAuth client lacks a permission this app needs | tell the instance operator ([self-hosting](self-hosting.md#1-register-a-cloudflare-oauth-client)) |
+| `scope_denied` | you declined a permission the config needs | nothing was created; start the sign-in again and allow it |
+| The ZIP is refused (`INVALID_PREBUILT_ZIP`, `SERVER_ZIP_VERIFY_LIMIT`, "does not match its declared size", `UNCOMPILED_ENTRYPOINT`, `PAGES_FUNCTIONS_UNSUPPORTED`, `SOURCE_POLICY_MISMATCH`) | the file breaks a [release rule](publishing.md#limits) or is not the release the publisher pinned | nothing was uploaded; get a fresh copy from the publisher's link |
+| `TARGET_MODE_CONFLICT` | New install, but a Worker with that name exists (or Upgrade of one that does not) | switch to Upgrade, or choose another name; no write happened |
+| Sending files fails with "rate limited" (429) or a Cloudflare 5xx | the installer already retried that upload once, waiting the time Cloudflare asked for (at most 10 s) | wait a minute and start over; files Cloudflare already stores are not sent again |
+| Any other step fails with a Cloudflare 429/5xx | not retried automatically | wait, then start over |
+| "Deployment did not complete", "Stopped at …" | a step failed or you pressed Stop; earlier steps stay live | check the dashboard link, then start over |
+| "Still in progress at Cloudflare" | the Pages deployment is still building | open the dashboard link; start over once it settles |
+| Success without an address | the release has no HTTP entry (cron, queue, Workflow) or no `workers.dev` name | the card lists what was created and the dashboard link; check it there |
+
+**Signing out.** *Sign out* (top of the install page, not shown while a deploy
+runs) asks Cloudflare to revoke the installer's token and clears the session.
+Do it when you are done; otherwise the session ends by itself within 20 minutes.

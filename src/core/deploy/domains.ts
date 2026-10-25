@@ -21,7 +21,7 @@ import {
 import { ensureWorkerRoute } from "../../cloudflare/resources/routes.js";
 import { customDomainFacts, decideCustomDomain, pagesCnameTarget } from "./custom-domains.js";
 
-export interface ReconcileDomainsResult {
+interface ReconcileDomainsResult {
   progressBaseline?: ExpectedTarget["domainBaseline"];
   applied: Array<{
     kind: string;

@@ -7,9 +7,9 @@
 // convention). Index dimension/metric configuration is immutable on the live
 // resource — the installer never silently changes it in place.
 
-export type VectorizeMetric = "cosine" | "euclidean" | "dot-product";
+type VectorizeMetric = "cosine" | "euclidean" | "dot-product";
 
-export interface VectorizeIndexConfig {
+interface VectorizeIndexConfig {
   dimensions?: number;
   metric?: VectorizeMetric;
   preset?: string;
@@ -24,7 +24,7 @@ export interface VectorizeIndex {
   modified_on?: string;
 }
 
-export type VectorizeCreateConfig =
+type VectorizeCreateConfig =
   | { dimensions: number; metric: VectorizeMetric }
   | { preset: string };
 

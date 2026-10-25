@@ -5,7 +5,7 @@ import { assetUploadHash } from "../cloudflare/assets/manifest.js";
 import { pagesAssetHash, pagesControlFileAtRoot, toPagesAssetPath } from "../cloudflare/pages/manifest.js";
 import { reachableEsmExports } from "./esm-exports.js";
 
-export interface PerUnitBundle {
+interface PerUnitBundle {
   unitId: string;
   wranglerPath: string;
   wranglerSha256: string;

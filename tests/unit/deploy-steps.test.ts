@@ -1,15 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 
-import {
-  uploadAssetBucket,
-  planUploadBatches,
-  splitBucketsForUpload,
-  DEFAULT_MAX_PARTS_PER_BATCH,
-  assetUploadHash,
-  buildAssetUploadManifest,
-  toRootedAssetPath,
-} from "../../src/cloudflare/assets/index.js";
+import { uploadAssetBucket } from "../../src/cloudflare/assets/upload.js";
+import { splitBucketsForUpload } from "../../src/cloudflare/assets/batching.js";
+import { assetUploadHash, buildAssetUploadManifest, toRootedAssetPath } from "../../src/cloudflare/assets/manifest.js";
 import {
   executeDeployStep,
   versionMessage,
@@ -129,28 +123,7 @@ describe("versionMessage / assetUploadManifest (official)", () => {
   });
 });
 
-describe("planUploadBatches / splitBucketsForUpload", () => {
-  it("chunks missing hashes into capped batches", () => {
-    const hashes = Array.from({ length: 130 }, (_, i) => `h-${i}`);
-    const batches = planUploadBatches(hashes, 64);
-    expect(batches.length).toBe(3);
-    expect(batches[0]!.length).toBe(64);
-    expect(batches[1]!.length).toBe(64);
-    expect(batches[2]!.length).toBe(2);
-  });
-
-  it("uses the documented default cap", () => {
-    expect(DEFAULT_MAX_PARTS_PER_BATCH).toBe(64);
-  });
-
-  it("deduplicates hashes", () => {
-    expect(planUploadBatches(["a", "a", "b", "b"], 2)).toEqual([["a", "b"]]);
-  });
-
-  it("rejects an invalid batch cap", () => {
-    expect(() => planUploadBatches(["a"], 0)).toThrow(/positive integer/);
-    expect(() => planUploadBatches(["a"], -1)).toThrow(/positive integer/);
-  });
+describe("splitBucketsForUpload", () => {
 
   it("preserves official buckets grouping while deduping", () => {
     const h1 = "a".repeat(32);
@@ -492,7 +465,7 @@ describe("executeDeployStep: create-version (multipart)", () => {
           d1: [],
           kv: [],
           queues: [{ binding: "Q", queueName: "my-queue", createIfMissing: true, role: "producer" }],
-          hyperdrive: [{ binding: "HD", configName: "my-hd", createIfMissing: true }],
+          hyperdrive: [{ binding: "HD", configName: "my-hd" }],
           vectorize: [],
           secretsStore: [],
           runtimeBindings: [],
@@ -559,9 +532,7 @@ describe("executeDeployStep: create-version (multipart)", () => {
             {
               binding: "SECRETS",
               storeName: "my-store",
-              createIfMissing: true,
               secretName: "api-token",
-              secretCreateIfMissing: true,
             },
           ],
           runtimeBindings: [],

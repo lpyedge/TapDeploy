@@ -6,9 +6,7 @@
 
 import type { Context, Hono } from "hono";
 import type { AppEnv, TapDeployEnv } from "../app.js";
-import { parseCookies } from "../../auth/cookies.js";
-import { validateCsrf, validateOrigin } from "../../auth/csrf.js";
-import { sessionCookieName, readSession, type SessionPayload } from "../../auth/session.js";
+import type { SessionPayload } from "../../auth/session.js";
 import { validateBootstrapProfile } from "../../core/deploy/bootstrap-profile.js";
 import {
   createCloudflareClient,
@@ -27,6 +25,7 @@ import type { DeployBundle } from "../../release/deploy-bundle.js";
 import { effectiveCapabilities, plannedUnits } from "../../manifest/config-v3.js";
 import type { InputMode } from "../../manifest/input-validation.js";
 import { loadKey } from "./auth.js";
+import { authenticate } from "../session-guard.js";
 import {
   authorizeGraphIntent,
   bindConfigToSession,
@@ -76,24 +75,11 @@ export function attachDeployPlanRoutes(
 }
 
 async function planHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
+  const auth = await authenticate(c, env);
+  if ("denied" in auth) return auth.denied;
+  const payload = auth.session;
   const publicOrigin = env.PUBLIC_ORIGIN ?? "";
-  const origin = c.req.header("origin");
-  const csrf = c.req.header("x-tapdeploy-csrf");
-
-  const cookies = parseCookies(c.req.raw.headers.get("cookie"));
-  const raw = cookies[sessionCookieName(publicOrigin)];
-  const key = raw ? await loadKey(env).catch(() => null) : null;
-  if (!key || !raw) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-  const payload = await readSession(key, raw);
-  if (!payload) {
-    return c.json({ error: "unauthenticated" }, 401);
-  }
-
-  if (!validateOrigin(publicOrigin, origin) || !validateCsrf(payload, csrf)) {
-    return c.json({ error: "csrf/origin check failed" }, 403);
-  }
+  const key = await loadKey(env);
 
   let body: DeployPlanBody;
   try {

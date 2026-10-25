@@ -869,36 +869,6 @@ describe("cloudflare api client contract", () => {
       await expect(client.listHyperdriveConfigs()).rejects.toMatchObject({ kind: "invalid-response" });
     });
 
-    it("creates a Hyperdrive config with a JSON body (hyperdrive)", async () => {
-      const { fn, log, schedule } = mockFetcher();
-      schedule(
-        jsonResponse(
-          envelope({
-            id: "0f2ac74b498b48028cb68387c421e279",
-            name: "my-hyperdrive",
-            origin: { database: "postgres", host: "database.example.com", scheme: "postgres" },
-          }),
-        ),
-      );
-      const client = createCloudflareClient({
-        accessToken: TOKEN,
-        accountId: ACCOUNT_ID,
-        fetcher: fn,
-      });
-      const created = await client.createHyperdriveConfig({
-        name: "my-hyperdrive",
-        origin: { database: "postgres", host: "database.example.com", scheme: "postgres" },
-      });
-      expect(created).toMatchObject({ id: "0f2ac74b498b48028cb68387c421e279", name: "my-hyperdrive" });
-      expect(at(log, 0).url).toContain("/hyperdrive/configs");
-      expect(at(log, 0).init.method).toBe("POST");
-      const body = at(log, 0).init.body as string;
-      expect(JSON.parse(body)).toEqual({
-        name: "my-hyperdrive",
-        origin: { database: "postgres", host: "database.example.com", scheme: "postgres" },
-      });
-    });
-
     // Vectorize indexes — list/create.
     it("parses Vectorize index list from result[] with id/name/config (vectorize)", async () => {
       const { fn, log } = fixtureFetcher();
@@ -990,26 +960,6 @@ describe("cloudflare api client contract", () => {
       await expect(client.listSecretsStores()).rejects.toMatchObject({ kind: "invalid-response" });
     });
 
-    it("creates a Secrets Store store with a JSON body (secrets-store)", async () => {
-      const { fn, log, schedule } = mockFetcher();
-      schedule(
-        jsonResponse(
-          envelope({ id: "11111111111111111111111111111111", name: "my-secrets-store" }),
-        ),
-      );
-      const client = createCloudflareClient({
-        accessToken: TOKEN,
-        accountId: ACCOUNT_ID,
-        fetcher: fn,
-      });
-      const created = await client.createSecretsStore({ name: "my-secrets-store" });
-      expect(created).toMatchObject({ id: "11111111111111111111111111111111", name: "my-secrets-store" });
-      expect(at(log, 0).url).toContain("/secrets_store/stores");
-      expect(at(log, 0).init.method).toBe("POST");
-      const body = at(log, 0).init.body as string;
-      expect(JSON.parse(body)).toEqual({ name: "my-secrets-store" });
-    });
-
     it("parses Secrets Store secret list from result[] with id/name/store_id and no value (secrets-store)", async () => {
       const { fn, log } = fixtureFetcher();
       const client = createCloudflareClient({
@@ -1039,43 +989,6 @@ describe("cloudflare api client contract", () => {
         fetcher: fn,
       });
       await expect(client.listSecretsStoreSecrets("11111111111111111111111111111111")).rejects.toMatchObject({ kind: "invalid-response" });
-    });
-
-    it("creates a Secrets Store secret with scopes + write-only value and never echoes it back (secrets-store)", async () => {
-      const { fn, log, schedule } = mockFetcher();
-      schedule(
-        jsonResponse(
-          envelope({
-            id: "33333333333333333333333333333333",
-            name: "api-token",
-            store_id: "11111111111111111111111111111111",
-          }),
-        ),
-      );
-      const client = createCloudflareClient({
-        accessToken: TOKEN,
-        accountId: ACCOUNT_ID,
-        fetcher: fn,
-      });
-      const created = await client.createSecretsStoreSecret("11111111111111111111111111111111", {
-        name: "api-token",
-        scopes: ["workers"],
-        value: "s3cr3t-value",
-      });
-      expect(created).toMatchObject({
-        id: "33333333333333333333333333333333",
-        name: "api-token",
-        store_id: "11111111111111111111111111111111",
-      });
-      expect("value" in (created as unknown as Record<string, unknown>)).toBe(false);
-      expect(at(log, 0).url).toContain("/secrets_store/stores/11111111111111111111111111111111/secrets");
-      expect(at(log, 0).init.method).toBe("POST");
-      const body = JSON.parse(at(log, 0).init.body as string);
-      expect(body).toEqual({
-        name: "api-token",
-        scopes: ["workers"],
-        value: "s3cr3t-value",
-      });
     });
 
     it("lists Pages projects from the official /pages/projects array shape", async () => {

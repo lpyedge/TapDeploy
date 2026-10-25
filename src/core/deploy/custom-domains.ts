@@ -38,7 +38,7 @@ export function hostnameInZone(hostname: string, zone: string): boolean {
 }
 
 /** Per-unit domain request of a plan body: hostnames to bind and (upgrade) to remove. */
-export interface UnitDomainChoices {
+interface UnitDomainChoices {
   bind?: Array<{ hostname?: unknown; zone?: unknown; replaceExisting?: unknown }>;
   remove?: Array<{ hostname?: unknown; zone?: unknown }>;
 }

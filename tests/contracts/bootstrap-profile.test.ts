@@ -9,11 +9,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   assessBootstrapPrivacy,
-  bootstrapReadinessProblems,
   checkBootstrapRace,
   clientBootstrapRunner,
   decideBootstrapMode,
-  fetchBootstrapReadiness,
   inspectBootstrapTarget,
   planBootstrapSecrets,
   validateBootstrapProfile,
@@ -212,34 +210,5 @@ describe("bootstrap profile — provider contract (typed client, stub fetcher)",
     if (!proof.ok) expect(proof.refusal.code).toBe("PRIVATE_PROOF_FAILED");
 
     expect(calls.every((call) => call.method === "GET")).toBe(true);
-  });
-});
-
-describe("bootstrap profile — readiness endpoint contract", () => {
-  it("calls the app's own /api/auth/methods and reports not-ready states", async () => {
-    const urls: string[] = [];
-    const pending = await fetchBootstrapReadiness(
-      (url) => {
-        urls.push(url);
-        return Promise.resolve(
-          Response.json({ setup: "pending", methods: { password: { enabled: false } } }),
-        );
-      },
-      { origin: "https://owner-app.example.workers.dev", readinessPath: "/api/auth/methods" },
-    );
-    expect(urls).toEqual(["https://owner-app.example.workers.dev/api/auth/methods"]);
-    expect(pending.ok).toBe(true);
-    if (!pending.ok) return;
-    const problems = bootstrapReadinessProblems({
-      methods: pending.methods,
-      ownerExists: true,
-      credentialExists: true,
-      firstSetup: true,
-      ownerKey: "auth/owner.json",
-      initialPasswordKey: "auth/initial-owner-password.txt",
-    });
-    expect(problems.length).toBe(2);
-    expect(problems.join(" ")).toContain('"pending"');
-    expect(problems.join(" ")).toContain("not enabled");
   });
 });

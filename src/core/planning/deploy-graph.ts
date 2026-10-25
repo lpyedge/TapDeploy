@@ -49,16 +49,16 @@ import type { UnitProgressEntry } from "./types.js";
 // Input contract (structurally matches the v3 `units[]` entry)
 // ---------------------------------------------------------------------------
 
-export type GraphUnitInputKind = "worker" | "pages" | "resources";
+type GraphUnitInputKind = "worker" | "pages" | "resources";
 
-export interface GraphUnitResourceInput {
+interface GraphUnitResourceInput {
   kind: "r2" | "kv" | "d1" | "queue" | "vectorize";
   name: string;
   mode: "ensure" | "bind-existing";
 }
 
 /** Service binding of the unit's final wrangler config (`{ binding, service }`). */
-export interface GraphServiceTargetInput {
+interface GraphServiceTargetInput {
   binding: string;
   service: string;
 }
@@ -72,7 +72,7 @@ export interface GraphServiceTargetInput {
  *     account BLOCKS the graph (cross-account reference).
  *   - `services`: mapped from the normalized wrangler projection (`services`).
  */
-export interface GraphUnitInput {
+interface GraphUnitInput {
   id: string;
   kind: GraphUnitInputKind;
   /** Present for worker/pages units: ZIP-relative path to the unit's final wrangler.jsonc. */
@@ -118,7 +118,7 @@ export interface GraphUnit {
   buildRoute?: BuildRouteDecision;
 }
 
-export interface GraphResourceRef {
+interface GraphResourceRef {
   unitId: string;
   /** Env binding name; absent for resource-only unit provisioning intent. */
   binding?: string;
@@ -126,7 +126,7 @@ export interface GraphResourceRef {
   role?: QueueRole;
 }
 
-export interface GraphResource {
+interface GraphResource {
   id: string;
   kind: UnitResourceKind;
   name?: string;
@@ -136,7 +136,7 @@ export interface GraphResource {
   secretPolicy?: SecretPolicy;
 }
 
-export interface GraphBindingEdge {
+interface GraphBindingEdge {
   unitId: string;
   resourceId: string;
   /** Absent for `provision-intent` edges (resource-only units carry no env binding). */
@@ -144,7 +144,7 @@ export interface GraphBindingEdge {
   kind: "env-binding" | "provision-intent";
 }
 
-export interface GraphTriggerNode {
+interface GraphTriggerNode {
   /** Unit-scoped: `<unitId>/<baseId>`. */
   id: string;
   kind: "cron" | "queue-consumer";
@@ -153,7 +153,7 @@ export interface GraphTriggerNode {
   queueName?: string;
 }
 
-export interface GraphExposureEdge {
+interface GraphExposureEdge {
   unitId: string;
   kind: ConfigDomainKind;
   hostname: string;
@@ -161,13 +161,13 @@ export interface GraphExposureEdge {
   updateAction?: DomainUpdateAction;
 }
 
-export type GraphDependencyKind =
+type GraphDependencyKind =
   | "declared"
   | "resource-order"
   | "service-binding"
   | "queue-consumer";
 
-export interface GraphDependencyEdge {
+interface GraphDependencyEdge {
   /** Runs after `dependency` (the dependency's identity must exist first). */
   dependent: string;
   dependency: string;
@@ -175,7 +175,7 @@ export interface GraphDependencyEdge {
   detail: string;
 }
 
-export type GraphGuardBaseCode =
+type GraphGuardBaseCode =
   | "missing-unit-spec"
   | "unexpected-unit-spec"
   | "duplicate-unit-id"
@@ -197,7 +197,7 @@ export type GraphGuardBaseCode =
   | "cross-account-reference";
 
 /** Base codes plus the single-target resolver codes propagated per unit. */
-export type GraphGuardCode = GraphGuardBaseCode | UnitGuardCode;
+type GraphGuardCode = GraphGuardBaseCode | UnitGuardCode;
 
 export interface GraphGuard {
   code: GraphGuardCode;

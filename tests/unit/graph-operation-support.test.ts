@@ -14,7 +14,6 @@ import { DEPLOY_STEP_NAMES, graphStepForResourceAction, isGraphActionStepAllowed
 import { exactGraphDispatchSpec } from "../../src/core/deploy/graph-dispatch.js";
 import {
   graphActionsForPlan,
-  graphPhaseForDiff,
 } from "../../src/web/graph-deploy-runner.js";
 import type { DeploySpec } from "../../src/core/deploy-spec.js";
 
@@ -134,9 +133,6 @@ describe("catalog: unimplemented operations refuse with UNSUPPORTED_GRAPH_OPERAT
 
 describe("browser parity: same catalog, zero browser-only fallback", () => {
   it("maps supported diffs to the catalog phase and skips no-ops", () => {
-    expect(graphPhaseForDiff("worker", "r2", "create")).toBe("create-r2-buckets");
-    expect(graphPhaseForDiff("worker", "schedule", "create")).toBe("reconcile-schedules");
-    expect(graphPhaseForDiff("pages-static", "static-assets", "create")).toBe("pages-register-assets");
     const actions = graphActionsForPlan({
       units: [
         {
@@ -155,7 +151,6 @@ describe("browser parity: same catalog, zero browser-only fallback", () => {
   });
 
   it("maps the Worker asset pair to register-assets and executes both phases under one action", () => {
-    expect(graphPhaseForDiff("worker", "static-assets", "create")).toBe("register-assets");
     const actions = graphActionsForPlan({
       units: [{ unitId: "main", kind: "worker", diffs: [{ resource: "static-assets", action: "create", name: "app" }] }],
     } as never);

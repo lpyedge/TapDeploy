@@ -19,7 +19,3 @@ export interface D1CreateRequest {
   primary_location_hint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc";
   read_replication?: { mode: "auto" | "disabled" };
 }
-
-export interface D1DatabaseListResult {
-  databases: D1Database[];
-}

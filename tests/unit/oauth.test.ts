@@ -5,7 +5,6 @@ import {
   buildAuthorizeUrl,
   exchangeCode,
   revokeToken,
-  verifyPkceChallenge,
   type OAuthConfig,
 } from "../../src/auth/oauth.js";
 
@@ -29,13 +28,13 @@ describe("PKCE", () => {
     expect(pkce.verifier.length).toBeGreaterThanOrEqual(40);
     expect(pkce.challenge).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(pkce.method).toBe("S256");
-    expect(await verifyPkceChallenge(pkce.challenge, pkce.verifier)).toBe(true);
+    expect(await sha256Base64Url(pkce.verifier)).toBe(pkce.challenge);
   });
 
   it("rejects a mismatched challenge", async () => {
     const pkce = await generatePkce();
     const other = await generatePkce();
-    expect(await verifyPkceChallenge(pkce.challenge, other.verifier)).toBe(false);
+    expect(await sha256Base64Url(other.verifier)).not.toBe(pkce.challenge);
   });
 });
 

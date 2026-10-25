@@ -13,23 +13,7 @@ import type { QueueBindingSpec } from "../../core/deploy-spec.js";
 import type { Queue, QueueConsumerRequest, QueueConsumerSettings } from "../models/index.js";
 import {
   ResourceConflictError,
-  type ResourceAdapter,
-  type ResourceSupport,
 } from "./types.js";
-
-export const QUEUE_SUPPORT: ResourceSupport = {
-  kind: "queue",
-  label: "Queue",
-  install: "create-declared",
-  upgrade: "preserve",
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const queueAdapter: ResourceAdapter = {
-  support: QUEUE_SUPPORT,
-  mutation: "ensureQueue",
-};
 
 export type QueueAction =
   | { binding?: string; queueName: string; action: "preserve"; id: string }
@@ -201,15 +185,4 @@ export function declaredQueueConsumerMatches(
     }
   }
   return true;
-}
-
-// Project one declared producer to the official Worker binding shape
-// ({type:"queue", name, queue_name}). `resolvedQueueName` is the queue name
-// that the ensure step verified against the live account; the binding must
-// carry that verified identity, never an unverified literal.
-export function producerBindingFor(
-  producer: { binding: string; queue: string },
-  resolvedQueueName: string,
-): { type: "queue"; name: string; queue_name: string } {
-  return { type: "queue", name: producer.binding, queue_name: resolvedQueueName };
 }

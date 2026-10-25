@@ -100,7 +100,7 @@ export async function snapshotTarget(
     : [];
 
   const activeDeployment = deployments[0];
-  const activeIds = [...new Set((activeDeployment?.versions ?? []).map(v => v.version_id ?? v.id ?? ""))];
+  const activeIds = [...new Set((activeDeployment?.versions ?? []).map(v => v.version_id))];
   if (activeIds.some(id => !id) || activeIds.length > 2) throw new Error("ambiguous active version inventory");
   const activeDetails = await Promise.all(activeIds.map(id => accountClient.getVersion(opts.workerName, id)));
   for (const version of activeDetails) {
@@ -153,14 +153,8 @@ export async function snapshotTarget(
   const secretsStoreSecrets = needs.secretsStore !== false
     ? await readSecretsStoreSecrets(accountClient, secretsStores, needs.secretsStore === true)
     : [];
-  // live binding identity (binding -> bucket) from the documented
-  // GET .../settings bindings (r2_bucket entries). Denied access to an existing
-  // worker fails closed: it cannot be assumed to have no deployed bindings.
-  const workerR2Bindings =
-    workerExists ? await readWorkerR2Bindings(accountClient, opts.workerName, activeBindings) : {};
-  // full deployed binding identity map for every resource family. This
-  // subsumes the R2 map (kept for backward compatibility) and feeds the upgrade
-  // rebind guards. Missing permission is not an empty verified map.
+  // full deployed binding identity map for every resource family; feeds the
+  // upgrade rebind guards. Missing permission is not an empty verified map.
   const deployedBindings =
     workerExists ? await readDeployedBindings(accountClient, opts.workerName, activeBindings) : {};
 
@@ -184,7 +178,7 @@ export async function snapshotTarget(
     latestVersionId: versions[0]?.id,
     activeDeploymentId: activeDeployment?.id,
     activeDeploymentVersionIds:
-      activeDeployment?.versions.map((v) => v.version_id ?? v.id ?? "") ?? [],
+      activeDeployment?.versions.map((v) => v.version_id) ?? [],
     ...(activeBindings ? { activeBindings } : {}),
     r2Buckets,
     d1Databases,
@@ -195,7 +189,6 @@ export async function snapshotTarget(
     vectorizeIndexes,
     secretsStores,
     secretsStoreSecrets,
-    workerR2Bindings,
     deployedBindings,
     secretNames,
     scheduleCrons,
@@ -535,41 +528,6 @@ async function readRateLimitCount(
   } catch (error) {
     if (isNotFound(error) || isMissingScope(error)) {
       return 0;
-    }
-    throw error;
-  }
-}
-
-// deployed R2 binding identity from the documented settings
-// bindings (GET .../settings). Official R2 entry shape is
-// { type: "r2_bucket", name: "<binding>", bucket_name: "<bucket>" }.
-// Unknown/malformed entries are ignored (fail closed later at plan time);
-// missing worker or missing scope maps to empty (no verified bindings).
-async function readWorkerR2Bindings(
-  client: CloudflareApiClient,
-  workerName: string,
-  activeBindings?: Array<Record<string, unknown>>,
-): Promise<Record<string, string>> {
-  try {
-    const bindings = activeBindings ?? (await client.getWorkerSettings(workerName))?.bindings;
-    if (!Array.isArray(bindings)) {
-      return {};
-    }
-    const out: Record<string, string> = {};
-    for (const entry of bindings as Record<string, unknown>[]) {
-      if (entry?.["type"] !== "r2_bucket") {
-        continue;
-      }
-      const name = entry["name"];
-      const bucket = entry["bucket_name"] ?? entry["bucketName"] ?? entry["bucket"];
-      if (typeof name === "string" && name.length > 0 && typeof bucket === "string" && bucket.length > 0) {
-        out[name] = bucket;
-      }
-    }
-    return out;
-  } catch (error) {
-    if (isNotFound(error)) {
-      return {};
     }
     throw error;
   }

@@ -28,7 +28,7 @@ import type {
 // The routes the installer can satisfy TODAY without bundling or remote build:
 // prebuilt artifacts uploaded directly (Worker script multipart or Pages direct
 // upload). Nothing is bundled or built remotely.
-export type BuildRouteId =
+type BuildRouteId =
   | "workers-direct-upload"
   | "pages-direct-upload"
   | "pages-direct-upload-functions";
@@ -39,7 +39,7 @@ export interface BuildRouteDecision {
   notes: string;
 }
 
-export interface BuildRouteInput {
+interface BuildRouteInput {
   targetKind: "workers" | "pages";
   hasWorkerModule: boolean;
   hasPagesFunctionBundle: boolean;
@@ -72,9 +72,9 @@ export function selectBuildRoute(input: BuildRouteInput): BuildRouteDecision {
 // Graph nodes
 // ---------------------------------------------------------------------------
 
-export type DeploymentUnitKind = "worker" | "pages-static" | "pages-functions";
+type DeploymentUnitKind = "worker" | "pages-static" | "pages-functions";
 
-export interface DeploymentUnit {
+interface DeploymentUnit {
   id: string;
   kind: DeploymentUnitKind;
   name: string;
@@ -106,7 +106,7 @@ export type ResourceDisposition =
   | "bind-only"
   | "policy";
 
-export interface UnitResourceNode {
+interface UnitResourceNode {
   id: string;
   kind: UnitResourceKind;
   // The Worker/Pages env binding name (or the secret policy key). Absent for a
@@ -123,9 +123,9 @@ export interface UnitResourceNode {
   secretPolicy?: SecretPolicy;
 }
 
-export type TriggerKind = "cron" | "queue-consumer";
+type TriggerKind = "cron" | "queue-consumer";
 
-export interface UnitTriggerNode {
+interface UnitTriggerNode {
   id: string;
   kind: TriggerKind;
   unitId: string;
@@ -133,7 +133,7 @@ export interface UnitTriggerNode {
   queueName?: string;
 }
 
-export interface UnitBindingEdge {
+interface UnitBindingEdge {
   unitId: string;
   resourceId: string;
   // Absent for a consumer-only queue: the queue is provisioned/used but
@@ -141,7 +141,7 @@ export interface UnitBindingEdge {
   binding?: string;
 }
 
-export interface UnitExposureEdge {
+interface UnitExposureEdge {
   unitId: string;
   kind: ConfigDomainKind;
   hostname: string;
@@ -157,7 +157,7 @@ export type UnitGuardCode =
   | "trigger-requires-worker"
   | "exposure-requires-hostname";
 
-export interface UnitGuard {
+interface UnitGuard {
   code: UnitGuardCode;
   message: string;
 }
@@ -289,7 +289,7 @@ export function resolveDeploymentUnits(spec: DeploySpec): DeploymentUnitPlan {
       kind: "hyperdrive",
       binding: r.binding,
       name: r.configName,
-      disposition: r.createIfMissing ? "create-if-missing" : "bind-existing",
+      disposition: "bind-existing",
     });
   }
   for (const r of spec.cloudflare.vectorize) {
@@ -307,7 +307,7 @@ export function resolveDeploymentUnits(spec: DeploySpec): DeploymentUnitPlan {
       kind: "secrets-store",
       binding: r.binding,
       name: r.storeName,
-      disposition: r.createIfMissing ? "create-if-missing" : "bind-existing",
+      disposition: "bind-existing",
     });
   }
   for (const r of spec.cloudflare.runtimeBindings) {

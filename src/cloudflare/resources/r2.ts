@@ -13,23 +13,7 @@ import type {
 import type { R2Bucket, R2CustomDomain, R2ManagedDomain } from "../models/index.js";
 import {
   ResourceConflictError,
-  type ResourceAdapter,
-  type ResourceSupport,
 } from "./types.js";
-
-export const R2_BUCKET_SUPPORT: ResourceSupport = {
-  kind: "r2-bucket",
-  label: "R2 bucket",
-  install: "create-declared",
-  upgrade: "preserve",
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const r2BucketAdapter: ResourceAdapter = {
-  support: R2_BUCKET_SUPPORT,
-  mutation: "ensureR2Bucket",
-};
 
 export type BucketAction =
   | { binding: string; bucketName: string; action: "preserve"; id: string }
@@ -42,12 +26,12 @@ type KnownBuckets = readonly Pick<R2Bucket, "name" | "id">[];
 // no provider id in the config; the bucket name is the only creation handle and
 // the live identity (`name@creation_date`) is always read back from the
 // account, never assumed from the config.
-export interface DeclaredR2Bucket {
+interface DeclaredR2Bucket {
   binding: string;
   bucketName: string;
 }
 
-export interface R2EnsureOptions {
+interface R2EnsureOptions {
   createIfMissing: boolean;
 }
 
@@ -56,7 +40,7 @@ export interface R2EnsureOptions {
 // an existing bucket is preserved by its unique live identity; an ambiguous or
 // identity-less live match is a conflict. Denied discovery never reaches here:
 // required snapshot reads fail closed instead of returning an empty list.
-export function plannedBucketActionFor(
+function plannedBucketActionFor(
   declared: DeclaredR2Bucket,
   knownBuckets: KnownBuckets,
   options: R2EnsureOptions,

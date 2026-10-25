@@ -19,7 +19,7 @@ import {
   type V3Capability,
 } from "../manifest/config-v3.js";
 
-export interface ScopeReason {
+interface ScopeReason {
   scope: string;
   capability: ScopeCapability;
   reason: string;

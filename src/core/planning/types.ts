@@ -23,15 +23,15 @@ export interface ProjectionIssue {
   detail: string;
 }
 
-export type PlanKind = "install" | "upgrade" | "blocked";
+type PlanKind = "install" | "upgrade" | "blocked";
 
 // the concrete hosting target kind and the install-vs-upgrade mode the plan
 // is bound to. Both are derived from the operator's explicit selector (not
 // inferred from a bare worker-name input) and are bound into the plan + expected
 // target so an account/mode/target change cannot silently re-deploy elsewhere.
-export type PlanTargetKind = "workers" | "pages";
+type PlanTargetKind = "workers" | "pages";
 
-export type PlanAction = "create" | "update" | "preserve" | "conflict" | "skip" | "attach" | "detach";
+type PlanAction = "create" | "update" | "preserve" | "conflict" | "skip" | "attach" | "detach";
 
 export type PlanResource =
   | "worker"
@@ -73,7 +73,7 @@ export interface ResourceDiff {
   detail?: string;
 }
 
-export type GuardCode =
+type GuardCode =
   | "missing-account"
   | "wrong-account"
   | "wrong-target-kind"
@@ -143,10 +143,6 @@ export interface TargetSnapshot {
   vectorizeIndexes: { name: string; id: string; config?: { dimensions?: number; metric?: "cosine" | "euclidean" | "dot-product"; preset?: string } }[];
   secretsStores: { name: string; id: string }[];
   secretsStoreSecrets: { secretName: string; id: string; store_id: string }[];
-  // live R2 binding identity (binding name -> bucket name) read from
-  // GET .../settings. Empty when the worker is absent or has no R2 bindings.
-  // Used to refuse silent rebinds on upgrade; never carries credentials.
-  workerR2Bindings?: Record<string, string>;
   // live deployed binding identity for every resource family the installer
   // binds (R2, D1, KV, Queue, Hyperdrive, Vectorize, Secrets Store), read from
   // GET .../settings. Each map is binding-name -> the target identity the deployed
@@ -257,9 +253,6 @@ export interface ExpectedTarget {
   // Vectorize index + Secrets Store identities at plan time (name -> id).
   vectorizeIndexIds?: Record<string, string>;
   secretsStoreIds?: Record<string, string>;
-  // deployed binding map at plan time (binding -> bucket). Compared
-  // against the fresh snapshot before each write to catch outside rebinds.
-  workerR2Bindings?: Record<string, string>;
   // deployed binding map at plan time for every resource family.
   // Compared against the fresh snapshot before each write to catch an outside
   // rebind (binding now pointing at a different R2/D1/KV/Queue/Hyperdrive/
@@ -316,7 +309,7 @@ export interface DeployPlan {
 // own state and, once its boundary is sealed, its own receipt digest. A
 // partially completed graph resumes from live provider state and never
 // auto-rolls back another unit's existing resources.
-export type UnitProgressState = "pending" | "in-progress" | "succeeded" | "failed" | "skipped";
+type UnitProgressState = "pending" | "in-progress" | "succeeded" | "failed" | "skipped";
 
 export interface UnitProgressEntry {
   unitId: string;

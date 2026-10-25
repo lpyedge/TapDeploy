@@ -24,7 +24,10 @@ in, which is enough for testing. To let anyone use your instance, make the
 client **public**; Cloudflare first verifies the client URL's domain with a
 DNS `TXT` record (`cloudflare_oauth_client_publisher=…`). That is why a public
 instance needs **its own domain** (a shared `*.workers.dev` hostname cannot be
-verified). Publishing is permanent.
+verified). Publishing is permanent. *Public* only decides who may sign in:
+the client stays a confidential, server-side one. The secret never reaches the
+browser, the token exchange uses it with `client_secret_basic`, and PKCE `S256`
+is always sent as well.
 
 | Dashboard name | Scope ID | Used for |
 |---|---|---|

@@ -74,9 +74,9 @@ export const V3_CAPABILITY_META: Record<V3Capability, V3CapabilityMeta> = {
   d1: { scopeCapabilities: ["d1-write"], note: "List/create D1 databases." },
   kv: { scopeCapabilities: ["kv-write"], note: "List/create KV namespaces." },
   queues: { scopeCapabilities: ["queues-write"], note: "List/create Queues and manage consumers." },
-  hyperdrive: { scopeCapabilities: ["hyperdrive-write"], note: "List/create Hyperdrive configs." },
+  hyperdrive: { scopeCapabilities: ["hyperdrive-write"], note: "List the account's Hyperdrive configs (never created: they hold the user's own database credentials)." },
   vectorize: { scopeCapabilities: ["vectorize-write"], note: "List/create Vectorize indexes." },
-  "secrets-store": { scopeCapabilities: ["secrets-store-write"], note: "Manage central Secrets Store entries." },
+  "secrets-store": { scopeCapabilities: ["secrets-store-write"], note: "List Secrets Stores and their secret names (never created)." },
   "workers-ai": { scopeCapabilities: ["ai-write"], note: "Account-level Workers AI management (a runtime binding alone needs nothing)." },
   "browser-rendering": { scopeCapabilities: ["browser-rendering-write"], note: "Account-level Browser Rendering management (a runtime binding alone needs nothing)." },
   routes: { scopeCapabilities: ["workers-routes-write"], note: "Zone-scoped Workers routes." },
@@ -94,14 +94,14 @@ export type InstallPolicyKind = (typeof INSTALL_POLICY_KINDS)[number];
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ConfigV3Source {
+interface ConfigV3Source {
   defaultUrl?: string;
   /** Defaults to true when omitted (canonicalized for the deterministic ID). */
   allowLocalZip?: boolean;
   expectedSha256?: string;
 }
 
-export type ConfigV3InputType =
+type ConfigV3InputType =
   | "string"
   | "text"
   | "integer"
@@ -113,7 +113,7 @@ export type ConfigV3InputType =
   | "multiselect";
 
 /** A choice of a `select` / `multiselect`: a plain value, or a value with its own label. */
-export type ConfigV3InputOption = string | number | { label: string; value: string | number | boolean };
+type ConfigV3InputOption = string | number | { label: string; value: string | number | boolean };
 
 export interface ConfigV3Input {
   /** Also the name of the Worker variable (or secret) the value is bound to. */
@@ -139,10 +139,10 @@ export interface ConfigV3Input {
   };
 }
 
-export type ConfigV3ResourceKind = "r2" | "kv" | "d1" | "queue" | "vectorize";
+type ConfigV3ResourceKind = "r2" | "kv" | "d1" | "queue" | "vectorize";
 
 /** An account resource the app uses, created before any Worker or Pages site is deployed. */
-export interface ConfigV3Resource {
+interface ConfigV3Resource {
   kind: ConfigV3ResourceKind;
   name: string;
   /** Create it when missing. Default true; false requires it to exist already. */
@@ -154,7 +154,7 @@ export interface ConfigV3Resource {
   metric?: "cosine" | "euclidean" | "dot-product";
 }
 
-export interface ConfigV3Unit {
+interface ConfigV3Unit {
   id: string;
   kind: "worker" | "pages";
   /** ZIP-relative path to the unit's final wrangler.jsonc. */
@@ -176,7 +176,7 @@ export interface ConfigV3InstallPolicy {
   readinessPath?: string;
 }
 
-export interface ConfigV3Install {
+interface ConfigV3Install {
   policies: ConfigV3InstallPolicy[];
 }
 
@@ -196,9 +196,9 @@ export interface ConfigV3 {
 // ---------------------------------------------------------------------------
 
 /** Id of the planner unit that holds the config's `resources`; no declared unit may use it. */
-export const RESOURCES_UNIT_ID = "resources" as const;
+const RESOURCES_UNIT_ID = "resources" as const;
 
-export interface PlannedResource {
+interface PlannedResource {
   kind: ConfigV3ResourceKind;
   name: string;
   mode: "ensure" | "bind-existing";
@@ -342,7 +342,7 @@ export function parseConfigV3Text(
 // Schema validator
 // ---------------------------------------------------------------------------
 
-export interface ConfigV3ValidationError {
+interface ConfigV3ValidationError {
   instancePath: string;
   message: string;
 }
@@ -366,7 +366,7 @@ export function validateConfigV3(
 // Semantic safety guard (defence in depth beyond schema additionalProperties)
 // ---------------------------------------------------------------------------
 
-export interface ConfigV3SafetyIssue {
+interface ConfigV3SafetyIssue {
   field: string;
   detail: string;
 }

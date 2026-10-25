@@ -42,9 +42,9 @@ const FULL_SPEC = spec({
     { binding: "JOBS", queueName: "q", createIfMissing: true, role: "producer" },
     { binding: "WORKER_CONSUMER", queueName: "q", createIfMissing: true, role: "consumer" },
   ],
-  hyperdrive: [{ binding: "PG", configName: "pg", createIfMissing: true }],
+  hyperdrive: [{ binding: "PG", configName: "pg" }],
   vectorize: [{ binding: "IDX", indexName: "idx", createIfMissing: true }],
-  secretsStore: [{ binding: "SS", storeName: "store", createIfMissing: true, secretName: "api" }],
+  secretsStore: [{ binding: "SS", storeName: "store", secretName: "api" }],
   runtimeBindings: [
     { binding: "AI", type: "ai" },
     { binding: "BROWSER", type: "browser-rendering" },

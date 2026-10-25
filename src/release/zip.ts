@@ -1,9 +1,11 @@
-import { unzipSync } from "fflate";
+import { Inflate } from "fflate";
 
-export interface ZipEntryInfo {
+interface ZipEntryInfo {
   name: string;
   compressedSize: number;
   uncompressedSize: number;
+  method: number;
+  localHeaderOffset: number;
   isDir: boolean;
   isSymlink: boolean;
 }
@@ -32,7 +34,12 @@ export interface ZipValidationResult {
 
 const EOCD_SIG = 0x06054b50;
 const CEN_SIG = 0x02014b50;
+const LOC_SIG = 0x04034b50;
 const CENTRAL_HEADER_SIZE = 46;
+const LOCAL_HEADER_SIZE = 30;
+// Compressed bytes fed to the inflater per call, so a stream that inflates past
+// its declared size is cut off after at most INFLATE_SLICE * ~1032 bytes.
+const INFLATE_SLICE = 16 * 1024;
 
 function readUInt32LE(bytes: Uint8Array, offset: number): number {
   return (
@@ -79,12 +86,14 @@ export function inspectZip(bytes: Uint8Array): ZipValidationResult {
       return { ok: false, error: "corrupt central directory" };
     }
     const flags = readUInt16LE(bytes, offset + 8);
+    const method = readUInt16LE(bytes, offset + 10);
     const compressedSize = readUInt32LE(bytes, offset + 20);
     const uncompressedSize = readUInt32LE(bytes, offset + 24);
     const nameLength = readUInt16LE(bytes, offset + 28);
     const extraLength = readUInt16LE(bytes, offset + 30);
     const commentLength = readUInt16LE(bytes, offset + 32);
     const externalAttrs = readUInt32LE(bytes, offset + 38);
+    const localHeaderOffset = readUInt32LE(bytes, offset + 42);
 
     const nameStart = offset + CENTRAL_HEADER_SIZE;
     let name: string;
@@ -106,7 +115,7 @@ export function inspectZip(bytes: Uint8Array): ZipValidationResult {
       return { ok: false, error: `encrypted ZIP entry "${name}" is not allowed` };
     }
 
-    info.push({ name, compressedSize, uncompressedSize, isDir, isSymlink });
+    info.push({ name, compressedSize, uncompressedSize, method, localHeaderOffset, isDir, isSymlink });
 
     offset += CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
   }
@@ -206,6 +215,49 @@ async function digestHex(data: Uint8Array): Promise<string> {
     .join("");
 }
 
+// Decode one entry to exactly the size its central directory declares. The
+// inflater stops as soon as the stream outgrows that size, so a header that
+// understates the content can neither be truncated silently nor make the
+// installer inflate a bomb.
+function inflateEntry(bytes: Uint8Array, entry: ZipEntryInfo): Uint8Array | string {
+  const mismatch = `file "${entry.name}" does not match its declared size`;
+  const local = entry.localHeaderOffset;
+  if (local + LOCAL_HEADER_SIZE > bytes.length || readUInt32LE(bytes, local) !== LOC_SIG) {
+    return `corrupt local header for "${entry.name}"`;
+  }
+  const start = local + LOCAL_HEADER_SIZE + readUInt16LE(bytes, local + 26) + readUInt16LE(bytes, local + 28);
+  const end = start + entry.compressedSize;
+  if (end > bytes.length) {
+    return `truncated data for "${entry.name}"`;
+  }
+  const data = bytes.subarray(start, end);
+  if (entry.method === 0) {
+    return entry.compressedSize === entry.uncompressedSize ? data.slice() : mismatch;
+  }
+  if (entry.method !== 8) {
+    return `unsupported compression method ${entry.method} for "${entry.name}"`;
+  }
+  const out = new Uint8Array(entry.uncompressedSize);
+  let written = 0;
+  let overflow = false;
+  const inflater = new Inflate((chunk) => {
+    if (overflow || written + chunk.length > out.length) {
+      overflow = true;
+      return;
+    }
+    out.set(chunk, written);
+    written += chunk.length;
+  });
+  try {
+    for (let at = 0; at < data.length && !overflow; at += INFLATE_SLICE) {
+      inflater.push(data.subarray(at, at + INFLATE_SLICE), at + INFLATE_SLICE >= data.length);
+    }
+  } catch {
+    return `corrupt compressed data for "${entry.name}"`;
+  }
+  return !overflow && written === out.length ? out : mismatch;
+}
+
 // Extract and validate the ZIP in one step, hashing each file with SHA-256.
 // Runs in both the browser and Node (crypto.subtle).
 export async function extractZipAsync(
@@ -221,12 +273,18 @@ export async function extractZipAsync(
     return { ok: false, error: validated.error };
   }
 
-  const entries = unzipSync(bytes);
   const files: ExtractedFile[] = [];
-  for (const [name, data] of Object.entries(entries)) {
-    const normalized = normalizePath(name);
-    if (!normalized || data === undefined) {
+  for (const entry of validated.info ?? []) {
+    if (entry.isDir) {
       continue;
+    }
+    const normalized = normalizePath(entry.name);
+    if (!normalized) {
+      continue;
+    }
+    const data = inflateEntry(bytes, entry);
+    if (typeof data === "string") {
+      return { ok: false, error: data };
     }
     const sha256 = await digestHex(data).catch(() => "");
     files.push({ path: normalized, bytes: data, size: data.length, sha256 });

@@ -8,23 +8,7 @@ import type { KvBindingSpec } from "../../core/deploy-spec.js";
 import type { KvNamespace } from "../models/index.js";
 import {
   ResourceConflictError,
-  type ResourceAdapter,
-  type ResourceSupport,
 } from "./types.js";
-
-export const KV_NAMESPACE_SUPPORT: ResourceSupport = {
-  kind: "kv-namespace",
-  label: "KV namespace",
-  install: "create-declared",
-  upgrade: "preserve",
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const kvNamespaceAdapter: ResourceAdapter = {
-  support: KV_NAMESPACE_SUPPORT,
-  mutation: "ensureKvNamespace",
-};
 
 export type NamespaceAction =
   | { binding: string; namespaceName: string; action: "preserve"; id: string }

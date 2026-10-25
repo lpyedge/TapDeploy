@@ -22,67 +22,18 @@ export interface VersionRef {
   message?: string;
 }
 
-// Marker presence in ANY version (generic installer-managed detection). This is
-// NOT sufficient to authorize an upgrade; ownership must be resolved against the
-// current deployment (see resolveActiveOwnership).
-export function isManagedWorker(versions: VersionRef[]): boolean {
-  return versions.some((v) => v.message?.includes(TAPDEPLOY_MANAGED_MARKER));
-}
-
 // the project owner stamped on a single version message, or undefined
 // when the version carries no installer ownership marker. The message is
 // `${projectId} v${version} ${TAPDEPLOY_MANAGED_MARKER}` (see steps.ts versionMessage);
 // the project id is the token before the first space. A bare marker yields
 // undefined.
-export function versionOwnerProjectId(version: VersionRef): string | undefined {
+function versionOwnerProjectId(version: VersionRef): string | undefined {
   const message = version.message;
   if (!message?.includes(TAPDEPLOY_MANAGED_MARKER)) {
     return undefined;
   }
   const firstSpace = message.indexOf(" ");
   return firstSpace > 0 ? message.slice(0, firstSpace) : undefined;
-}
-
-// the CURRENT (newest) version of a newest-first version list. The provider
-// returns versions newest-first, and each carries an ordering `number`; the
-// highest number wins (ties keep the first entry, i.e. provider order). Historical
-// versions never determine the current owner.
-export function currentVersion(versions: VersionRef[]): VersionRef | undefined {
-  let newest: VersionRef | undefined;
-  for (const v of versions) {
-    if (newest === undefined || (v.number ?? 0) > (newest.number ?? 0)) {
-      newest = v;
-    }
-  }
-  return newest;
-}
-
-// the project id stamped on the current version, or undefined.
-export function managedWorkerProjectId(versions: VersionRef[]): string | undefined {
-  const current = currentVersion(versions);
-  return current ? versionOwnerProjectId(current) : undefined;
-}
-
-// true when the CURRENT version of the target worker is managed by THIS
-// project (the marker is present on the current version AND, when a project id
-// is known, it matches). A marker on a HISTORICAL version is not evidence that
-// the current deployment belongs to this project, so it never authorizes an
-// upgrade. Callers that hold the active deployment should prefer
-// resolveActiveOwnership, which resolves against the actually-serving version(s).
-export function isManagedWorkerForProject(
-  versions: VersionRef[],
-  projectId: string | undefined,
-): boolean {
-  const current = currentVersion(versions);
-  if (!current || !current.message?.includes(TAPDEPLOY_MANAGED_MARKER)) {
-    return false;
-  }
-  // If we don't know the project we're deploying, fall back to the generic
-  // marker check (any installer-managed worker).
-  if (projectId === undefined) {
-    return true;
-  }
-  return versionOwnerProjectId(current) === projectId;
 }
 
 // the outcome of resolving upgrade ownership against the active deployment.
@@ -229,27 +180,6 @@ export function graphActionId(identity: GraphActionIdentity): string {
   return `tapdeploy-graph-action:${canonicalJson(identity)}`;
 }
 
-/**
- * Receipt state is intentionally separate from the graph-plan digest: own
- * writes advance this state, while the immutable plan digest remains stable.
- * A receipt binds exactly one account/plan/unit/action/state tuple and may
- * never be replayed as a receipt for another graph action.
- */
-export interface GraphStepStateMaterial {
-  accountId: string;
-  planDigest: string;
-  unitId: string;
-  actionId: string;
-  state: "in-progress" | "succeeded" | "failed";
-  resourceIdentities: Readonly<Record<string, string>>;
-}
-
-export async function computeGraphStepStateHash(
-  material: GraphStepStateMaterial,
-): Promise<string> {
-  return sha256Hex(canonicalJson({ kind: "tapdeploy-graph-step-state/v1", ...material }));
-}
-
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -264,9 +194,6 @@ export interface PlanDigestMaterial {
   spec: DeploySpec;
   accountId: string;
   workerName: string;
-  // Retained for caller compatibility only; excluded from the hash.
-  activeDeploymentId?: string;
-  diffSummary: { resource: string; action: string; name?: string }[];
   inputs: Record<string, string | number | boolean>;
 }
 
@@ -276,11 +203,10 @@ export async function computePlanDigest(
 ): Promise<string> {
   // Form inputs may carry secret values; hashing them here is one-way and the
   // digest is the only place they influence output, so nothing leaks.
-  // activeDeploymentId and diffSummary are accepted for backward
-  // compatibility but intentionally excluded from the hash. They describe live
-  // remote state that own writes legitimately advance (R2 create/preserve,
-  // secret create/preserve, deployment cutover); including them would turn the
-  // first own mutation into a plan_stale for every consecutive step.
+  // Live remote state (active deployment, diffs) is deliberately not hashed: own
+  // writes legitimately advance it (R2 create/preserve, secret create/preserve,
+  // deployment cutover), so hashing it would turn the first own mutation into a
+  // plan_stale for every consecutive step.
   const payload = canonicalJson({
     // Bind the entire immutable deployment intent, not only artifact bytes.
     // Otherwise a caller could add bindings/DNS or change runtime settings after
@@ -351,7 +277,7 @@ export function bundleProofMaterial(bundle: DeployBundle): {
 // live proof, and live proof can never be mistaken for a planned target.
 // ---------------------------------------------------------------------------
 
-export interface GraphPlanUnitAction {
+interface GraphPlanUnitAction {
   unitId: string;
   kind: string;
   identity: string;
@@ -387,7 +313,7 @@ export interface GraphPlanResourceIdentity {
   remoteId?: string;
 }
 
-export interface GraphPlanCostMaterial {
+interface GraphPlanCostMaterial {
   operations: { resource: string; action: string; name?: string }[];
   requiresConfirmation: boolean;
   blockedUnknownCost: boolean;

@@ -8,11 +8,3 @@ export interface AccountSummary {
   type?: string;
   settings?: Record<string, unknown>;
 }
-
-export interface AccountsEnvelope {
-  result: AccountSummary[];
-}
-
-export interface AccountEnvelope {
-  result: AccountSummary;
-}

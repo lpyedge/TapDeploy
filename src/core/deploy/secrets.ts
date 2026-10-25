@@ -17,9 +17,9 @@ import {
 import { stepFail, stepOk, toStepFailure, type DeployStepOutcome } from "./bindings.js";
 import type { DeployStepContext } from "./steps.js";
 
-export type SecretActionKind = "create" | "preserve" | "fail";
+type SecretActionKind = "create" | "preserve" | "fail";
 
-export type SecretActionReason =
+type SecretActionReason =
   | "install-create"
   | "exists-preserve"
   | "replace-value"
@@ -78,13 +78,13 @@ export function resolveSecretActions(
   return actions;
 }
 
-export interface InheritCheckInput {
+interface InheritCheckInput {
   deployedVersionId?: string;
   latestVersionId?: string;
   inheritedFromVersionId?: string;
 }
 
-export type InheritCheck =
+type InheritCheck =
   | { ok: true }
   | { ok: false; reason: "inherit-source-not-deployed"; detail: string };
 
@@ -116,7 +116,7 @@ function asValueMap(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-export interface ApplySecretsResult {
+interface ApplySecretsResult {
   secrets: { name: string; action: "create" | "preserve" }[];
 }
 

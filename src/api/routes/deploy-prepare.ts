@@ -3,16 +3,11 @@ import type { AppEnv, TapDeployEnv } from "../app.js";
 import { authenticate } from "../session-guard.js";
 import { loadKey } from "./auth.js";
 import { RELEASE_MAX_BYTES } from "../../core/upload-limits.js";
+import { readBoundedBody } from "../read-bounded-body.js";
 import { summarizePrebuiltRelease, verifyPrebuiltRelease } from "../../release/verify-prebuilt-release.js";
 import { sealVerifiedReleaseContext } from "../../core/planning/graph-execution-context.js";
 
-export async function readBoundedPrepareZip(body: ReadableStream<Uint8Array> | null): Promise<Uint8Array | null> {
-  if (!body) return null;
-  const reader = body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
-  try { for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > RELEASE_MAX_BYTES) { await reader.cancel(); return null; } chunks.push(value); } }
-  catch { return null; } finally { reader.releaseLock(); }
-  const out = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; } return out;
-}
+const BODY_READ_DEADLINE_MS = 60_000;
 
 export function attachDeployPrepareRoutes(app: Hono<AppEnv>, env: TapDeployEnv): void {
   app.post("/api/deploy/prepare", async (c) => {
@@ -21,8 +16,14 @@ export function attachDeployPrepareRoutes(app: Hono<AppEnv>, env: TapDeployEnv):
     if (c.req.header("content-type")?.split(";", 1)[0] !== "application/zip") return c.json({ error: "ZIP_CONTENT_TYPE_REQUIRED" }, 415);
     const declared = Number(c.req.header("content-length"));
     if (Number.isFinite(declared) && declared > RELEASE_MAX_BYTES) return c.json({ error: "SERVER_ZIP_VERIFY_LIMIT", limit: RELEASE_MAX_BYTES }, 413);
-    const bytes = await readBoundedPrepareZip(c.req.raw.body);
-    if (!bytes) return c.json({ error: "SERVER_ZIP_VERIFY_LIMIT", limit: RELEASE_MAX_BYTES }, 413);
+    const read = await readBoundedBody(c.req.raw.body, RELEASE_MAX_BYTES, BODY_READ_DEADLINE_MS);
+    if (!read.ok) {
+      if (read.reason === "too_large") return c.json({ error: "SERVER_ZIP_VERIFY_LIMIT", limit: RELEASE_MAX_BYTES }, 413);
+      return read.reason === "timeout"
+        ? c.json({ error: "request_timeout", detail: "the ZIP did not arrive in time" }, 408)
+        : c.json({ error: "invalid_body", detail: "request body could not be read" }, 400);
+    }
+    const bytes = read.bytes;
     const policy = auth.session.sourcePolicy;
     if (!policy || !Array.isArray(policy.units)) return c.json({ error: "SOURCE_POLICY_MISMATCH" }, 409);
     const verified = await verifyPrebuiltRelease(bytes, policy);

@@ -220,7 +220,7 @@ export function V3DeployPanel({
               {secretPromptNames.map((prompt) => {
                 const problem = secretProblem(prompt, secretValues[prompt.name] ?? "");
                 return (
-                  <label className="field" key={prompt.name}>
+                  <label className="field mt-3" key={prompt.name}>
                     {prompt.replacing ? `New ${prompt.label}` : prompt.label}
                     <input
                       type="password"

@@ -25,7 +25,7 @@ export interface TargetsEnvelope {
   pages: { name: string; id: string }[];
 }
 
-export interface StepEnvelope<T = unknown> {
+interface StepEnvelope<T = unknown> {
   resourceReceipt?: unknown;
   domainReceipt?: unknown;
   ok: boolean;
@@ -129,6 +129,11 @@ export function isAuthFailure(error: unknown): boolean {
 export async function getSession(): Promise<SessionState> {
   const json = (await request("/api/auth/session", undefined)) as SessionState;
   return json;
+}
+
+/** End the session: the server revokes the Cloudflare sign-in and clears the cookie. */
+export async function signOut(csrf: string): Promise<void> {
+  await request("/api/auth/logout", csrf, {});
 }
 
 export interface StartOAuthResult {
@@ -279,7 +284,7 @@ export async function prepareReleaseZip(
   return json as GraphPrepareEnvelope;
 }
 
-export interface GraphPlanUnitDiff {
+interface GraphPlanUnitDiff {
   resource: string;
   action: string;
   name?: string;

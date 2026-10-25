@@ -98,8 +98,9 @@ test.describe("dynamic installer UI", () => {
     await page.goto("/?auth=error&error=scope_denied&success=0");
     await expect(page.getByTestId("config-step")).toBeVisible();
 
-    // The notice is explicit about the authorization not completing.
-    await expect(page.locator(".notice")).toContainText(/authorization was not completed/i);
+    // The notice says what happened, that nothing changed, and what to do.
+    await expect(page.locator(".notice")).toContainText(/did not allow every permission/i);
+    await expect(page.locator(".notice")).toContainText(/nothing was changed/i);
     await expect(page.locator(".notice")).toContainText(/scope_denied/);
 
     // No token ever reaches browser storage, even on a failed auth.

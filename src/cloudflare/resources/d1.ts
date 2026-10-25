@@ -8,23 +8,7 @@ import type { D1BindingSpec } from "../../core/deploy-spec.js";
 import type { D1Database } from "../models/index.js";
 import {
   ResourceConflictError,
-  type ResourceAdapter,
-  type ResourceSupport,
 } from "./types.js";
-
-export const D1_DATABASE_SUPPORT: ResourceSupport = {
-  kind: "d1-database",
-  label: "D1 database",
-  install: "create-declared",
-  upgrade: "preserve",
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const d1DatabaseAdapter: ResourceAdapter = {
-  support: D1_DATABASE_SUPPORT,
-  mutation: "ensureD1Database",
-};
 
 export type DatabaseAction =
   | { binding: string; databaseName: string; action: "preserve"; id: string }

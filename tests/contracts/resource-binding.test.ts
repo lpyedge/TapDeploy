@@ -2,20 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 
 import {
-  RESOURCE_ADAPTERS,
-  RESOURCE_SUPPORT_MATRIX,
-  UnsupportedResourceError,
   bucketActionFor,
-  getResourceAdapter,
-  mapRateLimitMetadata,
-  resourceSupportFor,
   databaseActionFor,
   namespaceActionFor,
   queueActionFor,
-  hyperdriveActionFor,
   vectorizeActionFor,
-  secretsStoreActionFor,
-  validateSecretsStoreScope,
 } from "../../src/cloudflare/resources/index.js";
 import { ROUTES } from "../../src/cloudflare/client/routes.js";
 import {
@@ -28,13 +19,8 @@ import {
   planQueueActions,
   createQueues,
   registerQueueConsumers,
-  planHyperdriveConfigActions,
-  createHyperdriveConfigs,
   planVectorizeIndexActions,
   createVectorizeIndexes,
-  planSecretsStoreActions,
-  createSecretsStores,
-  ensureSecretsStoreSecrets,
   reconcileRateLimits,
 } from "../../src/core/deploy/bindings.js";
 import {
@@ -48,8 +34,6 @@ import {
   dnsCollisionReason,
 } from "../../src/cloudflare/resources/dns.js";
 import { workerRouteActionFor } from "../../src/cloudflare/resources/routes.js";
-import {
-} from "../../src/cloudflare/resources/domains.js";
 import type { DeploySpec, DomainEntrySpec } from "../../src/core/deploy-spec.js";
 import type { TargetSnapshot } from "../../src/core/planning/types.js";
 import type { DeployStepContext } from "../../src/core/deploy/steps.js";
@@ -118,27 +102,7 @@ function makeContext(overrides: Partial<DeployStepContext> = {}): DeployStepCont
   };
 }
 
-describe("resource adapters fail closed and never delete", () => {
-  it("rejects unknown resource kinds instead of falling back to a generic call", () => {
-    // queues, hyperdrive, vectorize and secrets-store are now
-    // supported adapters, so a genuinely unknown kind (a typo or an
-    // unimplemented capability) must still fail closed.
-    expect(() => getResourceAdapter("definitely-not-a-kind" as never)).toThrow(UnsupportedResourceError);
-    expect(() => resourceSupportFor("definitely-not-a-kind" as never)).toThrow(UnsupportedResourceError);
-    expect(RESOURCE_ADAPTERS["r2-bucket"]).toBeDefined();
-    expect(RESOURCE_ADAPTERS["d1-database"]).toBeDefined();
-    expect(RESOURCE_ADAPTERS["queue"]).toBeDefined();
-    expect(RESOURCE_ADAPTERS["hyperdrive"]).toBeDefined();
-    expect(RESOURCE_ADAPTERS["vectorize"]).toBeDefined();
-    expect(RESOURCE_ADAPTERS["secrets-store"]).toBeDefined();
-  });
-
-  it("supports no destructive capability without an approved executable removal flow", () => {
-    // The one executable removal: an operator-chosen custom domain of the same unit.
-    for (const row of RESOURCE_SUPPORT_MATRIX) {
-      expect(row.deletes, row.kind).toBe(row.kind === "worker-custom-domain" || row.kind === "pages-custom-domain" ? "explicit" : "never");
-    }
-  });
+describe("the Cloudflare route table never deletes a stored resource", () => {
 
   it("has no R2 object content route and no DELETE route except the declared domain/route/DNS removes", () => {
     // DELETE is only allowed on the zone-scoped DNS record / route / custom
@@ -292,7 +256,7 @@ describe("D1 + KV resource actions", () => {
   });
 });
 
-describe("Queue + Hyperdrive resource actions", () => {
+describe("Queue resource actions", () => {
   it("preserves an existing Queue by identity", () => {
     const action = queueActionFor(
       { binding: "Q", queueName: "my-queue", createIfMissing: true },
@@ -317,55 +281,19 @@ describe("Queue + Hyperdrive resource actions", () => {
     expect(action.action).toBe("conflict");
   });
 
-  it("preserves an existing Hyperdrive config by identity", () => {
-    const action = hyperdriveActionFor(
-      { binding: "HD", configName: "my-hd", createIfMissing: true },
-      [{ name: "my-hd", id: "hd-id-1" }],
-    );
-    expect(action).toEqual({ binding: "HD", configName: "my-hd", action: "preserve", id: "hd-id-1" });
-  });
-
-  it("creates a Hyperdrive config only when missing and createIfMissing is set", () => {
-    const action = hyperdriveActionFor(
-      { binding: "HD", configName: "my-hd", createIfMissing: true },
-      [],
-    );
-    expect(action).toEqual({ binding: "HD", configName: "my-hd", action: "create" });
-  });
-
-  it("fails closed when a Hyperdrive config is missing and createIfMissing is false", () => {
-    const action = hyperdriveActionFor(
-      { binding: "HD", configName: "my-hd", createIfMissing: false },
-      [],
-    );
-    expect(action.action).toBe("conflict");
-  });
-
   it("Queue step no-ops when no binding is declared", async () => {
     const ctx = makeContext();
     const outcome = await createQueues(ctx, {});
     expect(outcome).toEqual({ ok: true, result: { skipped: true, queues: [] } });
   });
 
-  it("Hyperdrive step no-ops when no binding is declared", async () => {
-    const ctx = makeContext();
-    const outcome = await createHyperdriveConfigs(ctx, {});
-    expect(outcome).toEqual({ ok: true, result: { skipped: true, configs: [] } });
-  });
-
-  it("plans declared Queue + Hyperdrive bindings against their live lists", () => {
+  it("plans declared Queue bindings against their live list", () => {
     const ctx = makeContext();
     ctx.spec.cloudflare.queues = [
       { binding: "Q", queueName: "my-queue", createIfMissing: true, role: "producer" },
     ];
-    ctx.spec.cloudflare.hyperdrive = [
-      { binding: "HD", configName: "my-hd", createIfMissing: true },
-    ];
     expect(planQueueActions(ctx.spec, ctx.snapshot)).toMatchObject([
       { binding: "Q", queueName: "my-queue", action: "create" },
-    ]);
-    expect(planHyperdriveConfigActions(ctx.spec, ctx.snapshot)).toMatchObject([
-      { binding: "HD", configName: "my-hd", action: "create" },
     ]);
   });
 
@@ -473,35 +401,9 @@ describe("Queue + Hyperdrive resource actions", () => {
     }
     expect(ctx.client.createQueue).toHaveBeenCalledWith({ queue_name: "new-queue" });
   });
-
-  it("creates missing Hyperdrive configs via the provider and preserves existing ones", async () => {
-    const ctx = makeContext();
-    const origin = { database: "app", host: "db.example.com", user: "app", password: "synthetic-password", port: 5432, scheme: "postgresql" as const };
-    ctx.spec.cloudflare.hyperdrive = [
-      { binding: "NEW", configName: "new-hd", createIfMissing: true, origin },
-      { binding: "OLD", configName: "my-hd", createIfMissing: true },
-    ];
-    ctx.snapshot.hyperdriveConfigs = [{ name: "my-hd", id: "hd-id-1" }];
-    ctx.client.createHyperdriveConfig = vi.fn().mockResolvedValue({
-      id: "new-hd-id",
-      name: "new-hd",
-      origin,
-    });
-    const outcome = await createHyperdriveConfigs(ctx, {});
-    expect(outcome.ok).toBe(true);
-    if (outcome.ok) {
-      const result = outcome.result as { configs: unknown[] };
-      expect(result.configs).toEqual([
-        { binding: "NEW", configName: "new-hd", action: "create", id: "new-hd-id" },
-        { binding: "OLD", configName: "my-hd", action: "preserve", id: "hd-id-1" },
-      ]);
-    }
-    expect(ctx.client.createHyperdriveConfig).toHaveBeenCalled();
-    expect(JSON.stringify(outcome)).not.toContain("synthetic-password");
-  });
 });
 
-describe("Vectorize + Secrets Store resource actions", () => {
+describe("Vectorize resource actions", () => {
   it("preserves an existing Vectorize index by identity", () => {
     const action = vectorizeActionFor(
       { binding: "VZ", indexName: "my-index", createIfMissing: true },
@@ -526,55 +428,19 @@ describe("Vectorize + Secrets Store resource actions", () => {
     expect(action.action).toBe("conflict");
   });
 
-  it("preserves an existing Secrets Store store by identity", () => {
-    const action = secretsStoreActionFor(
-      { binding: "SS", storeName: "my-store", createIfMissing: true },
-      [{ name: "my-store", id: "store-id-1" }],
-    );
-    expect(action).toEqual({ binding: "SS", storeName: "my-store", action: "preserve", id: "store-id-1" });
-  });
-
-  it("creates a Secrets Store store only when missing and createIfMissing is set", () => {
-    const action = secretsStoreActionFor(
-      { binding: "SS", storeName: "my-store", createIfMissing: true },
-      [],
-    );
-    expect(action).toEqual({ binding: "SS", storeName: "my-store", action: "create" });
-  });
-
-  it("fails closed when a Secrets Store store is missing and createIfMissing is false", () => {
-    const action = secretsStoreActionFor(
-      { binding: "SS", storeName: "my-store", createIfMissing: false },
-      [],
-    );
-    expect(action.action).toBe("conflict");
-  });
-
   it("Vectorize step no-ops when no binding is declared", async () => {
     const ctx = makeContext();
     const outcome = await createVectorizeIndexes(ctx, {});
     expect(outcome).toEqual({ ok: true, result: { skipped: true, indexes: [] } });
   });
 
-  it("Secrets Store step no-ops when no binding is declared", async () => {
-    const ctx = makeContext();
-    const outcome = await createSecretsStores(ctx, {});
-    expect(outcome).toEqual({ ok: true, result: { skipped: true, stores: [] } });
-  });
-
-  it("plans declared Vectorize + Secrets Store bindings against their live lists", () => {
+  it("plans declared Vectorize bindings against their live list", () => {
     const ctx = makeContext();
     ctx.spec.cloudflare.vectorize = [
       { binding: "VZ", indexName: "my-index", createIfMissing: true },
     ];
-    ctx.spec.cloudflare.secretsStore = [
-      { binding: "SS", storeName: "my-store", createIfMissing: true },
-    ];
     expect(planVectorizeIndexActions(ctx.spec, ctx.snapshot)).toMatchObject([
       { binding: "VZ", indexName: "my-index", action: "create" },
-    ]);
-    expect(planSecretsStoreActions(ctx.spec, ctx.snapshot)).toMatchObject([
-      { binding: "SS", storeName: "my-store", action: "create" },
     ]);
   });
 
@@ -613,119 +479,9 @@ describe("Vectorize + Secrets Store resource actions", () => {
     expect(outcome.ok).toBe(false);
     expect(ctx.client.createVectorizeIndex).not.toHaveBeenCalled();
   });
-
-  it("creates missing Secrets Store stores via the provider and preserves existing ones", async () => {
-    const ctx = makeContext();
-    ctx.spec.cloudflare.secretsStore = [
-      { binding: "NEW", storeName: "new-store", createIfMissing: true },
-      { binding: "OLD", storeName: "my-store", createIfMissing: true },
-    ];
-    ctx.snapshot.secretsStores = [{ name: "my-store", id: "store-id-1" }];
-    ctx.client.createSecretsStore = vi.fn().mockResolvedValue({
-      id: "new-store-id",
-      name: "new-store",
-    });
-    const outcome = await createSecretsStores(ctx, {});
-    expect(outcome.ok).toBe(true);
-    if (outcome.ok) {
-      const result = outcome.result as { stores: unknown[] };
-      expect(result.stores).toEqual([
-        { binding: "NEW", storeName: "new-store", action: "create", id: "new-store-id" },
-        { binding: "OLD", storeName: "my-store", action: "preserve", id: "store-id-1" },
-      ]);
-    }
-    expect(ctx.client.createSecretsStore).toHaveBeenCalledWith({ name: "new-store" });
-  });
-
-  it("ensures a Secret inside a store only when missing and never forwards the value on preserve", async () => {
-    const ctx = makeContext();
-    ctx.spec.cloudflare.secretsStore = [
-      {
-        binding: "SS",
-        storeName: "my-store",
-        createIfMissing: true,
-        secretName: "api-token",
-        secretCreateIfMissing: true,
-        secretScopes: ["workers"],
-        secretValue: "s3cr3t",
-      },
-    ];
-    ctx.snapshot.secretsStores = [{ name: "my-store", id: "store-id-1" }];
-    ctx.snapshot.secretsStoreSecrets = [
-      { secretName: "api-token", id: "secret-id-1", store_id: "store-id-1" },
-    ];
-    const outcome = await ensureSecretsStoreSecrets(ctx, {});
-    expect(outcome.ok).toBe(true);
-    if (outcome.ok) {
-      const result = outcome.result as { secrets: unknown[] };
-      expect(result.secrets).toEqual([
-        { binding: "SS", secretName: "api-token", action: "preserve", id: "secret-id-1" },
-      ]);
-    }
-    // An existing secret is preserved; the provider create is never called and
-    // the write-only value is never forwarded.
-    expect(ctx.client.createSecretsStoreSecret).toBeUndefined();
-  });
-
-  it("creates a Secret inside a store when missing via the provider", async () => {
-    const ctx = makeContext();
-    ctx.spec.cloudflare.secretsStore = [
-      {
-        binding: "SS",
-        storeName: "my-store",
-        createIfMissing: true,
-        secretName: "new-secret",
-        secretCreateIfMissing: true,
-        secretScopes: ["workers"],
-        secretValue: "s3cr3t",
-      },
-    ];
-    ctx.snapshot.secretsStores = [{ name: "my-store", id: "store-id-1" }];
-    ctx.snapshot.secretsStoreSecrets = [];
-    ctx.client.createSecretsStoreSecret = vi.fn().mockResolvedValue({
-      id: "new-secret-id",
-      name: "new-secret",
-      store_id: "store-id-1",
-    });
-    const outcome = await ensureSecretsStoreSecrets(ctx, {});
-    expect(outcome.ok).toBe(true);
-    if (outcome.ok) {
-      const result = outcome.result as { secrets: unknown[] };
-      expect(result.secrets).toEqual([
-        { binding: "SS", secretName: "new-secret", action: "create", id: "new-secret-id" },
-      ]);
-    }
-    expect(ctx.client.createSecretsStoreSecret).toHaveBeenCalledWith(
-      "store-id-1",
-      { name: "new-secret", scopes: ["workers"], value: "s3cr3t" },
-    );
-  });
-
-  it("validates Secrets Store secret scopes against the provider enum", () => {
-    expect(validateSecretsStoreScope("workers")).toBe(true);
-    expect(validateSecretsStoreScope("ai_gateway")).toBe(true);
-    expect(validateSecretsStoreScope("dex")).toBe(true);
-    expect(validateSecretsStoreScope("bogus")).toBe(false);
-  });
 });
 
 describe("rate-limit metadata from settings bindings", () => {
-  it("normalizes ratelimit settings bindings to name-identity entries", () => {
-    expect(
-      mapRateLimitMetadata({
-        bindings: [
-          { name: "RL", type: "ratelimit" },
-          { type: "r2_bucket", name: "FILES", bucket_name: "b" },
-        ],
-      }),
-    ).toEqual([{ name: "RL" }]);
-  });
-
-  it("fails closed on malformed settings", () => {
-    expect(() => mapRateLimitMetadata(null)).toThrow();
-    expect(() => mapRateLimitMetadata({ bindings: "nope" })).toThrow();
-    expect(() => mapRateLimitMetadata({ bindings: [{ type: "ratelimit", name: "" }] })).toThrow();
-  });
 
   it("preserves existing rate limits from the documented settings route without writing", async () => {
     const ctx = makeContext();

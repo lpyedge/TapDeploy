@@ -18,25 +18,7 @@ import type {
 import type { DomainEntrySpec } from "../../core/deploy-spec.js";
 import {
   ResourceConflictError,
-  type ResourceAdapter,
-  type ResourceSupport,
 } from "./types.js";
-
-export const DNS_RECORD_SUPPORT: ResourceSupport = {
-  kind: "dns-record",
-  label: "DNS record",
-  install: "create-declared",
-  upgrade: "preserve",
-  // DNS is never auto-deleted on an ordinary Worker upgrade; a delete is only
-  // offered in the operator's own domain-management flow after consent.
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const dnsRecordAdapter: ResourceAdapter = {
-  support: DNS_RECORD_SUPPORT,
-  mutation: "ensureDnsRecord",
-};
 
 // A record that already exists at the same name+type is preserved; a name that
 // collides with an incompatible record type blocks (fail closed); otherwise the

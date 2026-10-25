@@ -71,44 +71,6 @@ export interface GraphDeployResult {
   publishNote?: string;
 }
 
-// the single authoritative operation gate lives in
-// ../core/planning/graph-operation-support.js. The browser imports the same
-// catalog the server plan preflight uses; there is no browser-only fallback
-// table. Unmapped actions throw with UNSUPPORTED_GRAPH_OPERATION before any
-// dispatch, so a partial graph can never be reported complete.
-
-/**
- * Map one approved diff to its exact step phase. Addressing only — the route
- * re-verifies unit/action/phase against the sealed approval before any read.
- * Throws when the approved action cannot be addressed: the caller must surface
- * the error and stop, never skip-and-report-success.
- */
-export function graphPhaseForDiff(
-  unitKind: string,
-  resource: string,
-  action: string,
-): string {
-  const resolution = resolveGraphOperation({
-    unitId: "browser-addressing",
-    unitKind,
-    resource,
-    action,
-  });
-  if (!resolution.supported) {
-    throw new Error(`${resolution.detail}; refusing partial deploy`);
-  }
-  const phase = resolution.phases[0];
-  // This owns multi-phase execution (worker static-assets register + complete
-  // pair); until it lands the catalog refuses that diff, so reaching this
-  // branch with zero phases is itself a refusal.
-  if (!phase) {
-    throw new Error(
-      `approved action "${resource}:${action}" has no graph step mapping; refusing partial deploy`,
-    );
-  }
-  return phase;
-}
-
 /** Expand the server-derived plan into addressable actions. Throws (fail-closed) on anything unaddressable. */
 export function graphActionsForPlan(plan: GraphPlan): GraphDeployAction[] {
   const out: GraphDeployAction[] = [];

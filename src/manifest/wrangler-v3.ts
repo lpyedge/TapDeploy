@@ -71,7 +71,6 @@ import {
 // ---------------------------------------------------------------------------
 
 export * from "./wrangler-v3-schema.js";
-export { resolveZipRelativePath };
 
 export function normalizeWranglerV3(
   source: string,

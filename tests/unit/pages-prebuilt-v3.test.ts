@@ -17,13 +17,9 @@
 
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { zipSync } from "fflate";
 
 import { normalizeWranglerV3 } from "../../src/manifest/wrangler-v3.js";
-import { extractPrebuiltZip } from "../../src/release/prebuilt-zip.js";
-import { buildDeployBundle } from "../../src/release/deploy-bundle.js";
 import {
-  buildPagesManifest,
   pagesAssetHash,
   pagesControlFileAtRoot,
   toPagesAssetPath,
@@ -145,21 +141,6 @@ function snapshot(): TargetSnapshot {
   } as TargetSnapshot;
 }
 
-function pagesZip(extra: Record<string, string> = {}): Uint8Array {
-  const files: Record<string, Uint8Array> = {
-    "wrangler.jsonc": enc.encode(PAGES_WRANGLER),
-    "dist/index.html": enc.encode("<html>site</html>"),
-    "dist/assets/app.js": enc.encode("console.log('app');"),
-    // A NESTED `_redirects` is a normal static file; only the output root name
-    // is reserved.
-    "dist/blog/_redirects": enc.encode("/old /new 301"),
-  };
-  for (const [name, content] of Object.entries(extra)) {
-    files[name] = enc.encode(content);
-  }
-  return zipSync(files, { level: 6 });
-}
-
 describe("V3 Pages config projection", () => {
   it("accepts a Pages config without any main module via pages_build_output_dir", () => {
     const result = normalizeWranglerV3(PAGES_WRANGLER);
@@ -198,52 +179,6 @@ describe("V3 Pages config projection", () => {
       "PATH_ESCAPES_UNIT",
       "pages_build_output_dir",
     ]);
-  });
-});
-
-describe("prebuilt Pages ZIP becomes an assets-only identity", () => {
-  it("builds the pages bundle from the verified ZIP and roots the manifest at the output dir", async () => {
-    const extracted = await extractPrebuiltZip(pagesZip());
-    expect(extracted.ok).toBe(true);
-    const built = await buildDeployBundle(extracted);
-    expect(built.ok).toBe(true);
-    const bundle = built.bundle!;
-    expect(bundle.targetKind).toBe("pages");
-    expect(bundle.mainModule).toBeUndefined();
-    expect(bundle.modules).toEqual([]);
-    expect(bundle.assetsDirectory).toBe("dist");
-    expect(bundle.assets.map((asset) => asset.path)).toEqual([
-      "dist/assets/app.js",
-      "dist/blog/_redirects",
-      "dist/index.html",
-    ]);
-
-    const byPath = new Map(extracted.files!.map((file) => [file.path, file]));
-    const refs = ["dist/assets/app.js", "dist/blog/_redirects", "dist/index.html"].map(
-      (path) => byPath.get(path)!,
-    );
-    const manifest = buildPagesManifest(refs, bundle.assetsDirectory);
-    expect(manifest).toEqual({
-      "/assets/app.js": pagesAssetHash("dist/assets/app.js", byPath.get("dist/assets/app.js")!.bytes),
-      "/blog/_redirects": pagesAssetHash("dist/blog/_redirects", byPath.get("dist/blog/_redirects")!.bytes),
-      "/index.html": pagesAssetHash("dist/index.html", byPath.get("dist/index.html")!.bytes),
-    });
-  });
-
-  it("refuses a control file at the output root instead of hashing it as a static asset", async () => {
-    const extracted = await extractPrebuiltZip(pagesZip({ "dist/_worker.js": "export default {};" }));
-    const built = await buildDeployBundle(extracted);
-    // The bundle classifies files under the output dir as assets; the 
-    // manifest layer then refuses the reserved root-level control name.
-    expect(built.ok).toBe(true);
-    const file = built.bundle!.assets.find((asset) => asset.path === "dist/_worker.js")!;
-    expect(file).toBeDefined();
-    expect(() =>
-      buildPagesManifest(
-        [{ path: file.path, size: file.size, sha256: file.sha256, bytes: enc.encode("export default {};") }],
-        built.bundle!.assetsDirectory,
-      ),
-    ).toThrow(/control file/);
   });
 });
 
@@ -541,9 +476,9 @@ describe("unsupported Pages resource families fail prewrite", () => {
     const families: Array<Partial<DeploySpec["cloudflare"]>> = [
       { cron: ["*/5 * * * *"] },
       { queues: [{ binding: "Q", queueName: "q", createIfMissing: false }] },
-      { hyperdrive: [{ binding: "H", configName: "h", createIfMissing: false }] },
+      { hyperdrive: [{ binding: "H", configName: "h" }] },
       { vectorize: [{ binding: "V", indexName: "idx", createIfMissing: false }] },
-      { secretsStore: [{ binding: "S", storeName: "s", createIfMissing: false }] },
+      { secretsStore: [{ binding: "S", storeName: "s" }] },
       { runtimeBindings: [{ type: "ai", binding: "AI" }] },
     ];
     for (const override of families) {

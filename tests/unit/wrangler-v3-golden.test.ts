@@ -6,7 +6,8 @@
 // it. A deliberate parser change must update the digest in the same commit.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { normalizeWranglerV3, resolveZipRelativePath, WRANGLER_V3_FIELD_MATRIX } from "../../src/manifest/wrangler-v3.js";
+import { normalizeWranglerV3, WRANGLER_V3_FIELD_MATRIX } from "../../src/manifest/wrangler-v3.js";
+import { resolveZipRelativePath } from "../../src/manifest/wrangler-v3-keys.js";
 
 const workerBase = { name: "w", main: "src/index.js", compatibility_date: "2026-10-17" };
 const pagesBase = { name: "p", pages_build_output_dir: "dist", compatibility_date: "2026-10-17" };

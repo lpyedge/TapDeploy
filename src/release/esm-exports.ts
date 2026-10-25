@@ -10,14 +10,14 @@
 // relative re-export, an unterminated construct or a non-UTF8 module makes the
 // scan inconclusive — and inconclusive is a refusal, never a silent pass.
 
-export interface NamedReexport {
+interface NamedReexport {
   /** Identifier names claimed from the target module. */
   names: string[];
   /** The exact `from "..."` specifier. */
   specifier: string;
 }
 
-export interface EsmModuleExports {
+interface EsmModuleExports {
   /** Named exports declared by this module itself (direct or `export * as ns`). */
   names: string[];
   /** Relative specifiers re-exported wholesale (`export * from "..."`). */

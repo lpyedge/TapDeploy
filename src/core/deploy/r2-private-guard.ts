@@ -35,12 +35,12 @@ export interface R2BucketPrivacyView {
   jurisdiction?: string;
 }
 
-export interface R2ManagedDomainView {
+interface R2ManagedDomainView {
   domain: string;
   enabled: boolean;
 }
 
-export interface R2CustomDomainView {
+interface R2CustomDomainView {
   domain: string;
   enabled: boolean;
 }
@@ -66,9 +66,9 @@ export interface R2PrivacyFacts {
 // Decision + proof
 // ---------------------------------------------------------------------------
 
-export type R2PrivacyState = "PRIVATE_VERIFIED" | "PUBLIC_EXPOSED" | "UNKNOWN";
+type R2PrivacyState = "PRIVATE_VERIFIED" | "PUBLIC_EXPOSED" | "UNKNOWN";
 
-export type R2PrivacyReasonCode =
+type R2PrivacyReasonCode =
   | "bucket-not-found"
   | "read-failed"
   | "identity-mismatch"
@@ -76,7 +76,7 @@ export type R2PrivacyReasonCode =
   | "managed-domain-enabled"
   | "custom-domains-present";
 
-export interface R2PrivacyReason {
+interface R2PrivacyReason {
   code: R2PrivacyReasonCode;
   detail: string;
 }
@@ -95,13 +95,13 @@ export interface R2PrivacyProof {
   readonly readAtMs: number;
 }
 
-export interface R2PrivacyPrivateDecision {
+interface R2PrivacyPrivateDecision {
   state: "PRIVATE_VERIFIED";
   reasons: readonly R2PrivacyReason[];
   proof: R2PrivacyProof;
 }
 
-export interface R2PrivacyRefusedDecision {
+interface R2PrivacyRefusedDecision {
   state: "PUBLIC_EXPOSED" | "UNKNOWN";
   reasons: readonly R2PrivacyReason[];
 }

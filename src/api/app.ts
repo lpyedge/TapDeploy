@@ -6,7 +6,6 @@ import { attachDeployStepRoutes } from "./routes/deploy-step.js";
 import { attachAssetUploadRoutes } from "./routes/asset-upload.js";
 import { attachReleaseDownloadRoutes } from "./routes/release-download.js";
 import { attachDeployPrepareRoutes } from "./routes/deploy-prepare.js";
-import { RESOURCE_SUPPORT_MATRIX } from "../cloudflare/resources/index.js";
 import { boundedApiBody } from "./body-limit.js";
 
 export interface AppEnv {
@@ -22,11 +21,6 @@ export interface TapDeployEnv {
 
 // The config schema version this server accepts (tapdeploy.config.json V3).
 export const SUPPORTED_SCHEMA_VERSION = 3;
-
-// Authoritative resource-kind vocabulary, derived from the resource support
-// matrix (single source of truth). Distinct from `ResourceKind` only in that
-// every row carries the installer's support policy.
-const SUPPORTED_RESOURCE_KINDS = RESOURCE_SUPPORT_MATRIX.map((r) => r.kind);
 
 export function createApp(env: TapDeployEnv): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -47,20 +41,6 @@ export function createApp(env: TapDeployEnv): Hono<AppEnv> {
       ok: true,
       runtime: env.RUNTIME,
       schemaVersion: SUPPORTED_SCHEMA_VERSION,
-    });
-  });
-
-  app.get("/api/capabilities", (c) => {
-    return c.json({
-      schemaVersion: SUPPORTED_SCHEMA_VERSION,
-      resourceKinds: SUPPORTED_RESOURCE_KINDS,
-      runtime: env.RUNTIME,
-      bindings: {
-        staticAssets: true,
-        r2: true,
-        secrets: true,
-        rateLimit: false,
-      },
     });
   });
 

@@ -11,8 +11,6 @@ import type { CloudflareApiClient } from "../client/index.js";
 import type { WorkerSettings } from "../models/index.js";
 import {
   ResourceConflictError,
-  type ResourceAdapter,
-  type ResourceSupport,
 } from "./types.js";
 
 function isTolerableAbsent(error: unknown): boolean {
@@ -24,20 +22,6 @@ function isTolerableAbsent(error: unknown): boolean {
   );
 }
 
-export const RATE_LIMIT_SUPPORT: ResourceSupport = {
-  kind: "rate-limit",
-  label: "Rate-limit binding",
-  install: "preserve",
-  upgrade: "preserve",
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const rateLimitAdapter: ResourceAdapter = {
-  support: RATE_LIMIT_SUPPORT,
-  mutation: "reconcileRateLimits",
-};
-
 // A preserved rate-limit binding is identified by its binding name (identity
 // only — settings bindings carry name + type, not period/limit metadata).
 export interface NormalizedRateLimit {
@@ -48,7 +32,7 @@ export interface NormalizedRateLimit {
 // normalized, identity-only view. Ratelimit bindings appear as
 // { type: "ratelimit", name: "<binding>" }. Malformed entries fail closed
 // rather than being silently coerced.
-export function mapRateLimitMetadata(settings: unknown): NormalizedRateLimit[] {
+function mapRateLimitMetadata(settings: unknown): NormalizedRateLimit[] {
   if (typeof settings !== "object" || settings === null) {
     throw new ResourceConflictError("Rate-limit settings are not an object");
   }
@@ -113,7 +97,7 @@ export interface DeclaredRateLimit {
   period: number;
 }
 
-export interface RateLimitMetadataBinding {
+interface RateLimitMetadataBinding {
   name: string;
   type: "ratelimit";
   namespace_id: string;

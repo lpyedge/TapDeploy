@@ -10,6 +10,7 @@ import {
   checkConfigCoverage,
   getAccounts,
   getSession,
+  signOut,
   startOAuth,
   type AccountSummary,
   type SessionState,
@@ -128,12 +129,7 @@ export function App() {
     if (auth === "error") {
       // A denied/failed grant must not loop back into an automatic sign-in.
       clearStoredConfig();
-      const code = errorLabel(params.get("error"));
-      setNotice(code === "invalid_scope"
-        ? "This installer's Cloudflare OAuth client does not include a permission this app needs (invalid_scope). The instance operator must add it to the client."
-        : code === "token_expired"
-          ? "Cloudflare authorization was not completed (token_expired): the sign-in it issued was already about to expire. Try again."
-          : `Cloudflare authorization was not completed (${code}).`);
+      setNotice(authErrorNotice(params.get("error")));
     }
     if (auth !== null || params.has("config")) window.history.replaceState({}, "", window.location.pathname);
     justAuthorized.current = auth === "success";
@@ -158,6 +154,19 @@ export function App() {
   // A session that ends mid-flow (expired cookie, revoked grant) goes straight
   // back to Cloudflare for the same config; nothing is written without a new
   // plan and confirmation.
+  // The server revokes the Cloudflare token and clears the session cookie; the
+  // page forgets everything it held about the session.
+  const handleSignOut = () => {
+    const csrf = session?.csrf;
+    if (csrf) void signOut(csrf).catch(() => {});
+    clearStoredConfig();
+    setSession(null);
+    setConfig(null);
+    setAccounts([]);
+    setAccountId("");
+    setNotice("Signed out. The installer asked Cloudflare to revoke this sign-in.");
+  };
+
   const reauthorize = () => {
     if (!config) return;
     setSession(null);
@@ -184,6 +193,7 @@ export function App() {
           appId={config.appId}
           sourceLabel={config.sourceLabel}
           onExit={() => { setConfig(null); clearStoredConfig(); }}
+          onSignOut={handleSignOut}
           onExpired={reauthorize}
           onReauthorize={reauthorize}
           onStage={(stage) => setUiStage(stage === "done" ? "deploy" : stage)}
@@ -204,16 +214,21 @@ export function App() {
   );
 }
 
-function errorLabel(code: string | null): string {
-  const known = new Set([
-    "access_denied",
-    "invalid_scope",
-    "unauthorized_client",
-    "server_error",
-    "temporarily_unavailable",
-    "exchange",
-    "scope_denied",
-    "token_expired",
-  ]);
-  return code && known.has(code) ? code : "provider_error";
+const AUTH_ERROR_NOTICE: Record<string, string> = {
+  access_denied: "You declined the Cloudflare sign-in, so nothing was created. Load the config and sign in again when you are ready.",
+  scope_denied: "You did not allow every permission this app needs, so no session was created and nothing was changed. Sign in again and allow all of them.",
+  invalid_scope: "This installer's Cloudflare OAuth client does not include a permission this app needs. The instance operator must add it to the client.",
+  token_expired: "The sign-in Cloudflare issued was already about to expire. Try again.",
+  missing_tx: "This sign-in could not be matched to this browser (it was started in another tab or browser, or its cookie was lost). Start it again from this page.",
+  bad_tx: "This sign-in could not be matched to this browser (it was started in another tab or browser, or its cookie was lost). Start it again from this page.",
+  bad_state: "This sign-in could not be matched to this browser (it was started in another tab or browser, or its cookie was lost). Start it again from this page.",
+  expired_tx: "This sign-in took too long and expired. Start it again from this page.",
+  exchange: "Cloudflare did not accept the sign-in code. Try again; if it keeps failing, the instance operator should check the OAuth client's redirect URL and secret.",
+};
+
+function authErrorNotice(code: string | null): string {
+  const known = code !== null && Object.hasOwn(AUTH_ERROR_NOTICE, code) ? code : null;
+  if (known) return `${AUTH_ERROR_NOTICE[known]} (${known})`;
+  const label = code && ["unauthorized_client", "server_error", "temporarily_unavailable"].includes(code) ? code : "provider_error";
+  return `Cloudflare could not complete the sign-in (${label}). Try again in a moment.`;
 }

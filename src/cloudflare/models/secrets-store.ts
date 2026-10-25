@@ -17,23 +17,10 @@ export interface SecretsStore {
   modified?: string;
 }
 
-export interface SecretsStoreCreateRequest {
-  name: string;
-}
-
-export type SecretsStoreSecretScope = "workers" | "ai_gateway" | "dex" | "cloudflare_workers_ai";
-
 export interface SecretsStoreSecret {
   id: string;
   name: string;
   store_id: string;
   created?: string;
   modified?: string;
-}
-
-export interface SecretsStoreSecretCreateRequest {
-  name: string;
-  scopes: SecretsStoreSecretScope[];
-  value: string;
-  comment?: string;
 }

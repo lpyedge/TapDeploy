@@ -11,10 +11,4 @@ describe("wrangler-binding-plan boundary", () => {
     expect(specifiers.filter((specifier) => /^\.\/(bindings|steps|secrets|pages|domains)\.js$/.test(specifier))).toEqual([]);
     expect(specifiers.filter((specifier) => /cloudflare\/client/.test(specifier))).toEqual([]);
   });
-
-  it("uses only the pure planned*ActionFor helpers from the resources index", () => {
-    const importBlock = /import \{([^}]*)\} from "\.\.\/\.\.\/cloudflare\/resources\/index\.js";/.exec(source);
-    const names = importBlock![1]!.split(",").map((name) => name.trim()).filter(Boolean);
-    expect(names.every((name) => /^planned[A-Za-z]+ActionFor$/.test(name)), names.join(",")).toBe(true);
-  });
 });

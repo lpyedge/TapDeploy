@@ -28,7 +28,7 @@ import {
 import type { DeploymentGraph } from "./planning/deploy-graph.js";
 import type { UnitResourceKind } from "./planning/deployment-units.js";
 
-export type EnvelopeErrorCode =
+type EnvelopeErrorCode =
   | "config_required"
   | "invalid_config"
   | "config_mismatch";
@@ -171,7 +171,7 @@ export function resolvedCapabilitiesForGraph(
   return [...caps].sort();
 }
 
-export type GraphIntentErrorCode =
+type GraphIntentErrorCode =
   | typeof DEVELOPER_SCOPE_UNDERDECLARED
   | "UNKNOWN_CAPABILITY";
 

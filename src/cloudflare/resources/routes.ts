@@ -12,23 +12,6 @@
 import type { CloudflareApiClient } from "../client/index.js";
 import type { WorkerRoute } from "../models/index.js";
 import type { DomainEntrySpec } from "../../core/deploy-spec.js";
-import { type ResourceAdapter, type ResourceSupport } from "./types.js";
-
-export const WORKER_ROUTE_SUPPORT: ResourceSupport = {
-  kind: "worker-route",
-  label: "Workers route",
-  install: "create-declared",
-  upgrade: "preserve",
-  // A route is never auto-removed on an ordinary Worker upgrade; a delete is
-  // only offered in the operator's own route-management flow after consent.
-  deletes: "never",
-  verified: "local-contract",
-};
-
-export const workerRouteAdapter: ResourceAdapter = {
-  support: WORKER_ROUTE_SUPPORT,
-  mutation: "ensureWorkerRoute",
-};
 
 export type WorkerRouteAction =
   | { pattern: string; action: "preserve"; id: string }

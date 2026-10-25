@@ -15,7 +15,7 @@
 import type { V3RetainedSource } from "./release.js";
 
 export type V3Stage = "release" | "configure" | "deploy" | "done";
-export type V3Coverage = "checking" | "covered" | "mismatch";
+type V3Coverage = "checking" | "covered" | "mismatch";
 
 export type V3MachineEvent =
   | "COVERED"

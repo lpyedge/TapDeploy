@@ -156,7 +156,3 @@ export async function revokeToken(
     return false;
   }
 }
-
-export function verifyPkceChallenge(challenge: string, verifier: string): Promise<boolean> {
-  return sha256Base64Url(verifier).then((c) => c === challenge);
-}

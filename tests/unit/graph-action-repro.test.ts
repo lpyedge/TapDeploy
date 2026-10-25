@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import type { DeploySpec } from "../../src/core/deploy-spec.js";
 import { exactGraphDispatchSpec } from "../../src/core/deploy/graph-dispatch.js";
 import { plannedNamespaceActionFor } from "../../src/cloudflare/resources/kv.js";
-import { graphPhaseForDiff } from "../../src/web/graph-deploy-runner.js";
 
 function file(path: string) {
   return { path, size: 16, sha256: "0".repeat(64) };
@@ -40,16 +39,6 @@ function workerSpec(overrides: { assets?: number; cron?: string[] } = {}): Deplo
     targetKind: "workers",
   } as DeploySpec;
 }
-
-describe("red repro: Worker+Assets graph addressing (DEFECT WORKER_ASSETS_GRAPH_GAP)", () => {
-  it("maps a Worker static-assets create to a worker asset phase instead of throwing", () => {
-    // plan.ts emits {resource:'static-assets',action:'create'} for Worker+assets;
-    // graphPhaseForDiff must address it (currently throws: pages-only mapping).
-    const phase = graphPhaseForDiff("worker", "static-assets", "create");
-    expect(typeof phase).toBe("string");
-    expect(phase.length).toBeGreaterThan(0);
-  });
-});
 
 describe("red repro: schedule identity (DEFECT SCHEDULE_NO_IDENTITY)", () => {
   it("dispatches the nameless schedule diff emitted by plan.ts (no name field)", () => {

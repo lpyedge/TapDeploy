@@ -2,22 +2,7 @@
 // array is one POST to the account upload endpoint. Hashes are 32-hex upload
 // identifiers; duplicates within or across buckets are uploaded once.
 
-export const DEFAULT_MAX_PARTS_PER_BATCH = 64;
-
-export function planUploadBatches(
-  missingHashes: string[],
-  maxPartsPerBatch = DEFAULT_MAX_PARTS_PER_BATCH,
-): string[][] {
-  if (!Number.isInteger(maxPartsPerBatch) || maxPartsPerBatch <= 0) {
-    throw new Error("maxPartsPerBatch must be a positive integer");
-  }
-  const unique = [...new Set(missingHashes)];
-  const batches: string[][] = [];
-  for (let i = 0; i < unique.length; i += maxPartsPerBatch) {
-    batches.push(unique.slice(i, i + maxPartsPerBatch));
-  }
-  return batches;
-}
+const DEFAULT_MAX_PARTS_PER_BATCH = 64;
 
 // Normalize server buckets for upload: dedupe globally, preserve bucket
 // grouping, chunk any oversized bucket to the part cap.

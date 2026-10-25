@@ -25,7 +25,6 @@ import {
 } from "../../src/manifest/wrangler-v3.js";
 import {
   consumerRequestFor,
-  producerBindingFor,
 } from "../../src/cloudflare/resources/queues.js";
 import { planRateLimitBindings } from "../../src/cloudflare/resources/rate-limits.js";
 import { ResourceConflictError } from "../../src/cloudflare/resources/types.js";
@@ -587,11 +586,5 @@ describe("provider projections for queues", () => {
     expect(
       consumerRequestFor({ queue: "jobs", type: "worker", max_concurrency: null }, "app"),
     ).toEqual({ script_name: "app" });
-  });
-
-  it("builds the official producer binding from the verified queue name", () => {
-    expect(
-      producerBindingFor({ binding: "EVENTS", queue: "events" }, "events"),
-    ).toEqual({ type: "queue", name: "EVENTS", queue_name: "events" });
   });
 });
