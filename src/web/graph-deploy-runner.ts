@@ -159,7 +159,7 @@ class GraphDeployRunner {
   private readonly versions = new Map<string, string>();
   private readonly deployments = new Map<string, string>();
   private readonly domainUrls: string[] = [];
-  private workersDevUrl: string | undefined;
+  private readonly workersDevUrls: string[] = [];
   private pagesUrls: string[] = [];
   private publishNote: string | undefined;
   private readonly assetCompletions = new Map<string, string>();
@@ -167,7 +167,6 @@ class GraphDeployRunner {
   private readonly deploymentActionIds = new Map<string, string>();
   private assetUnits = new Set<string>();
   private pending: GraphDeployAction[] = [];
-  private hints: SchedulerHints | null = null;
 
   constructor(private readonly ctx: GraphDeployContext) {
     this.onStep = ctx.onStep ?? (() => undefined);
@@ -179,6 +178,8 @@ class GraphDeployRunner {
     } catch (error) {
       return { ok: false, receipts: this.receipts, error: safeErrorMessage(error) };
     }
+    const hints = parseSchedulerHints(this.ctx.schedulerHints, this.ctx.graphPlan.units.map((unit) => unit.unitId));
+    if (!hints) return { ok: false, receipts: this.receipts, error: "The deployment plan has missing or invalid scheduler hints. Review the changes again to obtain a new plan." };
     try {
       this.addresses = await v3UnitAddresses(this.ctx.configText, this.ctx.source);
     } catch (error) {
@@ -193,16 +194,18 @@ class GraphDeployRunner {
     // any version upload for that unit.
     this.assetUnits = new Set(this.actions.filter((a) => a.resource === "static-assets").map((a) => a.unitId));
     this.pending = [...this.actions];
-    this.hints = parseSchedulerHints(this.ctx.schedulerHints, (this.ctx.graphPlan.units ?? []).map((unit) => unit.unitId));
-    const actionsOutcome = await this.runActions();
+    const actionsOutcome = await this.runActions(hints);
     if (actionsOutcome) return actionsOutcome;
+    if (this.ctx.signal?.aborted) return { ok: false, receipts: this.receipts, error: "deploy aborted" };
     const workerOutcome = await this.runWorkerPostchecks();
     if (workerOutcome) return workerOutcome;
+    if (this.ctx.signal?.aborted) return { ok: false, receipts: this.receipts, error: "deploy aborted" };
     const pagesOutcome = await this.runPagesPostchecks();
     if (pagesOutcome) return pagesOutcome;
+    if (this.ctx.signal?.aborted) return { ok: false, receipts: this.receipts, error: "deploy aborted" };
     // surface only verified addresses (or the explicit not-published note
     // alongside success). No URL is ever fabricated.
-    const urls = [...new Set([...this.domainUrls, ...(this.workersDevUrl ? [this.workersDevUrl] : []), ...this.pagesUrls])];
+    const urls = [...new Set([...this.domainUrls, ...this.workersDevUrls, ...this.pagesUrls])];
     return { ok: true, receipts: this.receipts, ...(urls.length > 0 ? { urls } : {}), ...(this.publishNote ? { publishNote: this.publishNote } : {}) };
   }
 
@@ -213,23 +216,22 @@ class GraphDeployRunner {
     return { ok: false, receipts: this.receipts, ...(action ? { failedAction: toFailedAction(action) } : {}), error: safeErrorMessage(error) };
   }
 
-  private async runActions(): Promise<GraphDeployResult | null> {
+  private async runActions(hints: SchedulerHints): Promise<GraphDeployResult | null> {
     const { ctx, receipts, pending, actions, addresses, base, versions, deployments, workerActionIds, deploymentActionIds, assetUnits, assetCompletions } = this;
     const onStep = this.onStep;
     const fail = (action: GraphDeployAction | undefined, error: unknown): GraphDeployResult => this.fail(action, error);
     const unitState = { versions, deployments, assetCompletions };
     // Dependency-retry loop: each round must complete at least one action or the
     // graph is deadlocked and fails closed. Server order is authoritative.
-    // With valid hints the plan is walked in order and an action waits (locally,
-    // no request) until the work it must follow is finished; without them the
-    // legacy newest-first sweep relies on the server's dependency refusals.
-    const hints = this.hints;
+    // Walk the current plan in order; prerequisites wait locally. The server
+    // still checks receipts, including dependencies omitted from the advice.
     for (let round = 0; pending.length > 0 && round <= actions.length; round += 1) {
       if (ctx.signal?.aborted) return { ok: false, receipts, error: "deploy aborted" };
       let completed = 0;
-      for (let index = hints ? 0 : pending.length - 1; hints ? index < pending.length : index >= 0; index += hints ? 1 : -1) {
+      for (let index = 0; index < pending.length; index += 1) {
+        if (ctx.signal?.aborted) return { ok: false, receipts, error: "deploy aborted" };
         const action = pending[index]!;
-        if (hints && blockedByPrerequisite(action, pending, hints)) continue;
+        if (blockedByPrerequisite(action, pending, hints)) continue;
         onStep({ ...toFailedAction(action), state: "running" });
         try {
           const result = await dispatchGraphAction(ctx, base, addresses, action, receipts, unitState, assetUnits);
@@ -242,9 +244,8 @@ class GraphDeployRunner {
           // used to fire a bogus pages-postcheck (GRAPH_PHASE_MISMATCH) after
           // every successful worker deploy.
           if (result.deploymentId && (action.unitKind === "pages-static" || action.unitKind === "pages-functions")) deployments.set(action.unitId, result.deploymentId);
-          // first verified workers.dev URL wins; an explicit not-published
-          // note is kept alongside a successful deployment (never a fake URL).
-          if (result.url && !this.workersDevUrl) this.workersDevUrl = result.url;
+          // Keep every verified address in a multi-Worker release.
+          if (result.url) this.workersDevUrls.push(result.url);
           if (result.publishNote && !this.publishNote) this.publishNote = result.publishNote;
           // A custom domain bound by a verified reconcile-domains step.
           const domainUrl = boundDomainUrl(action);
@@ -252,7 +253,7 @@ class GraphDeployRunner {
           if (action.resource === "worker") workerActionIds.set(action.unitId, action.actionId);
           if (action.resource === "deployment") deploymentActionIds.set(action.unitId, action.actionId);
           pending.splice(index, 1);
-          if (hints) index -= 1;
+          index -= 1;
           completed += 1;
           onStep({ ...toFailedAction(action), state: "done", ...(result.phaseReceipt !== undefined ? { receipt: true as const } : {}) });
         } catch (error) {
@@ -263,12 +264,6 @@ class GraphDeployRunner {
           onStep({ ...toFailedAction(action), state: "error", detail: safeErrorMessage(error) });
           return fail(action, error);
         }
-      }
-      if (completed === 0 && hints && this.hints) {
-        // Advice that leaves nothing runnable is wrong advice: drop it and let the
-        // legacy sweep and the server's own refusals decide, instead of deadlocking.
-        this.hints = null;
-        return this.runActions();
       }
       if (completed === 0) {
         const stuck = pending[0]!;
@@ -290,6 +285,7 @@ class GraphDeployRunner {
     const base = this.base;
     // Read-only postchecks: each needs the produced identity, never a guess.
     for (const [unitId, versionId] of versions) {
+      if (ctx.signal?.aborted) return { ok: false, receipts, error: "deploy aborted" };
       const actionId = workerActionIds.get(unitId);
       if (!actionId) continue;
       const action = { unitId, unitKind: "worker", resource: "worker", action: "create", actionId, phase: "postcheck" };
@@ -321,6 +317,7 @@ class GraphDeployRunner {
     const fail = (action: GraphDeployAction | undefined, error: unknown): GraphDeployResult => this.fail(action, error);
     const base = this.base;
     for (const [unitId, deploymentId] of deployments) {
+      if (ctx.signal?.aborted) return { ok: false, receipts, error: "deploy aborted" };
       const actionId = deploymentActionIds.get(unitId);
       if (!actionId) continue;
       const action = { unitId, unitKind: "pages-static", resource: "deployment", action: "create", actionId, phase: "pages-postcheck" };

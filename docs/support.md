@@ -6,7 +6,8 @@ a real account. Hosting TapDeploy itself on Workers is being verified.
 
 | Feature | What TapDeploy does | Live |
 |---|---|---|
-| Workers | create or upgrade (new version, then activation), ESM + Wasm modules, static assets, cron, `workers.dev`, rate limits | yes |
+| Workers | create or upgrade (new version, then activation), ESM + Wasm modules, cron, `workers.dev`, rate limits | yes |
+| Worker static assets | `assets.directory`: disabled until server-authoritative upload integrity is implemented | **no** |
 | Pages | static sites (project, assets, deployment) | yes |
 | R2, D1, KV, Queues | create when missing (per config) or bind an existing one; queue consumers | yes |
 | Durable Objects | own-script classes with a single new-class migration | yes |

@@ -148,6 +148,7 @@ export async function revokeToken(
   try {
     const res = await fetcher(cfg.revokeBase ?? DEFAULT_REVOKE, {
       method: "POST",
+      signal: AbortSignal.timeout(5_000),
       headers,
       body: body.toString(),
     });

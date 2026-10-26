@@ -46,7 +46,7 @@ export function V3ReleasePanel({ assetUrl, onAssetUrl, localFile, allowLocalZip,
           type="url"
           data-testid="v3-asset-url"
           value={assetUrl}
-          disabled={localFile !== null}
+          disabled={busy || localFile !== null}
           onChange={(e) => onAssetUrl(e.target.value)}
           placeholder="https://example.com/release.zip"
         />

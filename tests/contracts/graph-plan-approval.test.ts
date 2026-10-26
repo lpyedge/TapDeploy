@@ -539,6 +539,8 @@ it("authenticates every field of a sealed graph approval", async () => {
   for (const references of [
     { ...context.references, main: { ...context.references.main!, workerName: "other" } },
     { ...context.references, main: { ...context.references.main!, r2BucketIds: {} } },
+    { ...context.references, main: { ...context.references.main!, secretNames: ["forged-secret-name"] } },
+    { ...context.references, main: { ...context.references.main!, domainBaseline: { names: ["foreign.example"], zones: [], dnsRecords: [], workerRoutes: [], workerDomains: [], pagesDomains: [] } } },
     { ...context.references, extra: { accountId: ACCOUNT, workerName: "extra" } },
   ]) {
     expect(await verifyGraphPlanApproval(key, approval, { ...context, references })).toBe(false);

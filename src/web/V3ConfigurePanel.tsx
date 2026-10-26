@@ -86,7 +86,7 @@ export function V3ConfigurePanel(props: V3ConfigurePanelProps) {
     <V3InputField key={def.key} def={def} mode={modeIntent} value={inputValues[def.key] ?? ""} onChange={(value) => onInputValue(def.key, value)} />
   );
   return (
-    <>
+    <fieldset disabled={props.planning} className="m-0 min-w-0 border-0 p-0">
       <ReleaseSummary sourceLabel={props.sourceLabel} units={props.releaseUnits} />
       {props.showModeToggle && (
         <V3WorkerTarget
@@ -139,6 +139,6 @@ export function V3ConfigurePanel(props: V3ConfigurePanelProps) {
         </button>
       </div>
       {props.planning && <p className="meta" role="status" data-testid="v3-planning">Reading your account to build the plan. This can take up to a minute; nothing is written yet.</p>}
-    </>
+    </fieldset>
   );
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   generatePkce,
   sha256Base64Url,
@@ -148,6 +148,22 @@ describe("revokeToken", () => {
   it("returns false on a non-2xx revoke response", async () => {
     const fetcher = async () => new Response(null, { status: 400 });
     expect(await revokeToken(cfg, "tok", fetcher)).toBe(false);
+  });
+
+  it("bounds a stalled revoke to five seconds and reports it unconfirmed", async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    try {
+      const result = revokeToken(cfg, "tok", (async (_input, init) => {
+        expect(init?.signal).toBe(controller.signal);
+        return await new Promise<Response>((_resolve, reject) => {
+          init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+        });
+      }) as typeof fetch);
+      expect(timeout).toHaveBeenCalledWith(5_000);
+      controller.abort(new DOMException("timeout", "TimeoutError"));
+      expect(await result).toBe(false);
+    } finally { timeout.mockRestore(); }
   });
 
   it("returns false when the network request throws", async () => {

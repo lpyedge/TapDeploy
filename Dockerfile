@@ -5,7 +5,10 @@ FROM node:24-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY . .
+COPY scripts ./scripts
+COPY src ./src
+COPY schemas ./schemas
+COPY tsconfig.json vite.config.ts ./
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-slim AS runtime

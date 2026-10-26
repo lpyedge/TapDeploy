@@ -39,7 +39,7 @@
 
 ## 可部署的內容
 
-- **運算：** Workers（模組、Wasm、靜態資源、cron、Durable Objects、Workflows）與 Pages 靜態網站。
+- **運算：** Workers（模組、Wasm、cron、Durable Objects、Workflows）與 Pages 靜態網站。
 - **儲存與 binding：** R2、D1、KV、Queues、Vectorize、Workers AI、Browser Rendering、Hyperdrive 與 Secrets Store（使用者選擇的既有資源）。
 - **網域：** 使用者可把自己的網域綁到任一 Worker 或 Pages 網站，升級時可修改。
 - **不支援：** 編譯原始碼（release 必須預先建置）、Pages Functions、Cloudflare 以外的平台。
@@ -92,3 +92,5 @@ npm test
 ## 授權
 
 [MIT](LICENSE) © lpyedge。更多：[支援範圍](docs/support.md)、[安全模型](docs/security.md)、[架構](docs/ARCHITECTURE.md)。之後可能支援其他提供授權部署 API 的平台（例如 Vercel）。
+
+Worker 靜態資源（`assets.directory`）目前不支援：在具備 server-authoritative bytes 驗證前預設封鎖。Pages 靜態網站仍可使用。

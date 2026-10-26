@@ -131,9 +131,14 @@ export async function getSession(): Promise<SessionState> {
   return json;
 }
 
-/** End the session: the server revokes the Cloudflare sign-in and clears the cookie. */
-export async function signOut(csrf: string): Promise<void> {
-  await request("/api/auth/logout", csrf, {});
+export interface SignOutResult {
+  localSessionCleared: true;
+  providerRevocation: "confirmed" | "unconfirmed" | "not_applicable";
+}
+
+/** Clear the local cookie and report the provider's independent revoke result. */
+export async function signOut(csrf: string): Promise<SignOutResult> {
+  return await request("/api/auth/logout", csrf, {}) as SignOutResult;
 }
 
 export interface StartOAuthResult {

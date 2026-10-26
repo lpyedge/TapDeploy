@@ -43,6 +43,7 @@ export interface V3MachineSnapshot {
   bundleDigests: Record<string, string> | undefined;
   schedulerHints: unknown | null;
   deployOk: boolean | null;
+  deployRunning: boolean;
   deployError: string | null;
   deployUrls: string[];
   deployNote: string | null;
@@ -66,6 +67,7 @@ const initialSnapshot = (): V3MachineSnapshot => ({
   bundleDigests: undefined,
   schedulerHints: null,
   deployOk: null,
+  deployRunning: false,
   deployError: null,
   deployUrls: [],
   deployNote: null,
@@ -159,11 +161,12 @@ export class V3FlowMachine {
 
   startDeploy(): V3MachineSnapshot {
     const snap = this.snapshot();
-    if (snap.stage !== "deploy" || !snap.graphPlan || !snap.executionContext || !snap.approval) {
+    if (snap.stage !== "deploy" || snap.deployRunning || !snap.graphPlan || !snap.executionContext || !snap.approval) {
       throw new Error("illegal V3 flow transition: CONFIRM_DEPLOY without a sealed plan");
     }
     this.snap = {
       ...this.snap,
+      deployRunning: true,
       deployOk: null,
       deployError: null,
       deployUrls: [],
@@ -180,6 +183,7 @@ export class V3FlowMachine {
     this.snap = {
       ...this.snap,
       stage: to,
+      deployRunning: false,
       deployOk: outcome.ok,
       deployError: outcome.error ?? null,
       deployUrls: outcome.urls ?? [],
@@ -212,6 +216,7 @@ export class V3FlowMachine {
       approval: null,
       bundleDigests: undefined,
       schedulerHints: null,
+      deployRunning: false,
       deployOk: null,
       deployError: null,
       deployUrls: [],

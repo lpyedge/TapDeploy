@@ -7,11 +7,12 @@ const valid = { version: 1, topoOrder: ["c", "b", "a"], dependencies: [{ depende
 describe("parseSchedulerHints", () => {
   it("accepts well-formed hints for the plan's units", () => {
     expect(parseSchedulerHints(valid, units)).toEqual(valid);
-    expect(parseSchedulerHints({ version: 1, topoOrder: [], dependencies: [] }, units)).toEqual({ version: 1, topoOrder: [], dependencies: [] });
+    expect(parseSchedulerHints({ version: 1, topoOrder: [], dependencies: [] }, [])).toEqual({ version: 1, topoOrder: [], dependencies: [] });
   });
   it.each([
     ["missing", undefined],
     ["null", null],
+    ["missing units", { version: 1, topoOrder: [], dependencies: [] }],
     ["a string", "hints"],
     ["wrong version", { ...valid, version: 2 }],
     ["topoOrder not an array", { ...valid, topoOrder: "c,b,a" }],
@@ -27,7 +28,7 @@ describe("parseSchedulerHints", () => {
     ["order contradicting an edge", { ...valid, topoOrder: ["a", "b", "c"] }],
     ["edge with non-string ends", { ...valid, dependencies: [{ dependent: 1, dependency: "b" }] }],
     ["null edge", { ...valid, dependencies: [null] }],
-  ])("refuses %s (the driver then keeps its legacy order)", (_name, raw) => {
+  ])("refuses %s before dispatch", (_name, raw) => {
     expect(parseSchedulerHints(raw, units)).toBeNull();
   });
 });

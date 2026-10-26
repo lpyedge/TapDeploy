@@ -50,11 +50,24 @@ jobs:
         env:
           PW_RUNTIME: workers
 
-      - name: Upload Playwright results
-        if: failure()
+      # Raw trace/HAR/storageState may contain sessions; never upload test results.
+      - name: Package and scan public source and runtime archives
+        run: |
+          mkdir -p temp/release
+          python3 scripts/source-fingerprint.py --repo . --output temp/release/source.json
+          python3 scripts/package-public-artifact.py source --identity temp/release/source.json --output dist/releases/tapdeploy-source.zip
+          python3 scripts/package-public-artifact.py runtime --identity temp/release/source.json --output dist/releases/tapdeploy-runtime.zip
+          python3 scripts/scan-public-artifact.py dist/releases/tapdeploy-source.zip
+          python3 scripts/scan-public-artifact.py dist/releases/tapdeploy-runtime.zip
+
+      - name: Upload scanned public archives
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results
-          path: temp/playwright/results
-          if-no-files-found: ignore
+          name: tapdeploy-public
+          path: |
+            dist/releases/tapdeploy-source.zip
+            dist/releases/tapdeploy-source.manifest.json
+            dist/releases/tapdeploy-runtime.zip
+            dist/releases/tapdeploy-runtime.manifest.json
+          if-no-files-found: error
           retention-days: 7

@@ -66,6 +66,10 @@ async function forwardUpload(c: Context<AppEnv>, env: TapDeployEnv): Promise<Res
     return c.json({ error: "invalid_account" }, 400);
   }
 
+  // Provider acceptance does not attest Worker asset bytes. This mode stays
+  // closed until uploads can be bound to a server-verified manifest.
+  if (target === "workers-assets") return c.json({ error: "WORKER_ASSETS_UNSUPPORTED", detail: "Worker static assets are disabled: uploaded byte integrity is not verified. Use a static Pages site or a Worker without static assets." }, 409);
+
   // Only now, with the session, CSRF, target, token, type and account all
   // accepted, does the relay start consuming the body.
   const tooLarge = () => c.json({ error: "payload_too_large", detail: `request exceeds the ${ASSET_UPLOAD_MAX_BODY_BYTES}-byte API limit; ZIP and static asset bytes must remain in the browser` }, 413);

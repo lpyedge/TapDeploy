@@ -74,6 +74,7 @@ function graphPlanBody() {
       guards: [],
       cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
     },
+    schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
     executionContext: "ctx-sealed",
     approval: "appr-sealed",
     bundleDigests: { main: "bd-main" },
@@ -106,9 +107,7 @@ async function mockBase(page: Page, mocks: FlowMocks, sessionHash = "v3-session-
   await page.route("**/api/cloudflare/accounts", (route) =>
     json(route, { accounts: [{ id: accountId, name: "Acme" }] }),
   );
-  // The App shell fetches target discovery on account select (V2 leftover
-  // effect); the V3 flow never uses it. Stub it read-only so nothing escapes
-  // to the dev proxy.
+  // Configure discovers existing Workers in the selected account.
   await page.route("**/api/cloudflare/targets", (route) =>
     json(route, { accountId, workers: [], pages: [] }),
   );
@@ -208,6 +207,68 @@ function newMocks(): FlowMocks {
 }
 
 test.describe("prebuilt UI flow", () => {
+  test("planning and deployment lock account, navigation and mutable configuration", async ({ page }) => {
+    const mocks = newMocks();
+    let finishPlan!: () => void;
+    const planGate = new Promise<void>((resolve) => { finishPlan = resolve; });
+    let finishStep!: () => void;
+    mocks.stepGate = new Promise<void>((resolve) => { finishStep = resolve; });
+    await mockV3Api(page, mocks);
+    await page.route("**/api/cloudflare/accounts", (route) => json(route, { accounts: [
+      { id: "a".repeat(32), name: "Acme" }, { id: "b".repeat(32), name: "Other account" },
+    ] }));
+    await page.route("**/api/deploy/plan", async (route) => {
+      mocks.planBodies.push(route.request().postDataJSON());
+      await planGate;
+      return json(route, graphPlanBody());
+    });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("account-select").selectOption("a".repeat(32));
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-planning")).toBeVisible();
+    await expect(page.getByTestId("account-select")).toBeDisabled();
+    await expect(page.getByTestId("v3-input-workerName")).toBeDisabled();
+    await expect(page.getByTestId("v3-back-to-source")).toBeDisabled();
+    await expect(page.getByTestId("v3-exit")).toBeDisabled();
+    await expect(page.getByTestId("v3-sign-out")).toBeDisabled();
+    finishPlan();
+    await expect(page.getByTestId("v3-plan-review")).toContainText("Acme");
+    await expect(page.getByTestId("account-select")).toBeDisabled();
+    await page.getByTestId("v3-confirm-deploy").click();
+    await expect(page.getByTestId("v3-stop-deploy")).toBeVisible();
+    await expect(page.getByTestId("v3-exit")).toBeDisabled();
+    await expect(page.getByTestId("v3-sign-out")).toHaveCount(0);
+    await expect(page.getByTestId("v3-confirm-deploy")).toHaveCount(0);
+    finishStep();
+    await expect(page.getByTestId("v3-result")).toContainText("Deployment succeeded");
+    expect(mocks.planBodies[0]?.accountId).toBe("a".repeat(32));
+    expect(mocks.stepCalls.every((call) => call.accountId === "a".repeat(32))).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  test("a new quick link takes priority over the previous tab config", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.addInitScript((text) => sessionStorage.setItem("tapdeploy.config.v3", JSON.stringify({
+      text, appId: "old/app", sourceLabel: "old config", storedAt: Date.now(),
+    })), V3_TEXT.replace("example/prebuilt", "old/app"));
+    const configUrl = "https://config.example.com/new-app.json";
+    const next = JSON.stringify({ ...JSON.parse(V3_TEXT), app: { id: "example/new-app", name: "New app" } });
+    await page.route(configUrl, (route) => route.fulfill({ contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: next }));
+    await page.goto(`/?config=${encodeURIComponent(configUrl)}`);
+    await expect(page.locator('[data-testid="v3-flow"] h2')).toHaveText("Install New app");
+    await expect(page.getByTestId("v3-flow")).toContainText(configUrl);
+    expect(mocks.authStarts).toBe(0);
+    await page.getByTestId("v3-exit").click();
+    await expect(page.getByTestId("config-step")).toBeVisible();
+    await expect(page.getByTestId("config-input")).toHaveValue("");
+  });
+
   test("local ZIP reaches prepare bytes, proof-forwarded plan, and receipt-chained steps", async ({ page }) => {
     const mocks = newMocks();
     const zip = zipBytes();
@@ -238,11 +299,11 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-result")).toContainText("Deployment succeeded");
     await expect(page.getByTestId("v3-result-no-url")).toBeVisible();
     await expect(page.getByTestId("v3-result-dashboard")).toHaveAttribute("href", /dash\.cloudflare\.com\/a{32}\/workers\/services\/view\/api/);
-    // Exact prepare bytes, dependency retries, single OAuth, no compiler.
+    // Exact prepare bytes, ordered dispatch, single OAuth, no compiler.
     expect(mocks.prepareBodies).toHaveLength(1);
     expect(mocks.prepareBodies[0]?.equals(zip)).toBe(true);
     const workerCalls = mocks.stepCalls.filter((call) => (call as Record<string, unknown>).phase === "create-worker");
-    expect(workerCalls.length).toBeGreaterThanOrEqual(2);
+    expect(workerCalls).toHaveLength(1);
     expect(mocks.authStarts).toBe(0);
     expect(mocks.compilerRequests).toEqual([]);
     expect(mocks.unexpectedApi).toEqual([]);
@@ -308,7 +369,7 @@ test.describe("prebuilt UI flow", () => {
     const logouts: Array<{ method: string; csrf: string | undefined }> = [];
     await page.route("**/api/auth/logout", (route) => {
       logouts.push({ method: route.request().method(), csrf: route.request().headers()["x-tapdeploy-csrf"] });
-      return route.fulfill({ status: 200, contentType: "text/plain", body: "OK" });
+      return json(route, { localSessionCleared: true, providerRevocation: "confirmed" });
     });
     await page.goto("/");
     await pasteV3Config(page);
@@ -317,6 +378,42 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-flow")).toHaveCount(0);
     await expect(page.getByRole("status").filter({ hasText: "Signed out" })).toBeVisible();
     expect(logouts).toEqual([{ method: "POST", csrf: CSRF }]);
+  });
+
+  test("sign-out warns when provider revocation is unconfirmed and forgets the local flow on reload", async ({ page }) => {
+    await mockV3Api(page, newMocks());
+    await page.route("**/api/auth/logout", (route) => json(route, { localSessionCleared: true, providerRevocation: "unconfirmed" }));
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-sign-out").click();
+    await expect(page.getByRole("status")).toContainText("Cloudflare revocation was not confirmed");
+    await expect(page.getByTestId("v3-sign-out")).toHaveCount(0);
+    await page.route("**/api/auth/session", (route) => json(route, { authenticated: false }));
+    await page.reload();
+    await expect(page.getByTestId("config-step")).toBeVisible();
+    await expect(page.getByTestId("v3-flow")).toHaveCount(0);
+  });
+
+  test("sign-out waits for confirmation and keeps retry available after failure", async ({ page }) => {
+    await mockV3Api(page, newMocks());
+    let finishLogout!: () => void;
+    const gate = new Promise<void>((resolve) => { finishLogout = resolve; });
+    await page.route("**/api/auth/logout", async (route) => {
+      await gate;
+      return json(route, { error: "unavailable" }, 503);
+    });
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-sign-out").click();
+    await expect(page.getByTestId("session-loading")).toHaveText("Signing out…");
+    await expect(page.getByTestId("config-step")).toHaveCount(0);
+    finishLogout();
+    await expect(page.getByRole("status").filter({ hasText: "Sign-out could not be confirmed" })).toBeVisible();
+    await expect(page.getByTestId("v3-sign-out")).toBeVisible();
+    await page.route("**/api/auth/logout", (route) => json(route, { localSessionCleared: true, providerRevocation: "confirmed" }));
+    await page.getByTestId("v3-sign-out").click();
+    await expect(page.getByTestId("config-step")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Signed out" })).toBeVisible();
   });
 
   for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["mobile", { width: 390, height: 844 }]] as const) {
@@ -592,11 +689,9 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-result")).toContainText("You stopped the deployment");
     await expect(page.getByTestId("v3-result")).toContainText("nothing was rolled back");
     await expect(page.getByTestId("v3-result")).toContainText("1 verified receipts");
-    // Only the step in flight completed; no later action ran (a Worker create may
-    // appear once as the early dependency probe the server answers with 409).
+    // Only the step in flight completed; no later action ran.
     const phases = mocks.stepCalls.map((call) => call.phase);
-    expect(phases.filter((phase) => phase !== "create-worker")).toEqual(["create-r2-buckets"]);
-    expect(phases.filter((phase) => phase === "create-worker").length).toBeLessThanOrEqual(1);
+    expect(phases).toEqual(["create-r2-buckets"]);
     await expect(page.getByTestId("v3-stop-deploy")).toHaveCount(0);
   });
 
@@ -986,11 +1081,19 @@ test.describe("prebuilt UI flow", () => {
       }),
     );
     await page.unroute("**/api/cloudflare/targets");
-    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api" }], pages: [] }));
+    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api" }, { name: "other-api" }], pages: [] }));
+    let finishInventory!: () => void;
+    const inventoryGate = new Promise<void>((resolve) => { finishInventory = resolve; });
     const inventoryQueries: Array<Record<string, unknown>> = [];
-    await page.route("**/api/cloudflare/inventory", (route) => {
+    await page.route("**/api/cloudflare/inventory", async (route) => {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       inventoryQueries.push(body);
+      if (body.worker === "other-api") {
+        await inventoryGate;
+        return json(route, { accountId: "a".repeat(32), names: { r2: ["other-media", "other-cache"] }, bindings: [
+          { binding: "MEDIA", kind: "r2", name: "other-media" }, { binding: "CACHE", kind: "r2", name: "other-cache" },
+        ] });
+      }
       return json(route, { accountId: "a".repeat(32), names: { r2: ["live-media", "media", "live-cache"] }, ...(body.worker ? { bindings: [{ binding: "MEDIA", kind: "r2", name: "live-media" }, { binding: "CACHE", kind: "r2", name: "live-cache" }] } : {}) });
     });
     await page.goto("/");
@@ -1024,6 +1127,14 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     expect((mocks.planBodies.at(-1) as Record<string, unknown>).names).toEqual({ "r2:media": "live-media", "r2:cache": "new-cache" });
     expect(inventoryQueries.some((query) => query.worker === "api")).toBe(true);
+    await page.getByTestId("v3-back-to-configure").click();
+    await page.getByTestId("v3-upgrade-target").selectOption("other-api");
+    await expect.poll(() => inventoryQueries.some((query) => query.worker === "other-api")).toBe(true);
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await expect(page.getByTestId("v3-name-r2-media")).not.toHaveValue("live-media");
+    finishInventory();
+    await expect(page.getByTestId("v3-name-r2-media")).toHaveValue("other-media");
+    await expect(page.getByTestId("v3-to-deploy")).toBeEnabled();
     expect(mocks.unexpectedApi).toEqual([]);
   });
 
@@ -1159,6 +1270,7 @@ test.describe("prebuilt UI flow", () => {
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
         },
+        schedulerHints: { version: 1, topoOrder: ["resources"], dependencies: [] },
         executionContext: "ctx-r", approval: "appr-r", bundleDigests: { resources: "bd-r" },
       }),
     );
@@ -1225,6 +1337,7 @@ test.describe("prebuilt UI flow", () => {
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
         },
+        schedulerHints: { version: 1, topoOrder: ["site"], dependencies: [] },
         executionContext: "ctx-p", approval: "appr-p", bundleDigests: { site: "bd-site" },
       }),
     );
@@ -1428,7 +1541,7 @@ test.describe("bridge contracts (no browser)", () => {
     }
   });
 
-  test("driver completes worker+r2 with dependency retries and exact version cutover", async () => {
+  test("driver completes worker+r2 in dependency order with exact version cutover", async () => {
     const bytes = buildValidZip({ "wrangler.jsonc": WRANGLER, "worker/main.mjs": CODE });
     const source = await retainedSource(bytes, "release.zip");
     const phases: string[] = [];
@@ -1474,6 +1587,7 @@ test.describe("bridge contracts (no browser)", () => {
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
         },
+        schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
         executionContext: "ctx",
         approval: "appr",
         bundleDigests: { main: "bd-main" },
@@ -1481,14 +1595,14 @@ test.describe("bridge contracts (no browser)", () => {
       });
       expect(out.ok).toBe(true);
       expect(out.receipts).toHaveLength(4);
-      expect(phases.filter((phase) => phase === "create-worker")).toHaveLength(2);
+      expect(phases.filter((phase) => phase === "create-worker")).toHaveLength(1);
       expect(statuses.filter((status) => status.endsWith(":done"))).toHaveLength(4);
     } finally {
       globalThis.fetch = realFetch;
     }
   });
 
-  test("driver completes worker+assets pair with dependency retries and exact version cutover", async () => {
+  test("driver completes worker+assets pair in dependency order with exact version cutover", async () => {
     const WRANGLER_ASSETS = JSON.stringify({
       name: "api",
       main: "worker/main.mjs",
@@ -1564,6 +1678,7 @@ test.describe("bridge contracts (no browser)", () => {
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
         },
+        schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
         executionContext: "ctx",
         approval: "appr",
         bundleDigests: { main: "bd-main" },
@@ -1576,6 +1691,36 @@ test.describe("bridge contracts (no browser)", () => {
       expect(statuses.filter((status) => status.endsWith(":done"))).toHaveLength(4);
     } finally {
       globalThis.fetch = realFetch;
+    }
+  });
+
+  test("driver retains every verified workers.dev address in a multi-worker release", async () => {
+    const source = await retainedSource(buildValidZip({ "wrangler.jsonc": WRANGLER, "worker/main.mjs": CODE }), "release");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.phase).toBe("publish-workers-dev");
+      return Response.json({ ok: true, result: { published: true, url: `https://${body.unitId}.account.workers.dev` }, phaseReceipt: body.unitId });
+    }) as typeof fetch;
+    try {
+      const out = await runGraphDeploy({
+        csrf: "c", accountId: "a".repeat(32), source, releaseProof: "p",
+        configText: JSON.stringify({ units: [{ id: "first" }, { id: "second" }] }),
+        executionContext: "ctx", approval: "appr",
+        schedulerHints: { version: 1, topoOrder: ["first", "second"], dependencies: [] },
+        graphPlan: {
+          ok: true, blocked: false, digest: "g", guards: [],
+          cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+          units: ["first", "second"].map((unitId) => ({ unitId, kind: "worker", name: unitId, requiresBundle: false,
+            diffs: [{ resource: "workers-dev", action: "create", name: unitId }],
+          })),
+        },
+      });
+      expect(out.ok, out.error).toBe(true);
+      expect(out.urls).toEqual(["https://first.account.workers.dev/", "https://second.account.workers.dev/"]);
+    } finally {
+      globalThis.fetch = realFetch;
+      source.access.dispose();
     }
   });
 
@@ -1635,7 +1780,8 @@ test.describe("bridge contracts (no browser)", () => {
             guards: [],
             cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
           },
-          executionContext: "ctx",
+          schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
+        executionContext: "ctx",
           approval: "appr",
           bundleDigests: { main: "bd-main" },
           onStep: () => undefined,
@@ -1691,6 +1837,7 @@ test.describe("bridge contracts (no browser)", () => {
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
         },
+        schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
         executionContext: "ctx",
         approval: "appr",
         bundleDigests: { main: "bd-main" },

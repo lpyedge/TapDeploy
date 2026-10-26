@@ -158,6 +158,9 @@ async function graphV3Step(
   if (!unit || !isGraphActionStepAllowed({ unitKind: unit.kind, step, resource: approved.resource, action: approved.action })) return c.json({ error: "GRAPH_PHASE_MISMATCH" }, 409);
   const sourceSpec = (context.perUnitCanonicalSpecs as Record<string, unknown>)[body.unitId] as DeploySpec | undefined;
   if (!sourceSpec) return c.json({ error: "GRAPH_SPEC_MISMATCH" }, 409);
+  if (!pagesUnit && (sourceSpec.assets.length > 0 || sourceSpec.wrangler?.assets || context.approvedDiffsWithActionIds.some((entry) => entry.unitId === body.unitId && entry.resource === "static-assets"))) {
+    return c.json({ error: "WORKER_ASSETS_UNSUPPORTED", detail: "Worker static assets are disabled: uploaded byte integrity is not verified." }, 409);
+  }
   const exact = exactGraphDispatchSpec(sourceSpec, approved as { resource: string; action: string; name?: string });
   if (!exact) return c.json({ error: "GRAPH_ACTION_UNSUPPORTED" }, 409);
   const proof = (context.perUnitWranglerAndBundleProofs as Record<string, unknown>)[body.unitId];

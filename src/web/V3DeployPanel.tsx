@@ -168,7 +168,7 @@ export function V3DeployPanel({
   const finished = snap.stage === "done";
   const postchecks = statuses.filter((status) => status.phase === "postcheck" || status.phase === "pages-postcheck");
   const actions = statuses.filter((status) => status.phase !== "postcheck" && status.phase !== "pages-postcheck");
-  const reviewing = snap.stage === "deploy" && snap.deployOk === null && statuses.length === 0;
+  const reviewing = snap.stage === "deploy" && !snap.deployRunning;
   return (
     <>
       {snap.stage === "deploy" && graphPlan && reviewing && (
@@ -237,7 +237,7 @@ export function V3DeployPanel({
             </div>
           )}
           <div className="actionbar">
-            <button type="button" className="link text-sm" onClick={() => onBackToConfigure()} data-testid="v3-back-to-configure">Back</button>
+            <button type="button" className="link text-sm" disabled={busy} onClick={() => onBackToConfigure()} data-testid="v3-back-to-configure">Back</button>
             <button type="button" className="primary" disabled={busy || blocked || !secretsReady} onClick={() => onDeploy()} data-testid="v3-confirm-deploy">
               {busy ? <><Spinner />Checking with Cloudflare…</> : modeIntent === "upgrade" ? "Confirm and upgrade" : "Confirm and deploy"}
             </button>

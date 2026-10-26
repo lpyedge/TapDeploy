@@ -39,20 +39,19 @@
 - Never silently skips, downgrades, or falls back: unsupported operations,
   undeclared capabilities, unconfirmed costs, and ambiguous readbacks all
   block with typed errors and zero provider writes after the block point.
-- Asset bytes go from the browser through the installer's own origin
-  (`POST /api/upload/assets`, because Cloudflare's API allows no browser calls)
-  to four fixed Cloudflare URLs, under short-lived, project-scoped JWTs. The
-  relay is not a general proxy: it needs a session and CSRF, validates the
-  target, token, content type and account **before it reads any body**, caps and
-  counts the bytes it then reads (16 MiB), drops a stalled sender, forwards the
-  exact bytes, and never sees or forwards the OAuth token. The server verifies
-  the approved manifest/set before creating versions or deployments. The API
-  surface is a fixed list of typed operations (no generic fetch bridge). What the
-  server does **not** verify is the uploaded asset bytes themselves: it only
-  forwards them, and (measured on a real account, 2026-10-24) Cloudflare Workers
-  Assets accepts and serves bytes that do not match the hash they were uploaded
-  under, while Pages stores by content hash and leaves a forged hash missing. The
-  sealed hashes bind the file set, not what the browser then sends.
+- Worker static-assets deployment is **UNSUPPORTED**, default fail-closed in
+  both runtimes (`WORKER_ASSETS_UNSUPPORTED`). Shared browser/server verification
+  refuses releases declaring Worker assets; planning refuses older proofs;
+  execution refuses older sealed asset specs; the relay refuses Worker uploads
+  before reading bytes or contacting Cloudflare. A hostile browser cannot bypass
+  this by supplying its own hash, JWT, account or body. There is no override.
+  Previous real-account evidence (2026-10-24) showed Cloudflare Workers Assets
+  serving bytes that did not match the supplied hash. No server-authoritative
+  upload authorization/byte verifier is implemented, so provider 2xx is not proof.
+- Pages asset requests use three fixed same-origin relay targets, session/CSRF,
+  bounded bodies (16 MiB), scoped JWTs and bounded upstream responses. Historical
+  live evidence found forged Pages hashes missing at readback; current live
+  verification is still required. Pages behavior does not establish Worker safety.
 - The OAuth session never outlives its provider token: at most 20 minutes, and
   shorter when the token's `expires_in` is (minus a 15 s margin); a token that
   is already expiring creates no session (`token_expired`). A provider 401 is
@@ -78,3 +77,28 @@
 Review the plan diffs, the account, and the paid-risk disclosure before
 confirming. Treat a stopped deploy as live partial state: inspect Cloudflare
 before retrying, and re-plan rather than forcing a stale approval.
+
+## Sign-out contract
+
+`POST /api/auth/logout` clears the browser session cookie after Origin/CSRF
+validation even when provider revocation fails. JSON distinguishes
+`providerRevocation: confirmed | unconfirmed | not_applicable` and
+`localSessionCleared: true`; responses are `no-store`. Revocation waits at most
+five seconds. Unconfirmed revocation is shown with a Dashboard management notice.
+The stateless sealed session has no server-side revocation list: a previously
+copied cookie can remain cryptographically valid until expiry; local sign-out
+means clearing this browser's cookie, not invalidating every copy. Provider
+revocation and real Cloudflare behavior require separate live verification.
+
+## HTTP responses
+
+All dynamic API responses, including errors and redirects, are `no-store`.
+The shared Hono middleware also protects Node static responses. Workers static
+responses use `src/web/public/_headers`, copied by Vite: Cloudflare does not apply
+that file to Worker-generated API responses ([Workers headers documentation](https://developers.cloudflare.com/workers/static-assets/headers/)).
+Both paths use `nosniff`, `no-referrer`, `DENY` and CSP with same-origin scripts
+and workers, no objects/base/frame ancestors, and HTTPS connections for publisher
+config/ZIP downloads. Inline styles are allowed for the existing React UI; inline
+scripts and JavaScript eval are blocked. Only WASM compilation is allowed via
+`wasm-unsafe-eval`; an operator policy blocking it can use the existing Pages
+JavaScript hasher. Static responses revalidate with `no-cache`.

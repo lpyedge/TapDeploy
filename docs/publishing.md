@@ -46,8 +46,7 @@ config.
 release.zip
 ├── wrangler.jsonc        # { "name": "notes", "main": "worker/main.mjs", "compatibility_date": "2026-10-01", "r2_buckets": [...] }
 ├── worker/main.mjs       # from build/
-├── worker/engine.wasm    # optional binary module(s)
-└── public/…              # optional static assets, "assets": { "directory": "public" }
+└── worker/engine.wasm    # optional binary module(s)
 ```
 
 **One Pages site:** the same, with `"pages_build_output_dir": "public"` in place of
@@ -269,7 +268,7 @@ refused rather than ignored (`UNKNOWN_WRANGLER_FIELD`,
   (add-only), and on Worker units `hyperdrive`, `vectorize`,
   `secrets_store_secrets`, `ai`, `browser`. Behaviour per family:
   [support.md](support.md).
-- Workers static assets: `assets.directory` (+ optional `binding`).
+- Workers static assets: `assets.directory` is **unsupported** and rejected before planning (`WORKER_ASSETS_UNSUPPORTED`). Publish static files as a Pages site; Worker uploaded bytes cannot currently be attested by the server.
 - Pages: `pages_build_output_dir` instead of `main`/`assets`.
 - `routes[].custom_domain: true` is refused: the installing user chooses
   their own domain in the Configure step.
@@ -345,3 +344,32 @@ Node build for such releases.
    `DurableObject`, and new Durable Object classes use `new_sqlite_classes` in a
    single migration tag.
 5. You tested the ZIP from this computer on an instance and read the plan.
+
+## Distributing TapDeploy itself
+
+Use Python 3 (standard library only) and the existing Node toolchain. Public source
+archives include only Git-visible files under `src/`, `tests/`, `schemas/`,
+`scripts/`, `docs/`, `.github/` and the explicit root-file allowlist in
+`scripts/package-public-artifact.py`. Runtime archives contain only the built
+Node server/public directory, Workers script/assets, manifests and license.
+Never ZIP the entire workspace. Local credentials and runbook state are excluded.
+
+```sh
+npm run build
+mkdir -p temp/release
+python3 scripts/source-fingerprint.py --repo . --output temp/release/source.json
+python3 scripts/package-public-artifact.py source --identity temp/release/source.json --output dist/releases/tapdeploy-source.zip
+python3 scripts/package-public-artifact.py runtime --identity temp/release/source.json --output dist/releases/tapdeploy-runtime.zip
+python3 scripts/scan-public-artifact.py dist/releases/tapdeploy-runtime.zip
+```
+
+Packaging rejects a stale input fingerprint and scans before writing an archive.
+Embedded `manifest.json` records source/lockfile/file hashes and build versions;
+the sidecar adds archive SHA-256 and scanner result (avoiding a circular self-hash).
+The build must be re-run after source changes; the release runbook verifies that
+binding before candidate acceptance. The bounded scanner recursively checks
+ZIP/tar/gzip archives, rejects private paths, links, encrypted/unsupported archives,
+known private-key/token patterns and the synthetic regression sentinel; it is not
+a proof that arbitrary secrets cannot exist. Diagnostics contain types and paths,
+never matched values. CI uploads only scanned archives and manifests, never raw
+Playwright traces, HAR or storage state. Docker copies only named build inputs.

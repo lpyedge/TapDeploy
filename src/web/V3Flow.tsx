@@ -158,7 +158,13 @@ export function V3Flow(props: V3FlowProps) {
   // most one live source and releases it when replaced, removed or unmounted.
   const analysisRef = useRef<ReleaseAnalysisJob | null>(null);
   const liveSourceRef = useRef<V3RetainedSource | null>(null);
-  useEffect(() => () => { analysisRef.current?.cancel(); liveSourceRef.current?.access.dispose(); }, []);
+  useEffect(() => () => {
+    runRef.current += 1;
+    prepareAbortRef.current?.abort();
+    analysisRef.current?.cancel();
+    liveSourceRef.current?.access.dispose();
+    deployAbortRef.current?.abort();
+  }, []);
   const analyze = async (blob: Blob, label: string): Promise<V3RetainedSource> => {
     const policy = releasePolicyFromConfigText(configText);
     if (!policy) throw new Error("This config is invalid: fix it at the config step.");
@@ -285,7 +291,7 @@ export function V3Flow(props: V3FlowProps) {
   const nameTaken = form.mode === "install" && renameAllowed && (upgradeTargets.data ?? []).some((target) => target.name === workerName);
   const inputsReady = (!renameAllowed || checkWorkerName(workerNameDef, workerName) === null)
     && shownInputs.every((def) => inputError(def, form.mode, form.inputValues[def.key] ?? "") === null);
-  const configureReady = !busy && inputsReady && names.every((row) => !row.error) && Object.keys(domainErrors).length === 0
+  const configureReady = !busy && !inventory.loading && !upgradeTargets.loading && inputsReady && names.every((row) => !row.error) && Object.keys(domainErrors).length === 0
     && hyperdriveReady(hyperdriveUnits, form.hyperdriveChoices) && machine.can("PLAN_READY") && !nameTaken;
 
   const plan = async (proof: unknown, inputs: Record<string, string | number | boolean>, paidRiskConfirmed: boolean) => {
@@ -335,6 +341,7 @@ export function V3Flow(props: V3FlowProps) {
   };
 
   const continueFromConfigure = async () => {
+    if (!configureReady) return;
     const proof = machine.snapshot().releaseProof;
     if (!proof || !inputsReady || !machine.can("PLAN_READY")) return;
     const inputs = planInputs(renameAllowed, form.inputValues, shownInputs);
@@ -348,6 +355,7 @@ export function V3Flow(props: V3FlowProps) {
   const deployAbortRef = useRef<AbortController | null>(null);
   const stopDeploy = () => { setStopping(true); deployAbortRef.current?.abort(); };
   const deploy = async () => {
+    if (deployAbortRef.current) return;
     const s = machine.snapshot();
     if (!s.source || !s.releaseProof || !s.graphPlan || !s.executionContext || !s.approval) return;
     setStatuses([]);
@@ -392,7 +400,7 @@ export function V3Flow(props: V3FlowProps) {
   };
 
   // Signing out mid-deploy would end the session under the running steps.
-  const deploying = snap.stage === "deploy" && snap.deployOk === null && statuses.length > 0;
+  const deploying = snap.deployRunning;
   const graphPlan = (snap.graphPlan ?? null) as GraphPlan | null;
   // The confirmation is sealed into the plan approval, so toggling it re-plans;
   // the checkbox stays visible (checked) once the confirmed plan arrives.
@@ -409,8 +417,8 @@ export function V3Flow(props: V3FlowProps) {
           <p className="meta m-0 break-all">{props.appId} · config from {props.sourceLabel}</p>
         </div>
         <div className="flex shrink-0 gap-4">
-          <button type="button" className="link text-sm" onClick={props.onExit} data-testid="v3-exit">Use another config</button>
-          {!deploying && <button type="button" className="link text-sm" onClick={props.onSignOut} data-testid="v3-sign-out">Sign out</button>}
+          <button type="button" className="link text-sm" disabled={busy || deploying} onClick={props.onExit} data-testid="v3-exit">Use another config</button>
+          {!deploying && <button type="button" className="link text-sm" disabled={busy} onClick={props.onSignOut} data-testid="v3-sign-out">Sign out</button>}
         </div>
       </div>
       {props.accounts.length > 1 && !accountId && (

@@ -428,7 +428,7 @@ describe("auth routes", () => {
     expect(await res.json()).toEqual({ authenticated: false });
   });
 
-  it("logout clears the session cookie when CSRF + origin pass", async () => {
+  it.each([200, 400, 401, 404, 503, "throw", "timeout"] as const)("logout clears local cookie and reports provider outcome %s", async (outcome) => {
     const app = createApp(authEnv());
     // Build a valid session by running the full callback flow.
     const startRes = await startReq(app);
@@ -436,11 +436,15 @@ describe("auth routes", () => {
     const state = new URL((await startRes.json()).url).searchParams.get("state")!;
 
     const origFetch = globalThis.fetch;
+    let revokeCalls = 0;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       if (String(input).includes("/oauth2/token")) {
         return jsonResponse({ access_token: "tok-abc", token_type: "Bearer" });
       }
-      return new Response(null, { status: 404 });
+      revokeCalls++;
+      if (outcome === "throw") throw new Error("synthetic network error");
+      if (outcome === "timeout") throw new DOMException("synthetic timeout", "TimeoutError");
+      return new Response(null, { status: outcome });
     }) as typeof fetch;
 
     try {
@@ -456,6 +460,12 @@ describe("auth routes", () => {
       const csrf = (await sessRes.json()).csrf as string;
       expect(csrf).toBeTruthy();
 
+      for (const badHeaders of [{ origin: "https://evil.example", "x-tapdeploy-csrf": csrf }, { origin: PUBLIC_ORIGIN, "x-tapdeploy-csrf": "wrong" }]) {
+        const denied = await app.request("/api/auth/logout", { method: "POST", headers: { cookie: sessionCookie, ...badHeaders } });
+        expect(denied.status).toBe(403);
+        expect(denied.headers.get("set-cookie")).toBeNull();
+      }
+      expect(revokeCalls).toBe(0);
       const logoutRes = await app.request("/api/auth/logout", {
         method: "POST",
         headers: {
@@ -465,12 +475,31 @@ describe("auth routes", () => {
         },
       });
       expect(logoutRes.status).toBe(200);
+      expect(revokeCalls).toBe(1);
+      expect(await logoutRes.json()).toEqual({ localSessionCleared: true, providerRevocation: outcome === 200 ? "confirmed" : "unconfirmed" });
+      expect(logoutRes.headers.get("cache-control")).toBe("no-store");
       const setCookie = logoutRes.headers.get("set-cookie") ?? "";
       expect(setCookie).toContain("__Host-tapdeploy_session=;");
       expect(setCookie).toContain("Max-Age=0");
     } finally {
       globalThis.fetch = origFetch;
     }
+  });
+
+  it("logout without a session is idempotent and never calls the provider", async () => {
+    const app = createApp(authEnv());
+    const original = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => { calls++; throw new Error("unexpected provider call"); }) as typeof fetch;
+    try {
+      for (let i = 0; i < 2; i++) {
+        const res = await app.request("/api/auth/logout", { method: "POST", headers: { origin: PUBLIC_ORIGIN } });
+        expect(await res.json()).toEqual({ localSessionCleared: true, providerRevocation: "not_applicable" });
+        expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+        expect(await (await app.request("/api/auth/session")).json()).toEqual({ authenticated: false });
+      }
+      expect(calls).toBe(0);
+    } finally { globalThis.fetch = original; }
   });
 
   it("logout rejects a bad origin", async () => {

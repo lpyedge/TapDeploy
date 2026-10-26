@@ -60,7 +60,7 @@ export function ConfigEntry({ initialUrl, onLoaded, busy, error }: ConfigEntryPr
 
   // A local .json file replaces whatever is in the box.
   const readFile = async (file: File | undefined) => {
-    if (!file) return;
+    if (!file || checking || busy) return;
     if (file.size > CONFIG_MAX_BYTES) {
       setErrors([{ field: "$", message: `config is ${formatBytes(file.size)}; the limit is ${formatBytes(CONFIG_MAX_BYTES)}` }]);
       return;
@@ -171,7 +171,7 @@ export function ConfigEntry({ initialUrl, onLoaded, busy, error }: ConfigEntryPr
             data-testid="config-input"
             className={dragging ? "drop-active" : undefined}
             value={text}
-            disabled={busy}
+            disabled={working}
             onChange={(e) => setText(e.target.value)}
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
@@ -182,11 +182,11 @@ export function ConfigEntry({ initialUrl, onLoaded, busy, error }: ConfigEntryPr
             <p className="m-0">Paste the link to a <code>tapdeploy.config.json</code>, or paste its content.</p>
             <p className="m-0 flex flex-wrap items-center gap-2">
               Or load it from a file:
-              <button type="button" className="px-3 py-1.5" disabled={busy} onClick={() => fileInput.current?.click()} data-testid="config-file-browse">Choose a .json file…</button>
+              <button type="button" className="px-3 py-1.5" disabled={working} onClick={() => fileInput.current?.click()} data-testid="config-file-browse">Choose a .json file…</button>
               <span>or drop it onto the box above.</span>
             </p>
           </div>
-          <input ref={fileInput} type="file" accept=".json,application/json" className="sr-only" data-testid="config-file" onChange={(e) => { void readFile(e.target.files?.[0]); e.target.value = ""; }} />
+          <input ref={fileInput} type="file" accept=".json,application/json" className="sr-only" disabled={working} data-testid="config-file" onChange={(e) => { void readFile(e.target.files?.[0]); e.target.value = ""; }} />
           <p className={pastedBytes > CONFIG_MAX_BYTES ? "field-error" : "field-hint"} data-testid="config-size">
             {formatBytes(pastedBytes)} of {formatBytes(CONFIG_MAX_BYTES)}
           </p>

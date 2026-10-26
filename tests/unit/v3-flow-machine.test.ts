@@ -47,11 +47,14 @@ describe("V3FlowMachine", () => {
     expect(m.snapshot().stage).toBe("deploy");
     expect(m.snapshot().graphPlan).toEqual({ units: [] });
     m.startDeploy();
+    expect(m.snapshot().deployRunning).toBe(true);
+    expect(() => m.startDeploy()).toThrow();
     expect(m.snapshot().stage).toBe("deploy");
     m.finishDeploy({ ok: true, verifiedReceipts: 3 });
     const done = m.snapshot();
     expect(done.stage).toBe("done");
     expect(done.deployOk).toBe(true);
+    expect(done.deployRunning).toBe(false);
     expect(done.verifiedReceipts).toBe(3);
   });
 

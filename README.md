@@ -62,13 +62,13 @@ step that the user cannot get wrong:
 
 ## What it deploys
 
-- **Compute:** Workers (modules, Wasm, static assets, cron, Durable Objects,
+- **Compute:** Workers (modules, Wasm, cron, Durable Objects,
   Workflows) and static Pages sites.
 - **Storage and bindings:** R2, D1, KV, Queues, Vectorize, Workers AI, Browser
   Rendering, Hyperdrive and Secrets Store (existing ones the user picks).
 - **Domains:** the user binds their own domain to any Worker or Pages site, and
   can change it on upgrade.
-- **Not supported:** building source code (releases are prebuilt), Pages
+- **Not supported:** Worker static assets (`assets.directory`, disabled pending server-authoritative byte verification), building source code (releases are prebuilt), Pages
   Functions, providers other than Cloudflare.
 
 ## How it works

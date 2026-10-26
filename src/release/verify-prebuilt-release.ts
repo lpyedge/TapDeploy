@@ -34,6 +34,9 @@ export async function verifyPrebuiltRelease(bytes: Uint8Array, policy: PrebuiltR
   if (policy.expectedSha256 && policy.expectedSha256 !== result.manifest.archiveSha256) return { ok: false, status: 409, body: { error: "SOURCE_POLICY_MISMATCH" } };
   const perUnit = await buildPerUnitBundles(result, { resourceOnlyUnitIds: policy.units.filter((unit) => unit.kind === "resources").map((unit) => unit.id), unitDeclarations: policy.units, ...(engine.pagesHash ? { pagesHash: engine.pagesHash } : {}) });
   if (!perUnit.ok) return { ok: false, status: 400, body: { error: "INVALID_PER_UNIT_RELEASE", detail: perUnit.errors[0] } };
+  if (perUnit.units?.some((unit) => unit.canonicalWrangler.kind === "worker" && unit.canonicalWrangler.assets)) {
+    return { ok: false, status: 409, body: { error: "WORKER_ASSETS_UNSUPPORTED", detail: "Worker static assets are disabled: uploaded byte integrity is not verified. Use a static Pages site or a Worker without static assets." } };
+  }
   return { ok: true, manifest: result.manifest, files: result.files ?? [], perUnit };
 }
 

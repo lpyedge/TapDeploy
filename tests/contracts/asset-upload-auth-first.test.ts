@@ -129,18 +129,16 @@ describe("asset upload relay bounds what it reads once the caller is accepted", 
     expect(upstream).toHaveLength(0);
   });
 
-  it("forwards the exact bytes and the exact content type (multipart boundary kept)", async () => {
+  it("refuses Worker assets before reading the body or contacting upstream", async () => {
     const { app, login } = await setup();
-    stubUpstream(() => new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } }));
-    const payload = new Uint8Array(3 * CHUNK + 5).map((_, i) => (i * 31 + 7) & 255);
-    const type = "multipart/form-data; boundary=----exact-boundary-123";
-    const response = await send(app, { cookie: login.sessionCookie, csrf: login.csrf, jwt: JWT, type, query: `target=workers-assets&account=${ACCOUNT}`, body: payload });
-    expect(response.status).toBe(200);
-    const sent = upstream.at(-1)!;
-    expect(new Headers(sent.init.headers).get("content-type")).toBe(type);
-    const forwarded = new Uint8Array(await new Response(sent.init.body as BodyInit).arrayBuffer());
-    expect(forwarded.length).toBe(payload.length);
-    expect(forwarded.every((byte, i) => byte === payload[i])).toBe(true);
+    stubUpstream();
+    const { body, state } = countingBody(3 * CHUNK);
+    const response = await send(app, { cookie: login.sessionCookie, csrf: login.csrf, jwt: JWT,
+      type: "multipart/form-data; boundary=x", query: `target=workers-assets&account=${ACCOUNT}`, body });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "WORKER_ASSETS_UNSUPPORTED" });
+    expect(state.pulled).toBeLessThanOrEqual(CHUNK);
+    expect(upstream).toHaveLength(0);
   });
 
   it("passes upstream 429 and 500 through with Retry-After", async () => {

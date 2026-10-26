@@ -46,7 +46,10 @@ describe("release analysis matches /api/deploy/prepare", () => {
   it.each(comparable.map((f) => [f.name, f] as const))("%s", async (_name, fixture) => {
     const route = await prepareViaRoute(fixture.zip, fixture.policy);
     const analysis = await analyzeRelease(fixture.zip, fixture.policy as unknown as PrebuiltReleasePolicy);
-    expect(route.status === 200).toBe(fixture.kind !== "negative");
+    // Structurally valid historical corpus entries can be unsupported products.
+    const disabledWorkerAssets = ["worker-single", "multi-unit", "worker-5MiB-asset", "worker-near-24MiB-expanded", "obs-crc-mismatch-accepted"].includes(fixture.name);
+    expect(route.status === 200).toBe(fixture.kind !== "negative" && !disabledWorkerAssets);
+    if (disabledWorkerAssets) expect(route).toMatchObject({ status: 409, body: { error: "WORKER_ASSETS_UNSUPPORTED" } });
     if (route.status === 200) {
       expect(analysis.ok).toBe(true);
       if (analysis.ok) expect(analysis.summary).toEqual(route.body.releaseSummary);

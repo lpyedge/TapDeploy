@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { SECURITY_HEADERS } from "./security-headers.js";
 import { attachAuthRoutes } from "./routes/auth.js";
 import { attachAccountsRoutes } from "./routes/accounts.js";
 import { attachDeployPlanRoutes } from "./routes/deploy-plan.js";
@@ -24,6 +25,13 @@ export const SUPPORTED_SCHEMA_VERSION = 3;
 
 export function createApp(env: TapDeployEnv): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  // Registered before routes and Node's static middleware: applies to errors,
+  // redirects and static responses too. Workers static assets use _headers.
+  app.use("*", async (c, next) => {
+    await next();
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) c.header(name, value);
+    c.header("Cache-Control", c.req.path.startsWith("/api/") ? "no-store" : "no-cache");
+  });
   app.use("/api/*", boundedApiBody);
   // Server errors leave one line in the log (route, status, our own error codes;
   // never request bodies or credentials) so a failure the browser only reports

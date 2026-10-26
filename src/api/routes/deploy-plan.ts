@@ -160,6 +160,12 @@ async function openRelease({ payload, key, body }: PlanRequest) {
       throw new PlanRefusal(409, { error: "INVALID_RELEASE_PROOF" });
     }
   }
+  if (release.units.some((unit) => {
+    const wrangler = unit.canonicalWrangler as Record<string, unknown>;
+    return wrangler.kind === "worker" && wrangler.assets;
+  })) {
+    throw new PlanRefusal(409, { error: "WORKER_ASSETS_UNSUPPORTED", detail: "Worker static assets are disabled: uploaded byte integrity is not verified." });
+  }
   return { config: bound.config, configHash: bound.configHash, release };
 }
 

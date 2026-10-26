@@ -23,7 +23,7 @@ the Deploy page; there is no separate Connect, progress or done page).
 
 | Step | Contract |
 |---|---|
-| Config | One textarea (URL or JSON) and one button; `.json` can be dropped; `?config=` pre-fills and auto-submits once. Loading a config goes straight to Cloudflare consent (or straight into the flow when the session already covers that exact config); there is no Connect screen, and an expired session re-authorizes the same config directly. |
+| Config | One textarea (URL or JSON) and one button; `.json` can be dropped; `?config=` pre-fills and auto-submits once, taking priority over a previously stored config. Loading a config goes straight to Cloudflare consent (or straight into the flow when the session already covers that exact config); there is no Connect screen, and an expired session re-authorizes the same config directly. |
 | Release | One page: the download link and a ZIP-from-this-computer drop zone (omitted when the config sets `allowLocalZip: false`). A chosen file wins and the link rests until it is removed; one Verify button. Prebuilt ZIPs only, at most 8 MiB (`RELEASE_MAX_BYTES`, one number for a chosen file, a direct download, the installer relay and the server check). The browser checks the ZIP first in a Worker (stage text, Cancel that terminates the Worker or aborts the call); the server then verifies the same bytes, and only that check issues the proof (section 3a). |
 | Configure | Inline `New | Upgrade`. New: editable Worker name (pre-filled from the sealed release); a name that already exists is flagged with a switch to Upgrade. Upgrade: read-only dropdown of the account's Workers, manual entry if listing fails. Switching mode keeps the typed name. The server enforces the choice at plan time: New never updates a live Worker and Upgrade never creates one (`TARGET_MODE_CONFLICT`, zero writes). What must be answered (Worker name, required inputs, Hyperdrive) is always shown; everything optional (optional inputs and secret changes, resource names, custom domains) is a collapsed section that shows its current state and opens on demand, or stays open while it holds an error. Per Worker/Pages unit, an optional custom domain from the account's zones (`<sub>.<zone>`); replacing what serves a hostname today needs explicit consent; on Upgrade the bound hostnames are listed and one choice applies to them: keep (default), use another instead, or remove (unbinding needs consent). A release with Hyperdrive bindings requires picking one of the account's Hyperdrive configurations per binding. |
 | Deploy | Review (effective names, create/update/preserve, cost, secrets) → confirm → inline progress → result card. |
@@ -36,11 +36,16 @@ follow (a Pages domain reads `pending` for a few minutes): Pages domains by the
 status the domains endpoint reports, Worker domains by an opaque HTTPS probe;
 it says so while it waits and offers a re-check if the watch gives up. Without
 any address the card lists the created identities and says why; a Cloudflare dashboard link is **always**
-present. The dashboard link is derived from the approved plan's effective
+present. Every verified workers.dev address is retained for multi-Worker
+releases. The dashboard link is derived from the approved plan's effective
 Worker or Pages project name for any action (create, update, preserve) and falls
 back to the account home. URLs are never invented. Every step has one primary
 button whose enablement comes from the state machine plus input validation; the
-stepper follows the machine stage.
+stepper follows the machine stage. Account selection is locked after Release;
+changing accounts starts a fresh flow. Planning locks configuration and Back,
+and deployment marks itself running before the first async action and locks
+exit/sign-out. A changed inventory query hides the previous Worker’s facts
+until the new response arrives.
 
 Worker name override: any valid name (`^[a-z0-9-]{1,63}$`, plus the declared
 input's own validation when the config declares one) for a release with exactly
@@ -135,21 +140,24 @@ The browser does real work, but none of it is authority.
   with large assets, so the Workers Free 10 ms CPU limit is **not cleared**
   (billed CPU is not measured). A trust change (for example a publisher-signed
   manifest) was researched and is not approved.
-- **Asset uploads** go browser → same-origin `POST /api/upload/assets` → four
-  fixed Cloudflare URLs with the short-lived upload JWT only. The relay
+- **Worker static assets are unsupported.** Shared browser/server release verification rejects `assets.directory`; planning rejects older proofs, execution rejects older asset specs, and the direct relay refuses Worker uploads before reading the body. Plain Workers and static Pages remain supported.
+- **Asset uploads** go browser → same-origin `POST /api/upload/assets` → three
+  fixed Pages Cloudflare URLs with the short-lived upload JWT only. The relay
   authenticates and validates the request before it reads any body, counts and
   caps the bytes (16 MiB), drops a stalled sender, forwards the exact bytes and
   content type, and cancels the upstream request when the browser cancels. It is
   buffered after that point; streaming upstream is not enabled (not live
   verified). The browser retries a batch once after a transient failure (429,
-  5xx, network; also a 30 s timeout for Worker assets), waiting for the provider's `Retry-After` or a short
+  5xx, network), waiting for the provider's `Retry-After` or a short
   back-off (at most 10 s); 401/403 are never retried, and uploads are keyed by
   content hash, so a repeat is safe.
 - **Dispatch order.** The plan response also carries non-secret
   `schedulerHints` (the unit dependency edges already sealed in the context).
   The driver uses them to avoid asking for work whose prerequisites are
-  unfinished; invalid or absent hints fall back to the legacy order, and the
-  server still refuses (`GRAPH_DEPENDENCY_REQUIRED`) anything out of order. One
+  unfinished. The current plan must include valid hints covering every unit;
+  missing/invalid hints are refused before dispatch, and a deadlock stops the
+  run. There is no legacy dispatch path. The server still refuses
+  (`GRAPH_DEPENDENCY_REQUIRED`) anything out of order. One
   aggregated `/step` per approved action; there is no generic fetch bridge
   (`tests/contracts/api-surface.test.ts` pins the route list).
 
@@ -170,7 +178,9 @@ that is already expiring ends the callback with `token_expired`). A provider
 401 reaches the browser as 401 (sign in again for the same config), a provider
 403 as 403 (the account lacks a permission: signing in again will not help),
 and only a missing target is 404. *Sign out* (hidden while a deploy runs) calls
-`/api/auth/logout`: the server revokes the provider token and clears the cookie. The
+`/api/auth/logout`: the server revokes the provider token and clears the cookie.
+The UI waits for this response before announcing sign-out; a failed request
+keeps retry available. The
 scopes requested are exactly the config's; the client registration is the
 only upper bound (Cloudflare answers `invalid_scope` beyond it).
 
@@ -208,14 +218,12 @@ src/runtime/      node.ts (:8787), workers.ts
 
 ## 6. Resource rules (read before changing a provider path)
 
-Worker: the release name, optionally overridden (section 2). Static assets:
-register → browser upload → complete, completion JWT bound to the version upload.
-The manifest (paths and hashes) always comes from the sealed release, never from
-the browser; the uploaded **bytes** are not verified by the installer (the relay
-forwards them) and, measured live, Cloudflare Workers Assets serves bytes that do
-not match the hash they were uploaded under (Pages stores by content hash, so a
-mismatching upload leaves the hash missing). The browser that holds the ZIP is
-therefore trusted to upload the files it verified. Cron: whole-set PUT with exact ordered
+Worker: the release name, optionally overridden (section 2). Worker static
+assets are disabled at prepare, plan, step and relay boundaries in both runtimes.
+The existing format/hash code does not establish upload authority. Cloudflare
+Workers Assets was observed serving bytes inconsistent with the submitted hash;
+there is no supported browser-trust exception. Pages remains a separate path.
+Cron: whole-set PUT with exact ordered
 readback; an empty approved set preserves. KV: the id is a claim, lookup only,
 never created from an id. D1: verified `database_id`; resource-only units may
 ensure by name. R2: verified by name; private bootstrap is a guarded owner flow

@@ -24,6 +24,17 @@ async function mockApi(page: Page, options: { session: Record<string, unknown> |
 }
 
 test.describe("dynamic installer UI", () => {
+  test("pasted legacy config is refused before authorization", async ({ page }) => {
+    await mockApi(page, { session: { authenticated: false } });
+    const starts: string[] = [];
+    page.on("request", (request) => { if (request.url().endsWith("/api/auth/start")) starts.push(request.url()); });
+    await page.goto("/");
+    await page.getByTestId("config-input").fill('{"schemaVersion":2}');
+    await page.getByTestId("config-go").click();
+    await expect(page.getByTestId("config-errors")).toContainText("only Config V3");
+    expect(starts).toEqual([]);
+  });
+
   test("quick link with an invalid config stays on the entry step with the address filled in", async ({ page }) => {
     await mockApi(page, { session: { authenticated: false } });
     const configUrl = "https://config.example.com/bad.json";

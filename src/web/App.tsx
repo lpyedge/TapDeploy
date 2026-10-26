@@ -41,7 +41,7 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [session, setSession] = useState<SessionState | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
-  const [quickUrl] = useState(readQuickLink);
+  const [quickUrl, setQuickUrl] = useState(readQuickLink);
   // The loaded config once the session is known to cover it; V3Flow owns the rest.
   const [config, setConfig] = useState<LoadedConfig | null>(null);
   const [uiStage, setUiStage] = useState<"release" | "configure" | "deploy">("release");
@@ -49,6 +49,7 @@ export function App() {
   const [accountId, setAccountId] = useState("");
   // Checking coverage or handing the page over to Cloudflare sign-in.
   const [busy, setBusy] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   // Set right after a completed sign-in: a config that is still not covered
   // then is reported instead of looping back into another sign-in.
@@ -137,7 +138,7 @@ export function App() {
       const live = await getSession().catch(() => null);
       setSession(live);
       if (live?.authenticated && live.csrf) loadAccounts(live.csrf);
-      const stored = readStoredConfig();
+      const stored = quickUrl ? null : readStoredConfig();
       // Back from Cloudflare (or a reload mid-flow): continue with the stored
       // config; V3Flow re-verifies coverage before anything is uploaded. A
       // stored config without a session goes straight to sign-in (the page
@@ -154,17 +155,29 @@ export function App() {
   // A session that ends mid-flow (expired cookie, revoked grant) goes straight
   // back to Cloudflare for the same config; nothing is written without a new
   // plan and confirmation.
-  // The server revokes the Cloudflare token and clears the session cookie; the
+  // The server attempts provider revocation and clears the session cookie; the
   // page forgets everything it held about the session.
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     const csrf = session?.csrf;
-    if (csrf) void signOut(csrf).catch(() => {});
-    clearStoredConfig();
-    setSession(null);
-    setConfig(null);
-    setAccounts([]);
-    setAccountId("");
-    setNotice("Signed out. The installer asked Cloudflare to revoke this sign-in.");
+    setSigningOut(true);
+    setNotice(null);
+    try {
+      const result = csrf ? await signOut(csrf) : undefined;
+      clearStoredConfig();
+      setSession(null);
+      setConfig(null);
+      setAccounts([]);
+      setAccountId("");
+      setNotice(result?.providerRevocation === "confirmed"
+        ? "Signed out. Cloudflare confirmed revocation of this sign-in."
+        : result?.providerRevocation === "unconfirmed"
+          ? "Signed out of this installer. Cloudflare revocation was not confirmed; manage authorized applications in the Cloudflare Dashboard."
+          : "Signed out of this installer.");
+    } catch (error) {
+      setNotice(`Sign-out could not be confirmed (${safeErrorMessage(error)}). Try signing out again.`);
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   const reauthorize = () => {
@@ -173,19 +186,20 @@ export function App() {
     void signIn(config);
   };
 
-  if (!sessionChecked) {
+  if (!sessionChecked || signingOut) {
     return (
       <Shell step={0} notice={notice}>
-        <p className="loading" role="status" data-testid="session-loading">Loading…</p>
+        <p className="loading" role="status" data-testid="session-loading">{signingOut ? "Signing out…" : "Loading…"}</p>
       </Shell>
     );
   }
 
   if (config && session?.authenticated && session.csrf) {
-    const account = accounts.length > 1 ? <AccountBar accountId={accountId} accounts={accounts} onAccount={setAccountId} /> : undefined;
+    const account = accounts.length > 1 ? <AccountBar accountId={accountId} accounts={accounts} onAccount={setAccountId} disabled={uiStage !== "release"} /> : undefined;
     return (
       <Shell step={uiStage === "release" ? 1 : uiStage === "configure" ? 2 : 3} notice={notice} account={account}>
         <V3Flow
+          key={accountId}
           csrf={session.csrf}
           accountId={accountId}
           accounts={accounts}
@@ -208,7 +222,10 @@ export function App() {
         initialUrl={quickUrl}
         busy={busy}
         error={authError}
-        onLoaded={(text, sourceLabel) => void openConfig({ text, sourceLabel, appId: v3AppId(text) ?? "unknown" })}
+        onLoaded={(text, sourceLabel) => {
+          setQuickUrl(undefined);
+          void openConfig({ text, sourceLabel, appId: v3AppId(text) ?? "unknown" });
+        }}
       />
     </Shell>
   );

@@ -376,15 +376,12 @@ async function logoutHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Res
     return c.json({ error: "csrf/origin check failed" }, 403);
   }
 
-  if (payload?.accessToken) {
-    await revokeToken(oauthConfig(cfg), payload.accessToken);
-  }
-
-  return c.text("OK", {
-    status: 200,
-    headers: {
-      "Set-Cookie": clearSessionCookieHeader({ ttlMs: SESSION_TTL_MS, publicOrigin: cfg.publicOrigin }),
-    },
+  const providerRevocation = payload?.accessToken
+    ? await revokeToken(oauthConfig(cfg), payload.accessToken) ? "confirmed" : "unconfirmed"
+    : "not_applicable";
+  return c.json({ localSessionCleared: true, providerRevocation }, 200, {
+    "Set-Cookie": clearSessionCookieHeader({ ttlMs: SESSION_TTL_MS, publicOrigin: cfg.publicOrigin }),
+    "Cache-Control": "no-store",
   });
 }
 

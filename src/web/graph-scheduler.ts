@@ -17,8 +17,8 @@ export interface SchedulerHints {
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
 
 /**
- * Hints that are well formed for this plan, or null (the driver then keeps its
- * legacy order). Unknown units, duplicates, self edges, cycles and an order
+ * Hints that are well formed for this plan, or null (the driver refuses the
+ * plan). Unknown units, duplicates, self edges, cycles and an order
  * that contradicts the edges are all treated as unusable, never repaired.
  */
 export function parseSchedulerHints(raw: unknown, planUnitIds: readonly string[]): SchedulerHints | null {
@@ -26,7 +26,7 @@ export function parseSchedulerHints(raw: unknown, planUnitIds: readonly string[]
   const { version, topoOrder, dependencies } = raw as { version?: unknown; topoOrder?: unknown; dependencies?: unknown };
   if (version !== 1 || !isStringArray(topoOrder) || !Array.isArray(dependencies)) return null;
   const known = new Set(planUnitIds);
-  if (new Set(topoOrder).size !== topoOrder.length || topoOrder.some((id) => !known.has(id))) return null;
+  if (topoOrder.length !== known.size || new Set(topoOrder).size !== topoOrder.length || topoOrder.some((id) => !known.has(id))) return null;
   const position = new Map(topoOrder.map((id, index) => [id, index]));
   const seen = new Set<string>();
   const edges: SchedulerHints["dependencies"] = [];

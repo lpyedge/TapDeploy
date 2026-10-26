@@ -25,5 +25,8 @@ export function useLoaded<T>(key: string | null, load: () => Promise<T>): Loaded
     );
     return () => { cancelled = true; };
   }, [key, state.key]);
-  return { data: state.data, loading: key !== null && state.key !== key, error: state.error };
+  // A paused query retains its result for review/replanning. An active query
+  // must never expose another account or Worker's facts while it loads.
+  const current = key === null || state.key === key;
+  return { data: current ? state.data : null, loading: !current, error: current ? state.error : null };
 }
