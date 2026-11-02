@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { prepareOAuthTxRequest, verifyGrantedScopes } from "../../src/auth/oauth-tx.js";
+import { prepareOAuthTxRequest, sourcePolicyDigest, sourcePolicyFromConfig, verifyGrantedScopes } from "../../src/auth/oauth-tx.js";
 import {
   DEVELOPER_SCOPE_UNDERDECLARED,
   checkResolvedCapabilitiesWithin,
@@ -69,7 +69,7 @@ describe("v3 capability scope planning", () => {
 });
 
 describe("v3 one-shot oauth transaction", () => {
-  it("binds the canonical v3 hash, registry scopes and the app/source policy", async () => {
+  it("binds the canonical v3 hash, registry scopes and the app/source policy digest", async () => {
     const config = v3Config();
     const tx = await prepareOAuthTxRequest(config, SEED);
 
@@ -78,11 +78,8 @@ describe("v3 one-shot oauth transaction", () => {
     expect(tx.configHash).toMatch(/^[0-9a-f]{64}$/);
     expect(tx.scopes).toEqual(["dns.write", "workers-r2.write", "workers-scripts.admin", "zone.read"]);
     expect(tx.capabilities).toEqual(["dns", "r2", "workers", "zone"]);
-    expect(tx.appId).toBe("example/notes");
-    expect(tx.source).toEqual({
-      defaultUrl: "https://example.com/notes.zip",
-      allowLocalZip: true,
-    });
+    expect(sourcePolicyFromConfig(config)).toMatchObject({ defaultUrl: "https://example.com/notes.zip", allowLocalZip: true, appId: "example/notes" });
+    expect(tx.sourcePolicyDigest).toBe(await sourcePolicyDigest(sourcePolicyFromConfig(config)));
     expect(tx.modes).toEqual(["install", "upgrade"]);
     expect(tx.state).toBe(SEED.state);
     expect(tx.nonce).toBe(SEED.nonce);

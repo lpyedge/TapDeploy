@@ -13,7 +13,11 @@ export interface SessionPayload {
   nonce: string;
   accountId?: string;
   source: string;
-  sourcePolicy?: { defaultUrl?: string; allowLocalZip: boolean; expectedSha256?: string; appId: string; units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string; upgradeKeep: boolean }> }> };
+  // Digest of the authorized config's source policy (src/auth/oauth-tx.ts).
+  // Only digests live in the cookie, which must stay under the browser's 4 KiB
+  // limit for every valid config; /api/deploy/prepare rebuilds the policy from
+  // the config text it receives.
+  sourcePolicyDigest?: string;
   // the canonical SHA-256 of the config this one-shot OAuth was bound to
   //. A session that was created against a different/null config cannot be
   // reused for another config's deploy without re-authorization.
@@ -63,7 +67,7 @@ export async function createSession(
     source: string;
     accountId?: string;
     configHash?: string;
-    sourcePolicy?: SessionPayload["sourcePolicy"];
+    sourcePolicyDigest?: string;
   },
 ): Promise<SessionData> {
   const now = Date.now();
@@ -79,7 +83,7 @@ export async function createSession(
     accountId: token.accountId,
     source: token.source,
     configHash: token.configHash,
-    sourcePolicy: token.sourcePolicy,
+    sourcePolicyDigest: token.sourcePolicyDigest,
   };
   const envelope = await sealJson(key, payload);
   const json = JSON.stringify(envelope);

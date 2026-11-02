@@ -123,9 +123,7 @@ async function graphV3Step(
     return c.json({ error: "GRAPH_ACTION_REQUIRED" }, 400);
   }
   if (body.phase !== step) return c.json({ error: "GRAPH_PHASE_MISMATCH" }, 409);
-  const sourcePolicyDigest = payload.sourcePolicy
-    ? [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(payload.sourcePolicy)) as Uint8Array<ArrayBuffer>))].map((b) => b.toString(16).padStart(2, "0")).join("")
-    : "";
+  const sourcePolicyDigest = payload.sourcePolicyDigest ?? "";
   const context = await openGraphExecutionContext(key, body.executionContext, {
     nonce: payload.nonce, configHash: payload.configHash ?? "", accountId, sourcePolicyDigest,
   }, payload.expiresAt);

@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   prepareOAuthTxRequest,
+  sourcePolicyDigest,
+  sourcePolicyFromConfig,
   verifyGrantedScopes,
 } from "../../src/auth/oauth-tx.js";
 import type { ConfigV3 } from "../../src/manifest/config-v3.js";
@@ -26,15 +28,14 @@ function config(capabilities: string[], units: ConfigV3["units"] = [{ id: "main"
 const seed = { state: "state-abc", nonce: "nonce-xyz", verifier: "verifier-long-value" };
 
 describe("prepareOAuthTxRequest", () => {
-  it("binds config hash + derived scopes + capabilities + source policy + modes", async () => {
+  it("binds config hash + derived scopes + capabilities + source policy digest + modes", async () => {
     const tx = await prepareOAuthTxRequest(config(["workers", "r2"]), seed);
     expect(tx.v).toBe(2);
     expect(tx.configHash).toMatch(/^[0-9a-f]{64}$/);
     expect(tx.scopes).toEqual(["dns.write", "workers-r2.write", "workers-scripts.admin", "zone.read"]);
     expect(tx.capabilities).toEqual(["dns", "r2", "workers", "zone"]);
-    expect(tx.appId).toBe("example/notes-service");
-    expect(tx.source).toEqual({ allowLocalZip: true });
-    expect(tx.units).toEqual([{ id: "main", kind: "worker", wrangler: "wrangler.jsonc" }]);
+    expect(sourcePolicyFromConfig(config(["workers", "r2"]))).toEqual({ allowLocalZip: true, appId: "example/notes-service", units: [{ id: "main", kind: "worker", wrangler: "wrangler.jsonc" }] });
+    expect(tx.sourcePolicyDigest).toBe(await sourcePolicyDigest(sourcePolicyFromConfig(config(["workers", "r2"]))));
     expect(tx.modes).toEqual(["install", "upgrade"]);
     expect(tx.state).toBe("state-abc");
   });

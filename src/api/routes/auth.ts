@@ -263,7 +263,7 @@ async function callbackHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<R
     scope: tx.scopes,
     source: cfg.clientId,
     configHash: tx.configHash,
-    sourcePolicy: { ...tx.source, appId: tx.appId, units: tx.units },
+    sourcePolicyDigest: tx.sourcePolicyDigest,
   });
   const attrs = sessionCookie(session, { ttlMs, publicOrigin: cfg.publicOrigin });
   const setCookie = sessionCookieHeader(attrs);

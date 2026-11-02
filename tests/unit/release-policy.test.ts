@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { prepareOAuthTxRequest } from "../../src/auth/oauth-tx.js";
+import { prepareOAuthTxRequest, sourcePolicyDigest } from "../../src/auth/oauth-tx.js";
 import type { ConfigV3 } from "../../src/manifest/config-v3.js";
 import { releasePolicyFromConfigText } from "../../src/web/compute/release-policy.js";
 
@@ -11,9 +11,11 @@ const configs: ConfigV3[] = [
 ];
 
 describe("releasePolicyFromConfigText", () => {
-  it.each(configs.map((config) => [config.app.id, config] as const))("equals the policy the server seals for %s", async (_id, config) => {
+  it.each(configs.map((config) => [config.app.id, config] as const))("is the policy whose digest the server seals for %s", async (_id, config) => {
     const tx = await prepareOAuthTxRequest(config, seed);
-    expect(releasePolicyFromConfigText(JSON.stringify(config))).toEqual({ ...tx.source, appId: tx.appId, units: tx.units });
+    const policy = releasePolicyFromConfigText(JSON.stringify(config));
+    expect(policy).toMatchObject({ appId: config.app.id, allowLocalZip: config.source.allowLocalZip ?? true });
+    expect(await sourcePolicyDigest(policy!)).toBe(tx.sourcePolicyDigest);
   });
   it("returns null for text that is not a config", () => {
     expect(releasePolicyFromConfigText("not json")).toBeNull();

@@ -126,11 +126,6 @@ interface PlanRequest {
   json: (value: unknown) => Response;
 }
 
-async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 /** The config bound to the session and the release the prepare step proved: the only authority planning accepts. */
 async function openRelease({ payload, key, body }: PlanRequest) {
   const bound = await bindConfigToSession({ sessionConfigHash: payload.configHash, configText: body.config?.text });
@@ -140,7 +135,7 @@ async function openRelease({ payload, key, body }: PlanRequest) {
   const release = await openVerifiedReleaseContext(key, body.releaseProof, {
     nonce: payload.nonce,
     configHash: bound.configHash,
-    sourcePolicyDigest: payload.sourcePolicy ? await sha256Hex(JSON.stringify(payload.sourcePolicy)) : "",
+    sourcePolicyDigest: payload.sourcePolicyDigest ?? "",
   }, payload.expiresAt);
   if (!release) throw new PlanRefusal(409, { error: "INVALID_RELEASE_PROOF" });
   const declaredUnitIds = (plannedUnits(bound.config) ?? []).map((unit) => unit.id).sort();

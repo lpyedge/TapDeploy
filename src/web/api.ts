@@ -251,25 +251,30 @@ export interface GraphPrepareEnvelope {
 }
 
 /**
- * Send the EXACT retained ZIP bytes through the server trust boundary. The
- * browser preview hash (if any) is advisory; the returned releaseProof is the
- * only release authority the plan/step routes accept.
+ * Send the EXACT retained ZIP bytes, with the config this session was
+ * authorized for, through the server trust boundary. The browser preview hash
+ * (if any) is advisory; the returned releaseProof is the only release
+ * authority the plan/step routes accept.
  */
 export async function prepareReleaseZip(
   csrf: string,
+  configText: string,
   zip: Blob,
   signal?: AbortSignal,
 ): Promise<GraphPrepareEnvelope> {
+  const body = new FormData();
+  body.append("config", configText);
+  body.append("release", zip, "release.zip");
   let res: Response;
   try {
+    // The browser sets the multipart Content-Type (with its boundary) itself.
     res = await fetch("/api/deploy/prepare", {
       method: "POST",
       headers: {
         Accept: "application/json",
-        "Content-Type": "application/zip",
         ...(csrf ? { "x-tapdeploy-csrf": csrf } : {}),
       },
-      body: zip,
+      body,
       ...(signal ? { signal } : {}),
     });
   } catch (error) {

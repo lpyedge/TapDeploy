@@ -76,10 +76,12 @@
           },
           "then": {
             "required": [
-              "defaultUrl"
+              "defaultUrl",
+              "expectedSha256"
             ],
             "properties": {
-              "defaultUrl": true
+              "defaultUrl": true,
+              "expectedSha256": true
             }
           }
         }

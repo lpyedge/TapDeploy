@@ -4,7 +4,6 @@
 // implementation means the browser can neither accept what the server rejects
 // nor drift from its error codes.
 
-import type { SessionPayload } from "../auth/session.js";
 import { RELEASE_MAX_BYTES } from "../core/upload-limits.js";
 import { releaseResourceNames, type ReleaseResourceName } from "../core/planning/resource-names.js";
 import { buildPerUnitBundles, type PerUnitBundlesResult } from "./per-unit-bundles.js";
@@ -12,7 +11,14 @@ import { extractPrebuiltZip, type PrebuiltZipFile, type PrebuiltZipManifest } fr
 
 const MAX_VERIFIED_ZIP_EXPANDED = 24 * 1024 * 1024;
 
-export type PrebuiltReleasePolicy = NonNullable<SessionPayload["sourcePolicy"]>;
+/** What a config requires of its release (`sourcePolicyFromConfig`, src/auth/oauth-tx.ts). */
+export interface PrebuiltReleasePolicy {
+  defaultUrl?: string;
+  allowLocalZip: boolean;
+  expectedSha256?: string;
+  appId: string;
+  units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string; upgradeKeep: boolean }> }>;
+}
 
 export interface PrebuiltReleaseRefusal {
   status: 400 | 403 | 409 | 413;

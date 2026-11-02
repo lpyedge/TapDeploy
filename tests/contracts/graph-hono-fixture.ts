@@ -3,8 +3,8 @@ import { zipSync } from "fflate";
 import { createApp, type TapDeployEnv } from "../../src/api/app.js";
 import { deriveSealKey, openSeal, type SealedEnvelope } from "../../src/auth/keys.js";
 import { createSession, sessionCookieName } from "../../src/auth/session.js";
-import { sourcePolicyUnits } from "../../src/auth/oauth-tx.js";
-import { computeConfigV3Id, type ConfigV3 } from "../../src/manifest/config-v3.js";
+import type { ConfigV3 } from "../../src/manifest/config-v3.js";
+import { prepareForm, sessionBinding } from "./login.js";
 import type { VerifiedReleaseContext } from "../../src/core/planning/graph-execution-context.js";
 import type { GraphDeployPlan } from "../../src/core/planning/plan.js";
 import { graphActionId } from "../../src/core/planning/digest.js";
@@ -34,8 +34,7 @@ export async function graphHonoFixture(config: ConfigV3, files: Record<string, U
   const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET!);
   const session = await createSession(key, { ttlMs: 120_000, publicOrigin: origin }, {
     accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId,
-    configHash: await computeConfigV3Id(config),
-    sourcePolicy: { ...config.source, allowLocalZip: config.source.allowLocalZip ?? true, appId: config.app.id, units: sourcePolicyUnits(config) },
+    ...(await sessionBinding(config)),
   });
   const app = createApp(env);
   const trace: Array<{ method: string; path: string }> = [];
@@ -415,7 +414,7 @@ export async function graphHonoFixture(config: ConfigV3, files: Record<string, U
   const headers = { origin, "x-tapdeploy-csrf": session.payload.csrf, cookie: `${sessionCookieName(origin)}=${session.cookieValue}` };
   const json = (route: string, body: unknown) => app.request(route, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) });
   const archive = zipSync(files, { level: 0 });
-  const prepare = () => app.request("/api/deploy/prepare", { method: "POST", headers: { ...headers, "content-type": "application/zip" }, body: archive });
+  const prepare = () => app.request("/api/deploy/prepare", { method: "POST", headers, body: prepareForm(JSON.stringify(config), archive) });
   const prepared = await prepare();
   const preparedBody = await prepared.json() as { releaseProof: SealedEnvelope };
   if (options.allowPrepareFailure) {

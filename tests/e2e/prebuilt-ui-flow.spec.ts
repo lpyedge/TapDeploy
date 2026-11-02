@@ -140,8 +140,11 @@ async function mockV3Api(page: Page, mocks: FlowMocks, planStatus?: { status: nu
     const req = route.request();
     const headers = req.headers();
     expect(headers["x-tapdeploy-csrf"]).toBe(CSRF);
-    expect(headers["content-type"]).toContain("application/zip");
-    mocks.prepareBodies.push(req.postDataBuffer() ?? Buffer.of());
+    // multipart/form-data: the authorized config text and the exact ZIP bytes.
+    expect(headers["content-type"]).toContain("multipart/form-data");
+    const form = await new Request("http://prepare.test", { method: "POST", headers: { "content-type": headers["content-type"]! }, body: req.postDataBuffer() ?? Buffer.of() }).formData();
+    expect((JSON.parse(String(form.get("config"))) as { schemaVersion?: unknown }).schemaVersion).toBe(3);
+    mocks.prepareBodies.push(Buffer.from(await (form.get("release") as Blob).arrayBuffer()));
     return json(route, {
       releaseProof: "proof-sealed",
       releaseSummary: { archiveSha256: "a".repeat(64), manifestDigest: "b".repeat(64), entryCount: 2, units: [{ unitId: "main", kind: "worker", name: "api" }] },
@@ -1527,12 +1530,15 @@ test.describe("bridge contracts (no browser)", () => {
       return Response.json({ error: "GRAPH_DEPENDENCY_REQUIRED" }, { status: 409 });
     }) as typeof fetch;
     try {
-      const prepared = await prepareReleaseZip("csrf-x", new Blob([new Uint8Array([1, 2, 3])]));
+      const prepared = await prepareReleaseZip("csrf-x", V3_TEXT, new Blob([new Uint8Array([1, 2, 3])]));
       expect(prepared.releaseProof).toBe("p");
       expect(seen[0]?.url).toBe("/api/deploy/prepare");
-      expect((seen[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe("application/zip");
+      // The browser sets the multipart type (with its boundary) for the form itself.
+      expect((seen[0]?.init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
       expect((seen[0]?.init.headers as Record<string, string>)["x-tapdeploy-csrf"]).toBe("csrf-x");
-      expect(Array.from(new Uint8Array(await (seen[0]?.init.body as Blob).arrayBuffer()))).toEqual([1, 2, 3]);
+      const form = seen[0]?.init.body as FormData;
+      expect(form.get("config")).toBe(V3_TEXT);
+      expect(Array.from(new Uint8Array(await (form.get("release") as Blob).arrayBuffer()))).toEqual([1, 2, 3]);
       // Non-2xx responses surface as typed failures, never silent fallbacks.
       await expect(fetchGraphPlan("csrf-x", { accountId: "a", releaseProof: "p", config: { text: V3_TEXT } })).rejects.toMatchObject({ kind: "UNSUPPORTED_GRAPH_OPERATION", status: 409 });
       await expect(doGraphStep("csrf-x", { accountId: "a", executionContext: "c", approval: "x", unitId: "m", actionId: "act", phase: "activate", step: "activate" })).rejects.toMatchObject({ kind: "GRAPH_DEPENDENCY_REQUIRED", status: 409 });

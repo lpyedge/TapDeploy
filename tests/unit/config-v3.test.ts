@@ -218,6 +218,16 @@ describe("tapdeploy.config.v3 schema contract", () => {
     expect(assertConfigV3Safe(cast).some((i) => /defaultUrl is required/.test(i.detail))).toBe(true);
   });
 
+  // The browser downloads the release, so a config without local ZIPs can only
+  // be satisfied by a pinned hash; without one, /prepare could never accept it.
+  it("requires expectedSha256 when allowLocalZip is false (schema and guard)", () => {
+    const base = loadFixture("minimal");
+    const unpinned = { ...base, source: { allowLocalZip: false, defaultUrl: "https://example.com/app.zip" } };
+    expect(validateConfigV3(unpinned).ok).toBe(false);
+    expect(assertConfigV3Safe(unpinned as unknown as ConfigV3).some((i) => /expectedSha256 is required/.test(i.detail))).toBe(true);
+    expect(validateConfigV3Entry({ ...unpinned, source: { ...unpinned.source, expectedSha256: "a".repeat(64) } }).ok).toBe(true);
+  });
+
   it("rejects duplicate unit ids, unknown dependencies and dependency cycles", () => {
     const base = expectValid(loadFixture("multi-unit"));
 

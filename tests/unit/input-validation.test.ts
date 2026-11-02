@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inputAskedIn, inputOptions, inputProblem, inputRequiredIn, inputValueProblem } from "../../src/manifest/input-validation.js";
+import { inputAskedIn, inputOptions, inputPatternProblem, inputProblem, inputRequiredIn, inputValueProblem } from "../../src/manifest/input-validation.js";
 
 const options = [{ label: "Europe", value: "eu" }, { label: "US", value: "us" }, { label: "Three", value: 3 }];
 
@@ -45,16 +45,32 @@ describe("input values", () => {
     expect(inputValueProblem({ type: "multiselect", options }, "eu,asia")).toBe("only the listed options");
   });
 
-  it("applies the declared range, length, pattern and allowed values", () => {
+  it("applies the declared range, length and allowed values", () => {
     expect(inputValueProblem({ type: "integer", validation: { minimum: 1, maximum: 30 } }, "0")).toBe("at least 1");
     expect(inputValueProblem({ type: "integer", validation: { minimum: 1, maximum: 30 } }, "31")).toBe("at most 30");
     expect(inputValueProblem({ type: "string", validation: { minLength: 3, maxLength: 5 } }, "ab")).toBe("at least 3 characters");
     expect(inputValueProblem({ type: "string", validation: { minLength: 3, maxLength: 5 } }, "abcdef")).toBe("at most 5 characters");
-    expect(inputValueProblem({ type: "string", validation: { pattern: "sk_[a-z]+" } }, "sk_live")).toBeNull();
-    expect(inputValueProblem({ type: "string", validation: { pattern: "sk_[a-z]+" } }, "live")).toBe("invalid format");
-    expect(inputValueProblem({ type: "string", validation: { pattern: "(" } }, "x")).toBe("invalid declared pattern");
     expect(inputValueProblem({ type: "string", validation: { values: ["a", 2] } }, "2")).toBeNull();
     expect(inputValueProblem({ type: "string", validation: { values: ["a", 2] } }, "b")).toBe("one of the allowed values");
+  });
+
+  it("the browser applies the declared pattern to the whole value", () => {
+    expect(inputPatternProblem({ type: "string", validation: { pattern: "sk_[a-z]+" } }, "sk_live")).toBeNull();
+    expect(inputPatternProblem({ type: "string", validation: { pattern: "sk_[a-z]+" } }, "live")).toBe("invalid format");
+    expect(inputPatternProblem({ type: "string", validation: { pattern: "sk_[a-z]+" } }, "xsk_livex")).toBe("invalid format");
+    expect(inputPatternProblem({ type: "string", validation: { pattern: "(" } }, "x")).toBe("invalid declared pattern");
+    expect(inputPatternProblem({ type: "string", validation: { pattern: "sk_[a-z]+" } }, "")).toBeNull();
+    expect(inputPatternProblem({ type: "string" }, "anything")).toBeNull();
+  });
+
+  // A publisher regex can backtrack exponentially: `(a+)+` against 40 "a"s and a
+  // "!" runs for hours. The checks the server enforces never evaluate it.
+  it("the server-side checks never run the declared pattern", () => {
+    const hostile = { type: "string" as const, validation: { pattern: "(a+)+" } };
+    const started = performance.now();
+    expect(inputValueProblem(hostile, `${"a".repeat(40)}!`)).toBeNull();
+    expect(inputProblem(hostile, "install", `${"a".repeat(40)}!`)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it("an empty value is a problem only where the input is required", () => {

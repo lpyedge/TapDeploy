@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/api/app.js";
 import { deriveSealKey, openSeal, type SealedEnvelope } from "../../src/auth/keys.js";
 import { createSession, sessionCookieName } from "../../src/auth/session.js";
-import { sourcePolicyUnits } from "../../src/auth/oauth-tx.js";
-import { computeConfigV3Id, type ConfigV3 } from "../../src/manifest/config-v3.js";
+import type { ConfigV3 } from "../../src/manifest/config-v3.js";
 import { graphActionId } from "../../src/core/planning/digest.js";
 import { zipSync } from "fflate";
 import { graphHonoFixture } from "./graph-hono-fixture.js";
+import { prepareForm, sessionBinding } from "./login.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -380,7 +380,7 @@ it("rejects a forged V3 execution context in the real Hono route before provider
   const origin = "https://installer.example";
   const env = { RUNTIME: "node", PUBLIC_ORIGIN: origin, OAUTH_CLIENT_ID: "x", OAUTH_CLIENT_SECRET: "x" } as const;
   const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
-  const session = await createSession(key, { ttlMs: 60_000, publicOrigin: origin }, { accessToken: "token", tokenType: "Bearer", scope: [], source: "v3", accountId: "a".repeat(32), configHash: "c".repeat(64), sourcePolicy: { allowLocalZip: true, appId: "app", units: [] } });
+  const session = await createSession(key, { ttlMs: 60_000, publicOrigin: origin }, { accessToken: "token", tokenType: "Bearer", scope: [], source: "v3", accountId: "a".repeat(32), configHash: "c".repeat(64), sourcePolicyDigest: "d".repeat(64) });
   const app = createApp(env);
   const response = await app.request("/api/deploy/step", { method: "POST", headers: { origin, "content-type": "application/json", "x-tapdeploy-csrf": session.payload.csrf, cookie: `${sessionCookieName(origin)}=${session.cookieValue}` }, body: JSON.stringify({ executionContext: { forged: true }, unitId: "x", actionId: "x", phase: "create-r2-buckets", step: "create-r2-buckets" }) });
   expect(response.status).toBe(409); expect((await response.json()).error).toBe("GRAPH_CONTEXT_MISMATCH"); expect(fetchMock).not.toHaveBeenCalled();
@@ -498,8 +498,7 @@ describe("workers.dev exposure (graph API)", () => {
     const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
     const session = await createSession(key, { ttlMs: 120_000, publicOrigin: ORIGIN }, {
       accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId: ACCOUNT,
-      configHash: await computeConfigV3Id(V3_CONFIG as never),
-      sourcePolicy: { allowLocalZip: true, appId: "example/exposure", units: [] },
+      ...(await sessionBinding(V3_CONFIG as never)),
     });
     const headers = {
       origin: ORIGIN,
@@ -567,7 +566,7 @@ describe("workers.dev exposure (graph API)", () => {
     };
     const archive = zipSync(files, { level: 0 });
     const prepared = await app.request("/api/deploy/prepare", {
-      method: "POST", headers: { ...headers, "content-type": "application/zip" }, body: archive as unknown as BodyInit,
+      method: "POST", headers, body: prepareForm(JSON.stringify(V3_CONFIG), archive),
     });
     const preparedBody = await prepared.json() as { releaseProof: unknown };
     expect(prepared.status, JSON.stringify(preparedBody)).toBe(200);
@@ -693,8 +692,7 @@ describe("worker secret input and inheritance (graph API)", () => {
     const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
     const session = await createSession(key, { ttlMs: 120_000, publicOrigin: ORIGIN }, {
       accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId: ACCOUNT,
-      configHash: await computeConfigV3Id(V3_CONFIG as never),
-      sourcePolicy: { allowLocalZip: true, appId: "example/secrets", units: [] },
+      ...(await sessionBinding(V3_CONFIG as never)),
     });
     const headers = {
       origin: ORIGIN,
@@ -783,11 +781,13 @@ describe("worker secret input and inheritance (graph API)", () => {
     };
     const archive = zipSync(files, { level: 0 });
     const prepared = await app.request("/api/deploy/prepare", {
-      method: "POST", headers: { ...headers, "content-type": "application/zip" }, body: archive as unknown as BodyInit,
+      method: "POST", headers, body: prepareForm(JSON.stringify(V3_CONFIG), archive),
     });
-    const preparedBody = await prepared.json() as { releaseProof: unknown };
-    expect(prepared.status, JSON.stringify(preparedBody)).toBe(200);
-    const planned = await app.request("/api/deploy/plan", {
+    const preparedBody = await prepared.json() as { releaseProof: unknown; error?: string };
+    // An invalid config is refused at prepare, before any provider read; the
+    // tests read that refusal as the plan status.
+    if (prepared.status !== 200) expect(preparedBody.error, JSON.stringify(preparedBody)).toBe("invalid_config");
+    const planned = prepared.status !== 200 ? Response.json(preparedBody, { status: prepared.status }) : await app.request("/api/deploy/plan", {
       method: "POST", headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ accountId: ACCOUNT, releaseProof: preparedBody.releaseProof, config: { text: JSON.stringify(V3_CONFIG) }, paidRiskConfirmed: true, mode: "install", ...installBody }),
     });
@@ -1157,8 +1157,7 @@ it("prepares raw ZIP bytes and creates a server-derived V3 graph plan", async ()
   const key = await deriveSealKey(env.OAUTH_CLIENT_SECRET);
   const session = await createSession(key, { ttlMs: 60_000, publicOrigin: origin }, {
     accessToken: "token", tokenType: "Bearer", scope: [], source: "v3", accountId,
-    configHash: await computeConfigV3Id(config),
-    sourcePolicy: { allowLocalZip: true, appId: config.app.id, units: sourcePolicyUnits(config) },
+    ...(await sessionBinding(config)),
   });
   const app = createApp(env);
   let r2Created = false;
@@ -1195,7 +1194,7 @@ it("prepares raw ZIP bytes and creates a server-derived V3 graph plan", async ()
     "wrangler.jsonc": new TextEncoder().encode('{"name":"api","main":"worker/main.mjs","compatibility_date":"2026-10-17"}'),
     "worker/main.mjs": new TextEncoder().encode("export default { fetch() { return new Response('ok'); } };"),
   });
-  const prepared = await app.request("/api/deploy/prepare", { method: "POST", headers: { ...headers, "content-type": "application/zip" }, body: archive });
+  const prepared = await app.request("/api/deploy/prepare", { method: "POST", headers, body: prepareForm(configText, archive) });
   const preparedBody = await prepared.json() as { releaseProof?: unknown; error?: string; detail?: string };
   expect(prepared.status, JSON.stringify(preparedBody)).toBe(200);
   const proof = preparedBody.releaseProof;
@@ -1309,8 +1308,7 @@ async function setupBootstrap(
   const config = configWith(policy);
   const session = await createSession(key, { ttlMs: 120_000, publicOrigin: ORIGIN }, {
     accessToken: "offline-test-token", tokenType: "Bearer", scope: [], source: "v3", accountId: ACCOUNT,
-    configHash: await computeConfigV3Id(config as never),
-    sourcePolicy: { allowLocalZip: true, appId: "example/owner-app", units: [{ id: "main", kind: "worker", wrangler: "wrangler.jsonc" }] },
+    ...(await sessionBinding(config as never)),
   });
   const headers = {
     origin: ORIGIN,
@@ -1472,11 +1470,13 @@ async function setupBootstrap(
   };
   const archive = zipSync(files, { level: 0 });
   const prepared = await app.request("/api/deploy/prepare", {
-    method: "POST", headers: { ...headers, "content-type": "application/zip" }, body: archive as unknown as BodyInit,
+    method: "POST", headers, body: prepareForm(JSON.stringify(config), archive),
   });
-  const preparedBody = await prepared.json() as { releaseProof: unknown };
-  expect(prepared.status, JSON.stringify(preparedBody)).toBe(200);
-  const planned = await app.request("/api/deploy/plan", {
+  const preparedBody = await prepared.json() as { releaseProof: unknown; error?: string };
+  // An invalid config is refused at prepare, before any provider read; the
+  // tests read that refusal as the plan status.
+  if (prepared.status !== 200) expect(preparedBody.error, JSON.stringify(preparedBody)).toBe("invalid_config");
+  const planned = prepared.status !== 200 ? Response.json(preparedBody, { status: prepared.status }) : await app.request("/api/deploy/plan", {
     method: "POST", headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({ accountId: ACCOUNT, releaseProof: preparedBody.releaseProof, config: { text: JSON.stringify(config) }, paidRiskConfirmed: true, mode: "install" }),
   });

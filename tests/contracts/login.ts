@@ -7,6 +7,8 @@
 // deterministic.
 
 import type { createApp } from "../../src/api/app.js";
+import { sourcePolicyDigest, sourcePolicyFromConfig } from "../../src/auth/oauth-tx.js";
+import { computeConfigV3Id, type ConfigV3 } from "../../src/manifest/config-v3.js";
 
 export const CONFIG_TEXT = JSON.stringify({
   schemaVersion: 3,
@@ -86,4 +88,17 @@ export async function runConfigLogin(
   } finally {
     globalThis.fetch = origFetch;
   }
+}
+
+/** The session fields that bind a test session to `config`, as the OAuth callback seals them. */
+export async function sessionBinding(config: ConfigV3): Promise<{ configHash: string; sourcePolicyDigest: string }> {
+  return { configHash: await computeConfigV3Id(config), sourcePolicyDigest: await sourcePolicyDigest(sourcePolicyFromConfig(config)) };
+}
+
+/** A /api/deploy/prepare body: the authorized config text and the release ZIP. */
+export function prepareForm(configText: string, archive: Uint8Array): FormData {
+  const form = new FormData();
+  form.append("config", configText);
+  form.append("release", new Blob([archive as BlobPart]), "release.zip");
+  return form;
 }

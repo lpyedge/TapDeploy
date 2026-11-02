@@ -244,7 +244,7 @@ export function V3Flow(props: V3FlowProps) {
         if (!retained) return;
       }
       setReleaseStage("verifying");
-      const prepared = await prepareReleaseZip(csrf, retained.blob, abort.signal);
+      const prepared = await prepareReleaseZip(csrf, configText, retained.blob, abort.signal);
       if (run !== runRef.current) return;
       if (!prepared.releaseProof) throw new Error("prepare did not return a release proof");
       const units = prepared.releaseSummary.units ?? [];

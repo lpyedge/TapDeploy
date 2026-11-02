@@ -191,7 +191,10 @@ Values the user fills in, each validated in the browser and again by the server.
   arrives comma-joined) or `secret`.
 - `options`: plain values or `{ "label", "value" }` objects.
 - `validation`: `minLength`, `maxLength`, `pattern` (a regular expression that must
-  match the whole value), `minimum`, `maximum`, `values`.
+  match the whole value), `minimum`, `maximum`, `values`. The server checks all
+  of them again except `pattern`, which only the browser applies: a regular
+  expression can take exponential time on a crafted value, so the server never
+  runs one from a config.
 - `label`, `description`, `placeholder` are what the user reads.
 - On upgrade a secret you did not mark `upgradeKeep` or `generate` gets a
   "Change" checkbox; the new value is entered on the review step.

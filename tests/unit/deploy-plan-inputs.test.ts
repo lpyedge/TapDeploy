@@ -63,11 +63,24 @@ describe("preparedGraphInputs workerName override", () => {
     expect(out.specs["main"]?.cloudflare.workerName).toBe("renamed-worker");
   });
 
-  it("refuses values outside the declared pattern", () => {
-    const out = preparedGraphInputs(baseConfig(workerNameInput), [unit()], "a".repeat(64), "m".repeat(64), { workerName: "Bad_Name!" });
+  it("refuses values outside the declared length", () => {
+    const out = preparedGraphInputs(baseConfig(workerNameInput), [unit()], "a".repeat(64), "m".repeat(64), { workerName: "ab" });
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.detail).toContain("pattern");
+    expect(out.detail).toContain("minLength 3");
+  });
+
+  // The declared pattern is a browser-side hint: the server enforces Cloudflare's
+  // name rule and never evaluates a publisher regex on request input.
+  it("never evaluates the declared pattern; the Cloudflare baseline still applies", () => {
+    const hostile: ConfigV3["inputs"] = [{ key: "workerName", type: "string", label: "Worker name", validation: { pattern: "(a+)+" } }];
+    const started = performance.now();
+    const accepted = preparedGraphInputs(baseConfig(hostile), [unit()], "a".repeat(64), "m".repeat(64), { workerName: "a".repeat(40) + "-b" });
+    expect(accepted.ok).toBe(true);
+    const refused = preparedGraphInputs(baseConfig(hostile), [unit()], "a".repeat(64), "m".repeat(64), { workerName: `${"a".repeat(40)}!` });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.detail).toContain("a-z0-9");
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it("refuses values outside the safe baseline even without declared validation", () => {

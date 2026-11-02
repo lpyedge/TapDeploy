@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/api/app.js";
 import { ASSET_UPLOAD_MAX_BODY_BYTES } from "../../src/core/upload-limits.js";
-import { WORKER_CONFIG_SCOPES, runConfigLogin } from "./login.js";
+import { WORKER_CONFIG_SCOPES, prepareForm, runConfigLogin } from "./login.js";
 import { assetUploadHash } from "../../src/cloudflare/assets/manifest.js";
 import { zipSync } from "fflate";
 
@@ -144,7 +144,7 @@ describe("Worker static assets are unsupported in both runtimes", () => {
       "main.mjs": enc.encode("export default { fetch() { return new Response('ok'); } };"),
       "public/index.html": enc.encode("approved A"),
     });
-    const res = await app.request("/api/deploy/prepare", { method: "POST", headers: { cookie: login.sessionCookie, "x-tapdeploy-csrf": login.csrf, "content-type": "application/zip" }, body: archive as BodyInit });
+    const res = await app.request("/api/deploy/prepare", { method: "POST", headers: { cookie: login.sessionCookie, "x-tapdeploy-csrf": login.csrf }, body: prepareForm(V3_CONFIG_TEXT, archive) });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "WORKER_ASSETS_UNSUPPORTED" });
     expect(upstream).toHaveLength(0);

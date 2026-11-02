@@ -73,7 +73,9 @@ server): install asks for every input (`required` defaults true); upgrade asks
 for the ones not marked `upgradeKeep`, and an empty value there keeps the
 deployed one. The plan request is refused (`INVALID_INPUT`) for a value that is
 missing at install, not asked on upgrade, or breaks the declared type and
-`validation`. Non-secret inputs are merged into the Worker's `vars` when the
+`validation`; `validation.pattern` is the exception, applied in the browser only
+(`inputPatternProblem`), because a publisher's regular expression can backtrack
+exponentially and the server never evaluates one. Non-secret inputs are merged into the Worker's `vars` when the
 specs are built, so the version upload and the postcheck treat them like
 release variables; a key the release already sets is refused. On upgrade
 `replaceSecrets` lists the secrets the user chose to change: their policy
@@ -82,7 +84,8 @@ the version upload instead of an inherit directive.
 
 ## 3. Sealed-graph protocol (do not weaken)
 
-`prepare` (server seals the ZIP bytes) → `plan` (server re-validates config,
+`prepare` (server verifies the ZIP bytes against the config the session was
+authorized for and seals the result) → `plan` (server re-validates config,
 recomputes the hash, seals graph + context + approval) → `step` (server
 re-verifies context, action, receipts and a fresh snapshot, performs the write,
 reads the target back and seals a receipt).
@@ -119,7 +122,8 @@ The browser does real work, but none of it is authority.
   a run number so a cancelled or replaced run can neither update the page nor
   install a source.
 - **The Worker keeps the extracted files.** The page holds the original `Blob`
-  (re-sent unchanged to `/prepare`) and a narrow async `SourceAccessor`
+  (re-sent unchanged to `/prepare`, a `multipart/form-data` request with the
+  config text, from which the server rebuilds the same source policy) and a narrow async `SourceAccessor`
   (`listFiles`, `readFile`, Worker-asset index/bytes by approved hash, Pages
   manifest/bytes by hash; fixed method names, no URL or arbitrary read). One
   live source per flow; it is released when replaced, removed or on unmount.
@@ -169,7 +173,9 @@ escalation: a different config needs a fresh authorization. A changed config
 first calls the read-only `POST /api/auth/check-config`; covered configs go
 straight to Release, others re-authorize; a plan/step `config_mismatch` (409)
 returns the UI to the same panel. The config text lives only in the tab
-(`sessionStorage`, 30 minutes); the server stores only its hash. Cookies, CSRF
+(`sessionStorage`, 30 minutes); the server stores only its hash and the digest
+of its source policy, never the policy itself, so both cookies stay far below the
+browser's 4 KiB cookie limit for any valid config. Cookies, CSRF
 and the redirect URI derive from the single trusted origin `PUBLIC_ORIGIN`.
 The session and OAuth-transaction cookies are sealed with AES-GCM under a key
 derived (HKDF) from the OAuth client secret; a session lasts at most 20 minutes

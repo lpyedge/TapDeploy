@@ -1,15 +1,27 @@
-// The 38-archive release corpus (6 accepted, 31 refused, 1 observation) shared by the
-// server-route parity test and the browser Worker probe. Built deterministically at
-// test time; nothing here is a checked-in binary.
+// The 36-archive release corpus (6 accepted, 29 refused, 1 observation) shared by the
+// server-route parity test and the browser Worker probe. Each archive comes with the
+// config it is verified against (both sides derive the source policy from it). Built
+// deterministically at test time; nothing here is a checked-in binary.
 import { zipSync } from "fflate";
+import type { ConfigV3 } from "../../src/manifest/config-v3.js";
 import { buildCraftedZip } from "./zip-builder.js";
 
 export interface ReleaseFixture {
   name: string;
   kind: "positive" | "negative" | "observation";
-  policy: Record<string, unknown>;
+  config: ConfigV3;
   zip: Uint8Array;
 }
+
+type Units = NonNullable<ConfigV3["units"]>;
+const configOf = (appId: string, units: Units, extra: Partial<ConfigV3> = {}): ConfigV3 => ({
+  schemaVersion: 3,
+  app: { id: appId, name: "Fixture" },
+  source: { allowLocalZip: true },
+  capabilities: [...new Set(units.map((unit) => (unit.kind === "pages" ? "pages" as const : "workers" as const)))],
+  units,
+  ...extra,
+});
 
 function prng(seed: number): () => number {
   let s = seed >>> 0 || 1;
@@ -29,23 +41,24 @@ export function buildReleaseFixtures(): ReleaseFixture[] {
   const MAIN = enc.encode("import { x } from './extra.mjs';\nexport default { fetch() { return new Response(x); } };\n");
   const EXTRA = enc.encode("export const x = 'ok';\n");
   const assets = (prefix: string, n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`${prefix}/a/chunk-${i}.${i % 3 ? "js" : "css"}`, bytesOf(200 + (i * 37) % 3000, 700 + i)]));
-  const workerPolicy = { appId: "example/api", allowLocalZip: true, units: [{ id: "api", kind: "worker", wrangler: "wrangler.jsonc" }] };
+  const workerConfig = configOf("example/api", [{ id: "api", kind: "worker", wrangler: "wrangler.jsonc" }]);
+  const siteConfig = configOf("example/site", [{ id: "site", kind: "pages", wrangler: "wrangler.jsonc" }]);
   const workerFiles = (extra: Record<string, Uint8Array> = {}, wrangler: object = { name: "api", main: "worker/main.mjs", assets: { directory: "public" } }) => ({
     "wrangler.jsonc": wr(wrangler), "worker/main.mjs": MAIN, "worker/extra.mjs": EXTRA, "worker/mod.wasm": new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]),
     "public/index.html": enc.encode("<h1>hi</h1>"), ...extra,
   });
   const fx: ReleaseFixture[] = [];
-  const add = (name: string, kind: ReleaseFixture["kind"], zip: Uint8Array, policy: Record<string, unknown> = workerPolicy) => fx.push({ name, kind, policy, zip });
+  const add = (name: string, kind: ReleaseFixture["kind"], zip: Uint8Array, config: ConfigV3 = workerConfig) => fx.push({ name, kind, config, zip });
 
   // positives
   add("worker-single", "positive", zipSync({ ...workerFiles(assets("public", 220)) }));
-  add("pages", "positive", zipSync({ "wrangler.jsonc": wr({ name: "site", pages_build_output_dir: "public" }), "public/index.html": enc.encode("<h1>site</h1>"), "public/Logo.PNG": bytesOf(900, 3), ...assets("public", 40) }), { appId: "example/site", allowLocalZip: true, units: [{ id: "site", kind: "pages", wrangler: "wrangler.jsonc" }] });
+  add("pages", "positive", zipSync({ "wrangler.jsonc": wr({ name: "site", pages_build_output_dir: "public" }), "public/index.html": enc.encode("<h1>site</h1>"), "public/Logo.PNG": bytesOf(900, 3), ...assets("public", 40) }), siteConfig);
   add("multi-unit", "positive", zipSync({
     "units/jobs/wrangler.jsonc": wr({ name: "jobs", main: "main.mjs" }), "units/jobs/main.mjs": EXTRA,
     "units/api/wrangler.jsonc": wr({ name: "api", main: "main.mjs", assets: { directory: "public" } }), "units/api/main.mjs": MAIN.slice(), "units/api/public/index.html": enc.encode("api"),
     "units/site/wrangler.jsonc": wr({ name: "site", pages_build_output_dir: "dist" }), "units/site/dist/index.html": enc.encode("site"),
-  }), { appId: "example/stack", allowLocalZip: true, units: [{ id: "jobs", kind: "worker", wrangler: "units/jobs/wrangler.jsonc" }, { id: "api", kind: "worker", wrangler: "units/api/wrangler.jsonc" }, { id: "site", kind: "pages", wrangler: "units/site/wrangler.jsonc" }] });
-  add("resource-only", "positive", zipSync({ "README.md": enc.encode("resources only") }), { appId: "example/res", allowLocalZip: true, units: [{ id: "resources", kind: "resources" }] });
+  }), configOf("example/stack", [{ id: "jobs", kind: "worker", wrangler: "units/jobs/wrangler.jsonc" }, { id: "api", kind: "worker", wrangler: "units/api/wrangler.jsonc" }, { id: "site", kind: "pages", wrangler: "units/site/wrangler.jsonc" }]));
+  add("resource-only", "positive", zipSync({ "README.md": enc.encode("resources only") }), configOf("example/res", [], { capabilities: ["r2"], resources: [{ kind: "r2", name: "data" }] }));
   add("worker-5MiB-asset", "positive", zipSync({ ...workerFiles({ "public/big.wasm": bytesOf(5 * MiB, 55) }) }, { level: 0 }));
   add("worker-near-24MiB-expanded", "positive", zipSync({ ...workerFiles({ "public/p1.bin": sym4(7.3 * MiB | 0, 1), "public/p2.bin": sym4(7.3 * MiB | 0, 2), "public/p3.bin": sym4(7.3 * MiB | 0, 3) }) }, { level: 6 }));
   // negatives
@@ -76,14 +89,12 @@ export function buildReleaseFixtures(): ReleaseFixture[] {
   add("neg-garbage", "negative", bytesOf(1000, 4));
   add("neg-empty-zip", "negative", zipSync({}));
   add("neg-truncated", "negative", (() => { const z = zipSync(workerFiles()); return z.slice(0, z.length - 10); })());
-  add("neg-undeclared-wrangler", "negative", zipSync(workerFiles()), { ...workerPolicy, units: [{ id: "api", kind: "worker", wrangler: "other/wrangler.jsonc" }] });
-  add("neg-kind-mismatch", "negative", zipSync(workerFiles()), { ...workerPolicy, units: [{ id: "api", kind: "pages", wrangler: "wrangler.jsonc" }] });
+  add("neg-undeclared-wrangler", "negative", zipSync(workerFiles()), configOf("example/api", [{ id: "api", kind: "worker", wrangler: "other/wrangler.jsonc" }]));
+  add("neg-kind-mismatch", "negative", zipSync(workerFiles()), configOf("example/api", [{ id: "api", kind: "pages", wrangler: "wrangler.jsonc" }]));
   add("neg-main-missing", "negative", zipSync({ "wrangler.jsonc": wr({ name: "api", main: "nope.mjs" }) }));
-  add("neg-pages-functions", "negative", zipSync({ "wrangler.jsonc": wr({ name: "site", pages_build_output_dir: "public" }), "public/index.html": enc.encode("x"), "functions/api.js": enc.encode("x") }), { appId: "example/site", allowLocalZip: true, units: [{ id: "site", kind: "pages", wrangler: "wrangler.jsonc" }] });
-  add("neg-pages-control-file", "negative", zipSync({ "wrangler.jsonc": wr({ name: "site", pages_build_output_dir: "public" }), "public/_headers": enc.encode("/*\n X: 1") }), { appId: "example/site", allowLocalZip: true, units: [{ id: "site", kind: "pages", wrangler: "wrangler.jsonc" }] });
-  add("neg-pinned-sha-mismatch", "negative", zipSync(workerFiles()), { ...workerPolicy, expectedSha256: "0".repeat(64) });
-  add("neg-local-zip-forbidden", "negative", zipSync(workerFiles()), { ...workerPolicy, allowLocalZip: false });
-  add("neg-no-policy-units", "negative", zipSync(workerFiles()), { appId: "example/api", allowLocalZip: true });
+  add("neg-pages-functions", "negative", zipSync({ "wrangler.jsonc": wr({ name: "site", pages_build_output_dir: "public" }), "public/index.html": enc.encode("x"), "functions/api.js": enc.encode("x") }), siteConfig);
+  add("neg-pages-control-file", "negative", zipSync({ "wrangler.jsonc": wr({ name: "site", pages_build_output_dir: "public" }), "public/_headers": enc.encode("/*\n X: 1") }), siteConfig);
+  add("neg-pinned-sha-mismatch", "negative", zipSync(workerFiles()), { ...workerConfig, source: { allowLocalZip: true, expectedSha256: "0".repeat(64) } });
   add("obs-crc-mismatch-accepted", "observation", (() => { const z = zipSync(workerFiles(), { level: 0 }).slice(); const i = Buffer.from(z).indexOf(Buffer.from("<h1>hi</h1>")); z[i] = z[i]! ^ 0xff; return z; })());
   return fx;
 }

@@ -2,7 +2,7 @@
 // validated the config text; the defaults here only keep a hand-edited or
 // partial text from breaking the form.
 
-import { inputAskedIn, inputOptions, inputProblem, type InputMode } from "../manifest/input-validation.js";
+import { inputAskedIn, inputOptions, inputPatternProblem, inputProblem, type InputMode } from "../manifest/input-validation.js";
 import type { ConfigV3Input } from "../manifest/config-v3.js";
 
 /** A declared input as the form shows it: options already have labels. */
@@ -49,7 +49,7 @@ export function changeableSecrets(configText: string): DeclaredInput[] {
 
 /** What is wrong with the value of an input for this mode, or null. `workerName` also has the Cloudflare name rule. */
 export function inputError(def: DeclaredInput, mode: InputMode, value: string): string | null {
-  const problem = inputProblem(def, mode, value);
+  const problem = inputProblem(def, mode, value) ?? inputPatternProblem(def, value);
   if (problem !== null || value === "") return problem;
   if (def.key === "workerName" && !/^[a-z0-9-]{1,63}$/.test(value)) return "lowercase letters, digits and dashes, max 63";
   return null;

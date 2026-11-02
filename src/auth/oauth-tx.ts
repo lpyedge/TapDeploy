@@ -3,9 +3,10 @@
 // A single OAuth transaction is prepared from a validated Config V3 and is
 // sealed into the `__Host-tapdeploy_oauth_tx` cookie. It records the canonical
 // config hash, the derived one-shot scope set (the exact consent scope string),
-// the declared capabilities, the app/source policy and the modes covered
-// (install AND upgrade). Binding the config hash into the sealed transaction
-// means:
+// the declared capabilities, the digest of the config's source policy and the
+// modes covered (install AND upgrade). Only digests are sealed, never the policy
+// itself: a cookie must stay under the browser's 4 KiB limit for every valid
+// config. Binding the config hash into the sealed transaction means:
 //   - the callback cannot be replayed for a *different* config, and
 //   - a changed config requires a fresh transaction (no silent reuse).
 //
@@ -15,12 +16,12 @@
 
 import type { ConfigV3, V3Capability } from "../manifest/config-v3.js";
 import { computeConfigV3Id, effectiveCapabilities, plannedUnits } from "../manifest/config-v3.js";
+import type { PrebuiltReleasePolicy } from "../release/verify-prebuilt-release.js";
 import { planScopesForConfigV3 } from "./scope-planner.js";
 
 /**
  * The sealed OAuth transaction: the canonical V3 config hash plus the declared
- * symbolic capabilities (never raw scopes) and a snapshot of the app/source
- * policy.
+ * symbolic capabilities (never raw scopes) and the digest of the source policy.
  */
 export interface OAuthTxRequest {
   v: 2;
@@ -34,16 +35,14 @@ export interface OAuthTxRequest {
   scopes: string[];
   // The pre-authorized symbolic capability set (declared + implied by HTTP units).
   capabilities: V3Capability[];
-  // Nonsecret app identity + source policy bound into the session.
-  appId: string;
-  source: { defaultUrl?: string; allowLocalZip: boolean; expectedSha256?: string };
-  units: Array<{ id: string; kind: "worker" | "pages" | "resources"; wrangler?: string; resources?: Array<{ kind: string; name: string; upgradeKeep: boolean }> }>;
+  // Digest of `sourcePolicyFromConfig(config)`, bound into the session.
+  sourcePolicyDigest: string;
   // The modes covered by this single OAuth (install AND upgrade).
   modes: Array<"install" | "upgrade">;
 }
 
-/** The units the session's source policy carries: what the release must contain. */
-export function sourcePolicyUnits(config: ConfigV3): OAuthTxRequest["units"] {
+/** The units the source policy carries: what the release must contain. */
+export function sourcePolicyUnits(config: ConfigV3): PrebuiltReleasePolicy["units"] {
   return (plannedUnits(config) ?? []).map((unit) => ({
     id: unit.id,
     kind: unit.kind,
@@ -52,11 +51,28 @@ export function sourcePolicyUnits(config: ConfigV3): OAuthTxRequest["units"] {
   }));
 }
 
+/** What the config requires of its release: the policy /api/deploy/prepare verifies the ZIP against. */
+export function sourcePolicyFromConfig(config: ConfigV3): PrebuiltReleasePolicy {
+  return {
+    ...(config.source.defaultUrl !== undefined ? { defaultUrl: config.source.defaultUrl } : {}),
+    allowLocalZip: config.source.allowLocalZip ?? true,
+    ...(config.source.expectedSha256 !== undefined ? { expectedSha256: config.source.expectedSha256 } : {}),
+    appId: config.app.id,
+    units: sourcePolicyUnits(config),
+  };
+}
+
+/** SHA-256 hex of a source policy: the identity sessions, release proofs and receipts carry. */
+export async function sourcePolicyDigest(policy: PrebuiltReleasePolicy): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(policy)));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /**
  * Prepare the config-bounded one-shot OAuth transaction for a Config V3: derive
  * the scope bundle from the declared symbolic capabilities (never authored by
  * the config, never a raw scope) and bind the canonical V3 hash + the
- * capability set + the app/source policy into the sealed transaction. A scope
+ * capability set + the source policy digest into the sealed transaction. A scope
  * the OAuth client does not carry is refused by Cloudflare on its consent page
  * (`invalid_scope`). There is no re-authorization path: one config authorizes
  * exactly once.
@@ -77,17 +93,7 @@ export async function prepareOAuthTxRequest(
     configHash,
     scopes: plan.scopes,
     capabilities: effectiveCapabilities(config),
-    appId: config.app.id,
-    source: {
-      ...(config.source.defaultUrl !== undefined
-        ? { defaultUrl: config.source.defaultUrl }
-        : {}),
-      allowLocalZip: config.source.allowLocalZip ?? true,
-      ...(config.source.expectedSha256 !== undefined
-        ? { expectedSha256: config.source.expectedSha256 }
-        : {}),
-    },
-    units: sourcePolicyUnits(config),
+    sourcePolicyDigest: await sourcePolicyDigest(sourcePolicyFromConfig(config)),
     modes: ["install", "upgrade"],
   };
 }

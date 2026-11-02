@@ -496,9 +496,14 @@ export function assertConfigV3Safe(config: ConfigV3): ConfigV3SafetyIssue[] {
 
   // Source completeness + URL policy (defence in depth beyond the schema).
   if (config.source && typeof config.source === "object") {
-    const { defaultUrl, allowLocalZip } = config.source;
+    const { defaultUrl, allowLocalZip, expectedSha256 } = config.source;
     if (allowLocalZip === false && !defaultUrl) {
       issues.push({ field: "source.defaultUrl", detail: "defaultUrl is required when allowLocalZip is false" });
+    }
+    // The browser downloads the release, so its origin cannot be attested: only
+    // a pinned hash lets /api/deploy/prepare accept it without a local ZIP.
+    if (allowLocalZip === false && !expectedSha256) {
+      issues.push({ field: "source.expectedSha256", detail: "expectedSha256 is required when allowLocalZip is false" });
     }
     if (defaultUrl) {
       const problem = checkDefaultUrl(defaultUrl);

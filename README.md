@@ -30,8 +30,8 @@ the install in a small JSON file, and TapDeploy shows it as a single Configure
 step that the user cannot get wrong:
 
 - **Typed, validated inputs:** text, number, date, single or multiple choice,
-  secrets; patterns, ranges and allowed values checked in the browser and again
-  on the server; each one required or optional, and either asked again on
+  secrets; lengths, ranges and allowed values checked in the browser and again
+  on the server (a format `pattern` is checked in the browser); each one required or optional, and either asked again on
   upgrade or kept (an upgrade can change a secret such as an admin password).
   Every value arrives in the Worker as an environment variable.
 - **Resources named and governed in one place:** R2, D1, KV, Queues and

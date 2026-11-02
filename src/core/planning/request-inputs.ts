@@ -88,10 +88,11 @@ export function declaredSecretPolicies(config: ConfigV3, replaceSecrets: Readonl
  * Operator-renamable Worker identity. The release wrangler name is only a
  * publisher default: on install the operator always sets the target name
  * (prefilled from the release), and upgrade means entering an existing name.
- * A declared non-secret `workerName` input adds publisher-side constraints;
- * without one only the Cloudflare-safe baseline applies. Validation is
- * server-side and fail-closed; multi-executable releases keep release names
- * (a flat input cannot address one unit of several).
+ * A declared non-secret `workerName` input adds its length limits here (its
+ * pattern runs in the browser only, see input-validation.ts); the
+ * Cloudflare-safe baseline always applies. Validation is server-side and
+ * fail-closed; multi-executable releases keep release names (a flat input
+ * cannot address one unit of several).
  */
 export function workerNameOverride(config: ConfigV3, inputs: Record<string, PrimitiveInputValue>): Checked<string | undefined> {
   const raw = inputs.workerName;
@@ -101,15 +102,6 @@ export function workerNameOverride(config: ConfigV3, inputs: Record<string, Prim
   const validation = declared?.validation ?? {};
   if (typeof validation.minLength === "number" && raw.length < validation.minLength) return { ok: false, detail: `inputs.workerName is shorter than minLength ${validation.minLength}` };
   if (typeof validation.maxLength === "number" && raw.length > validation.maxLength) return { ok: false, detail: `inputs.workerName exceeds maxLength ${validation.maxLength}` };
-  if (typeof validation.pattern === "string") {
-    let pattern: RegExp;
-    try {
-      pattern = new RegExp(`^(?:${validation.pattern})$`);
-    } catch {
-      return { ok: false, detail: "inputs.workerName has an invalid declared pattern" };
-    }
-    if (!pattern.test(raw)) return { ok: false, detail: "inputs.workerName does not satisfy the declared pattern" };
-  }
   if (!/^[a-z0-9-]{1,63}$/.test(raw)) return { ok: false, detail: "inputs.workerName must match ^[a-z0-9-]{1,63}$" };
   return { ok: true, value: raw };
 }

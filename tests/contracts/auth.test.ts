@@ -64,6 +64,38 @@ async function getSessionCookie(res: Response): Promise<string> {
 }
 
 describe("auth routes", () => {
+  // A browser drops a cookie over 4096 bytes (name + value) without a word: the
+  // sign-in would finish and the user would still be signed out. The cookies
+  // carry digests only, so their size cannot grow with the config.
+  it("keeps the transaction and session cookies under 4096 bytes for the largest valid config", async () => {
+    const units = Array.from({ length: 8 }, (_, i) => ({ id: `u${i}`.padEnd(64, "x"), kind: i % 2 ? "pages" : "worker", wrangler: `${"d".repeat(140)}${i}/wrangler.jsonc` }));
+    const largest = JSON.stringify({
+      schemaVersion: 3,
+      app: { id: "a".repeat(180), name: "n".repeat(100) },
+      source: { defaultUrl: `https://example.com/${"p".repeat(2000)}`, allowLocalZip: false, expectedSha256: "f".repeat(64) },
+      capabilities: ["workers", "pages", "r2", "d1", "kv", "queues", "hyperdrive", "vectorize", "secrets-store", "workers-ai", "browser-rendering", "routes", "dns", "zone", "workflows", "durable-objects"],
+      units,
+      resources: Array.from({ length: 16 }, (_, i) => ({ kind: "r2", name: `b${i}`.padEnd(63, "y") })),
+    });
+    const app = createApp(authEnv());
+    const startRes = await app.request("/api/auth/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: largest }) });
+    expect(startRes.status, await startRes.clone().text()).toBe(200);
+    const txCookie = await getTxCookie(startRes);
+    expect(txCookie.length).toBeLessThan(4096);
+    const state = new URL((await startRes.json()).url).searchParams.get("state")!;
+    const origFetch = globalThis.fetch;
+    // A long provider token (a JWT-sized access token) must fit as well.
+    globalThis.fetch = (async () => jsonResponse({ access_token: "t".repeat(1500), token_type: "Bearer", expires_in: 3600 })) as typeof fetch;
+    try {
+      const cbRes = await app.request(`/api/auth/callback?code=code-1&state=${encodeURIComponent(state)}`, { headers: { cookie: txCookie } });
+      expect(cbRes.headers.get("location")).toBe(`${PUBLIC_ORIGIN}/?auth=success`);
+      const session = (await getSessionCookie(cbRes)).split(";")[0]!;
+      expect(session.length).toBeLessThan(4096);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   it("returns 500 when OAuth client id is not configured", async () => {
     const app = createApp(authEnv({ OAUTH_CLIENT_ID: "" }));
     const res = await startReq(app);

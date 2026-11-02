@@ -3,6 +3,10 @@
 // The browser uses this to guide the user and the server re-runs it on the
 // plan request, so one definition decides what a declared input accepts.
 // Values arrive as strings (a multiselect joins its choices with commas).
+// The one exception is `validation.pattern`: a publisher's regular expression
+// can backtrack exponentially on a crafted value, so only the browser runs it
+// (`inputPatternProblem`). The server never evaluates a config's regex on
+// request input; the value only lands in the operator's own Worker.
 
 import type { ConfigV3Input } from "./config-v3.js";
 
@@ -34,7 +38,11 @@ function isCalendarDate(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-/** The problem with `value` for this input, or null when it is acceptable (an empty value is not checked here). */
+/**
+ * The problem with `value` for this input, or null when it is acceptable (an
+ * empty value is not checked here). Everything but the declared pattern: this is
+ * what the server enforces.
+ */
 export function inputValueProblem(rule: ValueRule, value: string): string | null {
   const v = rule.validation ?? {};
   const optionValues = inputOptions(rule).map((option) => String(option.value));
@@ -68,15 +76,19 @@ export function inputValueProblem(rule: ValueRule, value: string): string | null
   }
   if (typeof v.minLength === "number" && value.length < v.minLength) return `at least ${v.minLength} characters`;
   if (typeof v.maxLength === "number" && value.length > v.maxLength) return `at most ${v.maxLength} characters`;
-  if (typeof v.pattern === "string") {
-    try {
-      if (!new RegExp(`^(?:${v.pattern})$`).test(value)) return "invalid format";
-    } catch {
-      return "invalid declared pattern";
-    }
-  }
   if (v.values && !v.values.map(String).includes(value)) return "one of the allowed values";
   return null;
+}
+
+/** Browser only: the declared pattern must match the whole value (see the note at the top). */
+export function inputPatternProblem(rule: ValueRule, value: string): string | null {
+  const pattern = rule.validation?.pattern;
+  if (typeof pattern !== "string" || value === "") return null;
+  try {
+    return new RegExp(`^(?:${pattern})$`).test(value) ? null : "invalid format";
+  } catch {
+    return "invalid declared pattern";
+  }
 }
 
 /** `required` when empty and needed; otherwise the value problem, if any. */

@@ -8,7 +8,7 @@ import { Spinner } from "./Spinner.js";
 import { boundDomains, deployedTargets, resultLinks, type ResultLink } from "./result-links.js";
 import { useLoaded } from "./use-loaded.js";
 import { V3DomainStatus } from "./V3DomainStatus.js";
-import { inputValueProblem } from "../manifest/input-validation.js";
+import { inputPatternProblem, inputValueProblem } from "../manifest/input-validation.js";
 
 export interface SecretPrompt {
   name: string;
@@ -35,7 +35,7 @@ export function secretPromptsFor(configText: string, graphPlan: GraphPlan | null
 
 /** What is wrong with a secret's value, or null (an empty value is "not entered yet", reported separately). */
 export function secretProblem(prompt: SecretPrompt, value: string): string | null {
-  return value === "" ? null : inputValueProblem(prompt.input, value);
+  return value === "" ? null : inputValueProblem(prompt.input, value) ?? inputPatternProblem(prompt.input, value);
 }
 
 /**
