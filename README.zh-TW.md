@@ -74,7 +74,9 @@
    └── worker/main.mjs    # 建置輸出
    ```
 3. **描述安裝內容：** 在 `tapdeploy.config.json` 寫下資源、輸入欄位、unit 與能力（capabilities），範例見上方。
-4. **發布：** 發布 ZIP（例如 GitHub release），分享 `https://<實例>/?config=<設定檔網址>`，例如做成 README 按鈕。
+4. **發布：** 發布 ZIP（例如 GitHub release），分享 `https://<實例>/?config=<設定檔網址>`，例如做成 README 按鈕，圖片用 TapDeploy 的[按鈕圖](docs/publishing.md#4-publish-and-share-the-link)：
+
+   ![Deploy with TapDeploy](src/web/public/button.svg)
 
 指南含各種情況的目錄範例、自動打包 ZIP 的 CI workflow 與完整設定檔參考：[docs/publishing.md](docs/publishing.md)。
 

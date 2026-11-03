@@ -298,12 +298,17 @@ Full field reference: the JSON Schema
    address: the browser fetches the config directly, so its host must send
    CORS headers (raw.githubusercontent.com does).
 3. Share `https://<instance>/?config=<URL-encoded config address>`, for example
-   as a README button. Every instance serves the button image at
-   `https://<instance>/button.svg`: the same height, border and type as
-   Cloudflare's *Deploy to Cloudflare* button, so the two sit together as a pair.
+   as a README button with TapDeploy's button image,
+   `https://raw.githubusercontent.com/lpyedge/TapDeploy/master/src/web/public/button.svg`:
+
+   ![Deploy with TapDeploy](../src/web/public/button.svg)
+
+   It has the same height, border and type as Cloudflare's *Deploy to
+   Cloudflare* button, so the two sit together as a pair. Load it from GitHub
+   as below, whichever instance the button opens.
 
 ```markdown
-[![Deploy with TapDeploy](https://deploy.example.com/button.svg)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
+[![Deploy with TapDeploy](https://raw.githubusercontent.com/lpyedge/TapDeploy/master/src/web/public/button.svg)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
 ```
 
 ### Offering both TapDeploy and Deploy to Cloudflare
@@ -317,7 +322,7 @@ repository and config addresses, and keep the rows true for your app):
 ```markdown
 ## Deploy
 
-[![Deploy with TapDeploy](https://deploy.example.com/button.svg)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
+[![Deploy with TapDeploy](https://raw.githubusercontent.com/lpyedge/TapDeploy/master/src/web/public/button.svg)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/you/notes)
 
 **Recommended: TapDeploy.** It installs the prebuilt release into your
@@ -487,8 +492,9 @@ Node build for such releases.
    names match that deployment ([upgrading](#upgrading-a-worker-tapdeploy-did-not-deploy)).
 8. You tested the ZIP from this computer on an instance and read the plan,
    both as a new install and as an upgrade.
-9. The README button uses `https://<instance>/button.svg`; next to *Deploy to
-   Cloudflare* it says how the two differ ([template](#offering-both-tapdeploy-and-deploy-to-cloudflare)).
+9. The README button loads its image from TapDeploy's repository
+   ([step 4](#4-publish-and-share-the-link)); next to *Deploy to Cloudflare* it
+   says how the two differ ([template](#offering-both-tapdeploy-and-deploy-to-cloudflare)).
 
 ## Distributing TapDeploy itself
 

@@ -22,6 +22,14 @@ describe("documentation links", () => {
     const missing = targets.filter((target) => !existsSync(resolve(dirname(file as string), target.split("#")[0]!)));
     expect(missing).toEqual([]);
   });
+
+  // Publishers' READMEs load the deploy button from this repository on GitHub,
+  // so a file such an address names must stay where it is.
+  it("GitHub addresses of this repository's files point at files that exist", () => {
+    const paths = files.flatMap((file) => [...readFileSync(file, "utf8").matchAll(/https:\/\/(?:raw\.githubusercontent\.com\/lpyedge\/TapDeploy\/master|github\.com\/lpyedge\/TapDeploy\/(?:blob|raw|tree)\/master)\/([^\s)"'`#]+)/g)].map((match) => match[1]!));
+    expect(paths).toContain("src/web/public/button.svg");
+    expect(paths.filter((path) => !existsSync(join(root, path)))).toEqual([]);
+  });
 });
 
 describe("package.json scripts", () => {

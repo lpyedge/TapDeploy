@@ -126,7 +126,10 @@ Guide: [docs/self-hosting.md](docs/self-hosting.md).
 3. **Describe** the install in `tapdeploy.config.json`: resources, inputs, units
    and capabilities (the example above).
 4. **Publish** the ZIP (e.g. a GitHub release) and share
-   `https://<instance>/?config=<config URL>`, for example as a README button.
+   `https://<instance>/?config=<config URL>`, for example as a README button
+   with TapDeploy's [button image](docs/publishing.md#4-publish-and-share-the-link):
+
+   ![Deploy with TapDeploy](src/web/public/button.svg)
 
 Guide with directory layouts for every case, a CI workflow that builds the ZIP,
 and the full config reference: [docs/publishing.md](docs/publishing.md).
