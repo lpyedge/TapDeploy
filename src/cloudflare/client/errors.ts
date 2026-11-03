@@ -42,7 +42,7 @@ function toKind(status: number | undefined): CloudflareErrorKind {
   }
 }
 
-function messageFor(kind: CloudflareErrorKind, detailMessage?: string): string {
+function messageFor(kind: CloudflareErrorKind, detailMessage?: string, status?: number): string {
   if (detailMessage) {
     return detailMessage;
   }
@@ -64,7 +64,8 @@ function messageFor(kind: CloudflareErrorKind, detailMessage?: string): string {
     case "invalid-response":
       return "Cloudflare API returned an invalid response";
     default:
-      return "Cloudflare API error";
+      // An unclassified status is the only clue a bodiless answer leaves.
+      return status !== undefined ? `Cloudflare API error (HTTP ${status})` : "Cloudflare API error";
   }
 }
 
@@ -93,7 +94,7 @@ export function makeCloudflareError(
   const detail = Array.isArray(body)
     ? undefined
     : ApiErrorDetail(body);
-  const message = messageFor(kind, detail?.message);
+  const message = messageFor(kind, detail?.message, status);
   const error = new Error(message) as CloudflareApiError;
   error.kind = kind;
   if (status !== undefined) {

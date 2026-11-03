@@ -8,6 +8,7 @@ import { Spinner } from "./Spinner.js";
 import { inputError, type DeclaredInput } from "./config-inputs.js";
 import { V3InputField } from "./V3InputField.js";
 import { V3WorkerTarget, type V3WorkerTargetProps } from "./V3WorkerTarget.js";
+import { secretValueProblem, type SecretRow } from "./secret-choices.js";
 import { inputRequiredIn, type InputMode } from "../manifest/input-validation.js";
 
 type V3ModeIntent = InputMode;
@@ -27,10 +28,13 @@ export interface V3ConfigurePanelProps {
   visibleInputs: readonly DeclaredInput[];
   inputValues: Readonly<Record<string, string>>;
   onInputValue: (key: string, value: string) => void;
-  /** Upgrade: secrets the user may replace, and the ones chosen so far (the new value is asked on the review step). */
-  secretsToChange: readonly DeclaredInput[];
+  /** The declared secrets this mode asks for: required ones, and (upgrade) ones kept unless the user changes them. */
+  secretRows: readonly SecretRow[];
+  /** Upgrade: the kept secrets the user chose to change. */
   replacedSecrets: readonly string[];
   onReplaceSecret: (key: string, replace: boolean) => void;
+  secretValues: Readonly<Record<string, string>>;
+  onSecretValue: (key: string, value: string) => void;
   upgradeTargets: V3WorkerTargetProps["targets"];
   upgradeTargetsLoading: boolean;
   upgradeTargetsError: string | null;
@@ -73,17 +77,43 @@ function optionalInputsSummary(mode: InputMode, setCount: number, total: number,
   return mode === "upgrade" ? `${parts.join(", ")} · empty keeps the current value` : parts.join(", ");
 }
 
+function SecretField({ def, value, onChange, note }: { def: DeclaredInput; value: string; onChange: (value: string) => void; note?: string }) {
+  const problem = secretValueProblem(def, value);
+  return (
+    <div className="field">
+      <label htmlFor={`v3-secret-${def.key}`}>{def.label}</label>
+      <input id={`v3-secret-${def.key}`} type="password" autoComplete="new-password" value={value} placeholder={def.placeholder ?? ""} onChange={(e) => onChange(e.target.value)} data-testid={`v3-secret-${def.key}`} />
+      {note && <p className="meta" data-testid={`v3-secret-${def.key}-note`}>{note}</p>}
+      {def.description && <p className="meta">{def.description}</p>}
+      {problem && <p className="error" data-testid={`v3-secret-${def.key}-error`}>{problem}</p>}
+    </div>
+  );
+}
+
+const SECRET_NOTE = "Secret values are sent only with the Worker upload: never with the plan, never stored in this page.";
+
 export function V3ConfigurePanel(props: V3ConfigurePanelProps) {
-  const { modeIntent, visibleInputs, inputValues, onInputValue, secretsToChange, replacedSecrets } = props;
+  const { modeIntent, visibleInputs, inputValues, onInputValue, secretRows, replacedSecrets, secretValues, onSecretValue } = props;
   const requiredInputs = visibleInputs.filter((def) => inputRequiredIn(def, modeIntent));
   const optionalInputs = visibleInputs.filter((def) => !inputRequiredIn(def, modeIntent));
-  const changeableSecrets = modeIntent === "upgrade" ? secretsToChange : [];
-  const hasOptionalInputs = optionalInputs.length + changeableSecrets.length > 0;
+  const requiredSecrets = secretRows.filter((row) => row.required);
+  const keptSecrets = secretRows.filter((row) => !row.required);
+  const hasOptionalInputs = optionalInputs.length + keptSecrets.length > 0;
   const setCount = optionalInputs.filter((def) => (inputValues[def.key] ?? "") !== "").length;
-  const optionalInvalid = optionalInputs.some((def) => inputError(def, modeIntent, inputValues[def.key] ?? "") !== null);
-  const noInputs = visibleInputs.length === 0 && !props.renameAllowed && changeableSecrets.length === 0;
+  const optionalInvalid = optionalInputs.some((def) => inputError(def, modeIntent, inputValues[def.key] ?? "") !== null)
+    || keptSecrets.some((row) => replacedSecrets.includes(row.def.key) && secretValueProblem(row.def, secretValues[row.def.key] ?? "") !== null);
+  const noInputs = visibleInputs.length === 0 && !props.renameAllowed && secretRows.length === 0;
   const field = (def: DeclaredInput) => (
     <V3InputField key={def.key} def={def} mode={modeIntent} value={inputValues[def.key] ?? ""} onChange={(value) => onInputValue(def.key, value)} />
+  );
+  const secretField = (row: SecretRow) => (
+    <SecretField
+      key={row.def.key}
+      def={row.def}
+      value={secretValues[row.def.key] ?? ""}
+      onChange={(value) => onSecretValue(row.def.key, value)}
+      {...(row.missing ? { note: `This Worker has no ${row.def.label} yet, so there is no current value to keep.` } : {})}
+    />
   );
   return (
     <fieldset disabled={props.planning} className="m-0 min-w-0 border-0 p-0">
@@ -107,26 +137,36 @@ export function V3ConfigurePanel(props: V3ConfigurePanelProps) {
       )}
       {noInputs && <p className="meta" data-testid="v3-no-inputs">This config declares no operator inputs; the release names apply as-is.</p>}
       {requiredInputs.map(field)}
+      {requiredSecrets.length > 0 && (
+        <div data-testid="v3-secrets-required">
+          {requiredSecrets.map(secretField)}
+          <p className="meta">{SECRET_NOTE}</p>
+        </div>
+      )}
       {props.required}
       {(hasOptionalInputs || props.hasOptional) && <h3 className="section-label">Optional</h3>}
       {hasOptionalInputs && (
         <Disclosure
           testId="v3-optional-inputs"
           title={modeIntent === "upgrade" ? "Settings" : "Optional settings"}
-          summary={optionalInputsSummary(modeIntent, setCount, optionalInputs.length, replacedSecrets.length)}
+          summary={optionalInputsSummary(modeIntent, setCount, optionalInputs.length, keptSecrets.filter((row) => replacedSecrets.includes(row.def.key)).length)}
           forceOpen={optionalInvalid}
         >
           {optionalInputs.map(field)}
-          {changeableSecrets.length > 0 && (
+          {keptSecrets.length > 0 && (
             <div className="field" data-testid="v3-secrets-change">
               <label>Secrets</label>
-              <p className="meta">Kept as they are today unless you choose to change one; you enter the new value on the next step.</p>
-              {changeableSecrets.map((def) => (
-                <label key={def.key} className="inline-flex items-center gap-2">
-                  <input type="checkbox" checked={replacedSecrets.includes(def.key)} onChange={(e) => props.onReplaceSecret(def.key, e.target.checked)} data-testid={`v3-secret-change-${def.key}`} />
-                  <span>Change {def.label}</span>
-                </label>
+              <p className="meta">Kept as they are today unless you choose to change one.</p>
+              {keptSecrets.map(({ def }) => (
+                <div key={def.key}>
+                  <label className="inline-flex items-center gap-2">
+                    <input type="checkbox" checked={replacedSecrets.includes(def.key)} onChange={(e) => props.onReplaceSecret(def.key, e.target.checked)} data-testid={`v3-secret-change-${def.key}`} />
+                    <span>Change {def.label}</span>
+                  </label>
+                  {replacedSecrets.includes(def.key) && <SecretField def={{ ...def, label: `New ${def.label}` }} value={secretValues[def.key] ?? ""} onChange={(value) => onSecretValue(def.key, value)} />}
+                </div>
               ))}
+              {replacedSecrets.length > 0 && <p className="meta">{SECRET_NOTE}</p>}
             </div>
           )}
         </Disclosure>

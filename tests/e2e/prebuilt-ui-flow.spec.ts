@@ -963,6 +963,8 @@ test.describe("prebuilt UI flow", () => {
     });
     await page.unroute("**/api/cloudflare/targets");
     await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api-live" }], pages: [] }));
+    // The upgrade target already has the secret.
+    await page.route("**/api/cloudflare/inventory", (route) => json(route, { accountId: "a".repeat(32), names: {}, secrets: ["ADMIN_PASSWORD"] }));
     const config = JSON.stringify({
       schemaVersion: 3,
       app: { id: "example/inputs", name: "Inputs" },
@@ -998,9 +1000,14 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-input-TAGS-b").check();
     await page.getByTestId("v3-input-EXPIRES").fill("2027-02-28");
     await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("2 of 2 set");
+    // A new install needs every entered secret, typed here with the other inputs.
+    await expect(page.getByTestId("v3-secrets-required")).toContainText("Admin password");
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("first-install-password");
     await page.getByTestId("v3-to-deploy").click();
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     expect((mocks.planBodies[0] as Record<string, unknown>).inputs).toEqual({ workerName: "api", REGION: "eu", RETENTION_DAYS: "7", TAGS: "a,b", EXPIRES: "2027-02-28" });
+    expect(JSON.stringify(mocks.planBodies[0])).not.toContain("first-install-password");
     expect((mocks.planBodies[0] as Record<string, unknown>).replaceSecrets).toBeUndefined();
     // Upgrade: the install-only input is gone, empty optional ones keep the current value, and a secret can be chosen for change.
     await page.getByTestId("v3-back-to-configure").click();
@@ -1013,7 +1020,15 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-input-TAGS")).toContainText("Alpha");
     await expect(page.getByTestId("v3-secrets-change")).toBeVisible();
     await page.getByTestId("v3-input-RETENTION_DAYS").fill("14");
+    // Kept unless changed; Change asks for the new value right here, under the declared rules.
+    await expect(page.getByTestId("v3-secrets-required")).toHaveCount(0);
+    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD")).toHaveCount(0);
     await page.getByTestId("v3-secret-change-ADMIN_PASSWORD").check();
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("short");
+    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD-error")).toHaveText("at least 8 characters");
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("long-enough-password");
     await page.getByTestId("v3-to-deploy").click();
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     const upgradeBody = mocks.planBodies.at(-1) as Record<string, unknown>;
@@ -1021,14 +1036,60 @@ test.describe("prebuilt UI flow", () => {
     expect(upgradeBody.replaceSecrets).toEqual(["ADMIN_PASSWORD"]);
     expect(upgradeBody.inputs).toMatchObject({ RETENTION_DAYS: "14", workerName: "api-live" });
     expect(upgradeBody.inputs).not.toHaveProperty("REGION");
-    // The new value is asked on the review step and follows the declared rules.
-    await expect(page.getByTestId("v3-secret-prompts")).toContainText("New Admin password");
-    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
-    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("short");
-    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD-error")).toHaveText("at least 8 characters");
-    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
-    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("long-enough-password");
+    expect(JSON.stringify(upgradeBody)).not.toContain("long-enough-password");
+    // The review asks for nothing more: the value was entered in Configure.
+    await expect(page.getByTestId("v3-secrets-unmet")).toHaveCount(0);
     await expect(page.getByTestId("v3-confirm-deploy")).toBeEnabled();
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("upgrading a Worker without the secret asks for it in Configure; a need Configure could not see sends the user back there", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/cloudflare/targets");
+    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api-live" }, { name: "api-other" }], pages: [] }));
+    // api-live reports no secrets; api-other's secrets cannot be read.
+    await page.route("**/api/cloudflare/inventory", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      return body.worker === "api-other" ? json(route, { error: "upstream", upstream: "server" }, 502) : json(route, { accountId: "a".repeat(32), names: {}, secrets: [] });
+    });
+    await page.unroute("**/api/deploy/plan");
+    await page.route("**/api/deploy/plan", (route) => {
+      mocks.planBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      const plan = graphPlanBody();
+      plan.graphPlan.units[0]!.diffs.push({ resource: "secret", action: "create", name: "ADMIN_PASSWORD" });
+      return json(route, plan);
+    });
+    const config = JSON.stringify({
+      schemaVersion: 3,
+      app: { id: "example/secret", name: "Secret" },
+      source: { allowLocalZip: true },
+      capabilities: ["workers"],
+      inputs: [{ key: "ADMIN_PASSWORD", type: "secret", label: "Admin password", validation: { minLength: 8 } }],
+    });
+    await page.goto("/");
+    await pasteV3Config(page, config);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await page.getByTestId("v3-mode-upgrade").check();
+    await page.getByTestId("v3-upgrade-target").selectOption("api-live");
+    // There is no current value to keep, so it is required here and says why.
+    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD-note")).toContainText("This Worker has no Admin password yet");
+    await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
+    // A target whose secrets cannot be read keeps them; the plan is the authority.
+    await page.getByTestId("v3-upgrade-target").selectOption("api-other");
+    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD")).toHaveCount(0);
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-secrets-unmet")).toContainText("Admin password: enter it in Configure.");
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
+    await page.getByTestId("v3-secrets-to-configure").click();
+    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD-note")).toContainText("This Worker has no Admin password yet");
+    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("long-enough-password");
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-secrets-unmet")).toHaveCount(0);
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeEnabled();
+    expect(mocks.planBodies.every((body) => !JSON.stringify(body).includes("long-enough-password"))).toBe(true);
     expect(mocks.unexpectedApi).toEqual([]);
   });
 

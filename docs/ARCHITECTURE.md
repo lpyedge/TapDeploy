@@ -25,8 +25,8 @@ the Deploy page; there is no separate Connect, progress or done page).
 |---|---|
 | Config | One textarea (URL or JSON) and one button; `.json` can be dropped; `?config=` pre-fills and auto-submits once, taking priority over a previously stored config. Loading a config goes straight to Cloudflare consent (or straight into the flow when the session already covers that exact config); there is no Connect screen, and an expired session re-authorizes the same config directly. |
 | Release | One page: the download link and a ZIP-from-this-computer drop zone (omitted when the config sets `allowLocalZip: false`). A chosen file wins and the link rests until it is removed; one Verify button. Prebuilt ZIPs only, at most 8 MiB (`RELEASE_MAX_BYTES`, one number for a chosen file, a direct download, the installer relay and the server check). The browser checks the ZIP first in a Worker (stage text, Cancel that terminates the Worker or aborts the call); the server then verifies the same bytes, and only that check issues the proof (section 3a). |
-| Configure | Inline `New | Upgrade`. New: editable Worker name (pre-filled from the sealed release); a name that already exists is flagged with a switch to Upgrade. Upgrade: read-only dropdown of the account's Workers, manual entry if listing fails. Switching mode keeps the typed name. The server enforces the choice at plan time: New never updates a live Worker and Upgrade never creates one (`TARGET_MODE_CONFLICT`, zero writes). What must be answered (Worker name, required inputs, Hyperdrive) is always shown; everything optional (optional inputs and secret changes, resource names, custom domains) is a collapsed section that shows its current state and opens on demand, or stays open while it holds an error. Per Worker/Pages unit, an optional custom domain from the account's zones (`<sub>.<zone>`); replacing what serves a hostname today needs explicit consent; on Upgrade the bound hostnames are listed and one choice applies to them: keep (default), use another instead, or remove (unbinding needs consent). A release with Hyperdrive bindings requires picking one of the account's Hyperdrive configurations per binding. |
-| Deploy | Review (effective names, create/update/preserve, cost, takeover, secrets) → confirm → inline progress → result card. |
+| Configure | Inline `New | Upgrade`. New: editable Worker name (pre-filled from the sealed release); a name that already exists is flagged with a switch to Upgrade. Upgrade: read-only dropdown of the account's Workers, manual entry if listing fails. Switching mode keeps the typed name. The server enforces the choice at plan time: New never updates a live Worker and Upgrade never creates one (`TARGET_MODE_CONFLICT`, zero writes). What must be answered (Worker name, required inputs, secret values, Hyperdrive) is always shown; everything optional (optional inputs and secret changes, resource names, custom domains) is a collapsed section that shows its current state and opens on demand, or stays open while it holds an error. Per Worker/Pages unit, an optional custom domain from the account's zones (`<sub>.<zone>`); replacing what serves a hostname today needs explicit consent; on Upgrade the bound hostnames are listed and one choice applies to them: keep (default), use another instead, or remove (unbinding needs consent). A release with Hyperdrive bindings requires picking one of the account's Hyperdrive configurations per binding. |
+| Deploy | Review (effective names, create/update/preserve, cost, takeover, secrets) → confirm → inline progress → result card. The review takes no input values: a secret the plan needs that Configure did not collect is listed with a way back to Configure, and Confirm stays disabled. |
 
 Takeover: an upgrade target whose active version carries no installer marker
 (`managed-by-tapdeploy`; deployed from a Git repository, the dashboard or
@@ -90,6 +90,15 @@ release variables; a key the release already sets is refused. On upgrade
 `replaceSecrets` lists the secrets the user chose to change: their policy
 becomes `replace`, the plan shows `secret: update`, and the new value rides in
 the version upload instead of an inherit directive.
+
+Secret values are typed in Configure only (`src/web/secret-choices.ts`) and
+never travel with the plan request. Install asks for every secret the user
+enters. Upgrade reads the target Worker's secret names (inventory, names only)
+and asks for a value only for a secret the Worker lacks, which the server would
+create and cannot keep; one it has is kept unless the user ticks Change. When
+the names cannot be read, the plan decides: a secret it creates becomes
+required in Configure. The deploy sends only the values the approved plan
+needs.
 
 ## 3. Sealed-graph protocol (do not weaken)
 

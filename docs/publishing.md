@@ -197,7 +197,9 @@ Values the user fills in, each validated in the browser and again by the server.
   runs one from a config.
 - `label`, `description`, `placeholder` are what the user reads.
 - On upgrade a secret you did not mark `upgradeKeep` or `generate` gets a
-  "Change" checkbox; the new value is entered on the review step.
+  "Change" checkbox; the new value is entered in the same Configure step. A
+  secret the upgraded Worker does not have yet is always asked for: there is no
+  current value to keep.
 
 ### `install.policies`
 

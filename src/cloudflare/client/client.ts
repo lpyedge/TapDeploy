@@ -144,10 +144,10 @@ export interface CloudflareApiClient {
   // read-only; the guard classifies their read-backs, never a wrangler binding.
   getR2ManagedDomain(bucketName: string): Promise<R2ManagedDomain>;
   listR2CustomDomains(bucketName: string): Promise<R2CustomDomain[]>;
-  // object existence only (HEAD returns headers, never object bytes).
-  // Resolves true when the provider answers 200, false on a verified 404;
-  // any other outcome throws so the caller fails closed.
-  headR2Object(bucketName: string, key: string): Promise<boolean>;
+  // object existence only: the body of the provider's GET is cancelled
+  // unread. Resolves true when the provider answers 200, false on a verified
+  // 404; any other outcome throws so the caller fails closed.
+  r2ObjectExists(bucketName: string, key: string): Promise<boolean>;
   listSecrets(scriptName: string): Promise<WorkerSecretMetadata[]>;
   getSchedules(scriptName: string): Promise<WorkerScheduleMetadata>;
   // The account's `<subdomain>.workers.dev` name, or undefined when none exists.
@@ -352,8 +352,8 @@ export function createCloudflareClient(
       withAccountId(accountId, "getR2ManagedDomain", undefined, (env) => normalizeR2ManagedDomain(env.result), fetcher, options.accessToken, { bucketName }) as Promise<R2ManagedDomain>,
     listR2CustomDomains: (bucketName) =>
       withAccountId(accountId, "listR2CustomDomains", undefined, (env) => normalizeR2CustomDomains(env.result), fetcher, options.accessToken, { bucketName }) as Promise<R2CustomDomain[]>,
-    headR2Object: (bucketName, key) =>
-      headR2Object(accountId, bucketName, key, fetcher, options.accessToken),
+    r2ObjectExists: (bucketName, key) =>
+      r2ObjectExists(accountId, bucketName, key, fetcher, options.accessToken),
 
     listSecrets: (scriptName) =>
       withScript(accountId, scriptName, "listSecrets", undefined, (env) => env.result ?? [], fetcher, options.accessToken) as Promise<WorkerSecretMetadata[]>,
@@ -662,10 +662,11 @@ async function listR2BucketsPaged(
   return out;
 }
 
-// object existence only (HEAD returns headers, never object bytes).
+// object existence only. GET is the object route's documented read (HEAD is
+// not one); its body is cancelled unread, so no object content is consumed.
 // Resolves true on 200, false on a verified 404; any other outcome throws so
 // the caller fails closed instead of treating absence as proven.
-async function headR2Object(
+async function r2ObjectExists(
   accountId: string | undefined,
   bucketName: string,
   key: string,
@@ -678,7 +679,7 @@ async function headR2Object(
   assertAccountId(accountId);
   if (!bucketName) throw makeInvalidResponseError("R2 bucket name is required");
   if (!key) throw makeInvalidResponseError("R2 object key is required");
-  const route = routeFor("headR2Object");
+  const route = routeFor("r2ObjectExists");
   const url = buildApiUrl(route.path({ accountId, bucketName, objectKey: key }));
   let response: Response;
   try {
@@ -689,6 +690,7 @@ async function headR2Object(
   } catch (error) {
     throw makeNetworkError(error);
   }
+  await response.body?.cancel();
   if (response.status === 404) {
     throw makeCloudflareError(response, { success: false, errors: [{ code: 10007, message: "not found" }] });
   }

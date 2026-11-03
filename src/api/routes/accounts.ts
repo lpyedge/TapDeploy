@@ -30,7 +30,8 @@ export function attachAccountsRoutes(app: Hono<AppEnv>, env: TapDeployEnv): void
 
 // The account's existing names per resource kind (Configure: reuse on install,
 // pick on upgrade), and, for an upgrade target Worker, the resource each of
-// its bindings uses today. Only kinds the session's scopes cover are listed.
+// its bindings uses today and the names (never values) of its secrets. Only
+// kinds the session's scopes cover are listed.
 const INVENTORY_SCOPES: Record<string, string> = { r2: "workers-r2.write", d1: "d1.write", kv: "workers-kv-storage.write", queue: "queues.write", vectorize: "vectorize.write", pages: "page.write" };
 
 async function inventoryHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<Response> {
@@ -53,9 +54,12 @@ async function inventoryHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<
       names[kind] = [...new Set(list.filter((name): name is string => typeof name === "string"))].sort();
     }
     let bindings: Array<{ binding: string; kind: string; name: string }> | undefined;
+    let secrets: string[] | undefined;
     if (typeof body.worker === "string" && body.worker.length > 0) {
       const settings = await client.getWorkerSettings(body.worker);
-      bindings = ((settings.bindings ?? []) as Array<Record<string, unknown>>).flatMap((binding) => {
+      const live = (settings.bindings ?? []) as Array<Record<string, unknown>>;
+      secrets = live.filter((binding) => (binding.type === "secret_text" || binding.type === "secret_key") && typeof binding.name === "string").map((binding) => binding.name as string).sort();
+      bindings = live.flatMap((binding) => {
         const name = typeof binding.name === "string" ? binding.name : "";
         if (binding.type === "r2_bucket" && typeof binding.bucket_name === "string") return [{ binding: name, kind: "r2", name: binding.bucket_name }];
         if (binding.type === "d1") {
@@ -68,7 +72,7 @@ async function inventoryHandler(c: Context<AppEnv>, env: TapDeployEnv): Promise<
         return [];
       });
     }
-    return c.json({ accountId: body.accountId, names, ...(bindings ? { bindings } : {}) });
+    return c.json({ accountId: body.accountId, names, ...(bindings ? { bindings } : {}), ...(secrets ? { secrets } : {}) });
   } catch (error) {
     if (isUpstreamError(error)) return c.json({ error: "upstream", upstream: error.kind }, 502);
     throw error;

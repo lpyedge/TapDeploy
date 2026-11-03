@@ -3,7 +3,7 @@
 // there is no generic endpoint proxy. This table is the interception seam
 // and the basis of the scope matrix in docs/cloudflare-scope-matrix.md.
 
-type ApiHttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+type ApiHttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface ApiRouteContext {
   accountId?: string;
@@ -153,13 +153,13 @@ export const ROUTES: Record<string, ApiRoute> = {
     path: (c) =>
       `/accounts/${prop(c.accountId ?? "")}/r2/buckets/${prop(c.bucketName ?? "")}/domains/custom`,
   },
-  // object existence only (HEAD returns headers, never object bytes).
-  // Used to verify guarded-bootstrap marker/owner presence without reading
-  // any object contents. A 404 means verified absence; anything else fails.
-  headR2Object: {
-    id: "headR2Object",
-    label: "Check R2 object existence (metadata only, never content)",
-    method: "HEAD",
+  // object existence only: GET is the documented object read (HEAD is not);
+  // the client cancels the body unread. Used to verify guarded-bootstrap
+  // marker/owner presence. A 404 means verified absence; anything else fails.
+  r2ObjectExists: {
+    id: "r2ObjectExists",
+    label: "Check R2 object existence (body discarded unread)",
+    method: "GET",
     category: "read",
     path: (c) =>
       `/accounts/${prop(c.accountId ?? "")}/r2/buckets/${prop(c.bucketName ?? "")}/objects/${(c.objectKey ?? "").split("/").map(prop).join("/")}`,

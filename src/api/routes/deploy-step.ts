@@ -258,7 +258,7 @@ async function graphV3Step(
     const runner = clientBootstrapRunner(client.withAccount(accountId), {
       objectExists: async (bucketName, objectKey) => {
         try {
-          return await client.withAccount(accountId).headR2Object(bucketName, objectKey);
+          return await client.withAccount(accountId).r2ObjectExists(bucketName, objectKey);
         } catch (error) {
           const kind = (error as { kind?: unknown }).kind;
           if (kind === "not-found") return false;

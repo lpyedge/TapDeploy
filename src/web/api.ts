@@ -239,6 +239,8 @@ export interface InventoryEnvelope {
   names: Record<string, string[]>;
   /** The upgrade target Worker's bindings and the resource each uses today. */
   bindings?: Array<{ binding: string; kind: string; name: string }>;
+  /** The upgrade target Worker's secret names (never values). */
+  secrets?: string[];
 }
 
 export async function getInventory(csrf: string, accountId: string, kinds: string[], worker?: string): Promise<InventoryEnvelope> {

@@ -14,7 +14,7 @@ export function useConfigureForm() {
   const [replacedSecrets, setReplacedSecrets] = useState<string[]>([]);
   const [domainDrafts, setDomainDrafts] = useState<Record<string, UnitDomainDraft>>({});
   const [hyperdriveChoices, setHyperdriveChoices] = useState<Record<string, Record<string, string>>>({});
-  // Secret values live in memory only, until the deploy steps that send them.
+  // Secret values (typed in Configure) live in memory only, until the deploy steps that send them.
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
 
   return {
@@ -36,6 +36,7 @@ export function useConfigureForm() {
       setMode(next);
       setNameValues({});
       setReplacedSecrets([]);
+      setSecretValues({});
     },
     replaceSecret: (key: string, replace: boolean) => {
       setReplacedSecrets((prev) => (replace ? [...prev.filter((name) => name !== key), key] : prev.filter((name) => name !== key)));

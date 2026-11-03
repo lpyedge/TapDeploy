@@ -30,16 +30,17 @@ import { formatBytes } from "./lib/guarded-fetch.js";
 import { releasePolicyFromConfigText } from "./compute/release-policy.js";
 import { releaseRefusalMessage } from "./compute/refusal-message.js";
 import { V3ReleasePanel, type ReleaseStage } from "./V3ReleasePanel.js";
-import { V3DeployPanel, secretProblem, secretPromptsFor } from "./V3DeployPanel.js";
+import { V3DeployPanel } from "./V3DeployPanel.js";
 import { V3ConfigurePanel } from "./V3ConfigurePanel.js";
 import { V3DomainsPanel } from "./V3DomainsPanel.js";
 import { V3HyperdrivePanel } from "./V3HyperdrivePanel.js";
 import { V3NamesPanel } from "./V3NamesPanel.js";
-import { changeableSecrets, declaredConfigInputs, inputError } from "./config-inputs.js";
+import { declaredConfigInputs, declaredSecrets, inputError } from "./config-inputs.js";
 import { allowsLocalZip, appDisplayName, defaultSourceUrl } from "./config-text.js";
 import { buildPlanRequest, httpUnitsFor, hyperdriveReady, hyperdriveUnitsFor, planInputs } from "./configure-model.js";
 import { draftErrors } from "./domain-choices.js";
 import { nameRows } from "./name-choices.js";
+import { secretNeedsFor, secretRows, secretValueProblem, secretsAwaitingValue, unmetSecretNeeds } from "./secret-choices.js";
 import { phaseLabel } from "./step-labels.js";
 import { useConfigureForm } from "./use-configure-form.js";
 import { useLoaded } from "./use-loaded.js";
@@ -77,6 +78,9 @@ export function V3Flow(props: V3FlowProps) {
   const [message, setMessage] = useState<string | null>(null);
   // Review confirmations; each is sealed into the plan approval, so changing one re-plans.
   const [confirmed, setConfirmed] = useState<PlanConfirmations>(NO_CONFIRMATIONS);
+  // Secrets the last plan creates on this target (the Worker has none yet):
+  // Configure asks for them even when it could not read the Worker's secrets.
+  const [planSecretCreates, setPlanSecretCreates] = useState<{ target: string; names: string[] }>({ target: "", names: [] });
   const [statuses, setStatuses] = useState<GraphStepStatus[]>([]);
 
   // The release comes from one place: a ZIP chosen on this computer when there
@@ -120,6 +124,7 @@ export function V3Flow(props: V3FlowProps) {
     form.reset();
     setReleaseResources([]);
     setConfirmed(NO_CONFIRMATIONS);
+    setPlanSecretCreates({ target: "", names: [] });
     setStatuses([]);
     setMessage(null);
     void (async () => {
@@ -281,7 +286,9 @@ export function V3Flow(props: V3FlowProps) {
   const upgradeTargets = useLoaded(canFetch && workerUnits.length === 1 ? accountId : null, async () => (await getTargets(csrf, accountId)).workers.map((worker) => ({ name: worker.name })));
   const inventoryWorker = form.mode === "upgrade" && renameAllowed ? workerName : "";
   const inventoryKinds = [...new Set(releaseResources.map((item) => item.kind))];
-  const inventory = useLoaded(canFetch && inventoryKinds.length > 0 ? `${accountId}|${inventoryWorker}|${inventoryKinds.join(",")}` : null, () => getInventory(csrf, accountId, inventoryKinds, inventoryWorker || undefined));
+  // An upgrade also reads the target's secret names, so Configure knows which secrets it can keep.
+  const wantsTargetSecrets = inventoryWorker !== "" && declaredSecrets(configText).some((def) => !def.generate);
+  const inventory = useLoaded(canFetch && (inventoryKinds.length > 0 || wantsTargetSecrets) ? `${accountId}|${inventoryWorker}|${inventoryKinds.join(",")}` : null, () => getInventory(csrf, accountId, inventoryKinds, inventoryWorker || undefined));
   const recordsByZone = useZoneRecords(csrf, accountId, [...new Set(Object.values(form.domainDrafts).filter((draft) => draft.bind && draft.zone).map((draft) => draft.zone))]);
 
   const declaredInputs = declaredConfigInputs(configText);
@@ -294,8 +301,13 @@ export function V3Flow(props: V3FlowProps) {
   // New never updates a live Worker (the server refuses it too): an existing
   // name is flagged in the panel with a switch to Upgrade instead of a late refusal.
   const nameTaken = form.mode === "install" && renameAllowed && (upgradeTargets.data ?? []).some((target) => target.name === workerName);
+  const secretTarget = `${form.mode}|${workerName}`;
+  const secrets = secretRows(configText, form.mode, inventoryWorker !== "" ? inventory.data?.secrets ?? null : null, planSecretCreates.target === secretTarget ? planSecretCreates.names : []);
+  // Only a secret the target keeps can be replaced; a missing one is created.
+  const replacedSecrets = form.replacedSecrets.filter((key) => secrets.some((row) => !row.required && row.def.key === key));
+  const secretsReady = secretsAwaitingValue(secrets, replacedSecrets).every(({ def }) => (form.secretValues[def.key] ?? "") !== "" && secretValueProblem(def, form.secretValues[def.key] ?? "") === null);
   const inputsReady = (!renameAllowed || checkWorkerName(workerNameDef, workerName) === null)
-    && shownInputs.every((def) => inputError(def, form.mode, form.inputValues[def.key] ?? "") === null);
+    && shownInputs.every((def) => inputError(def, form.mode, form.inputValues[def.key] ?? "") === null) && secretsReady;
   const configureReady = !busy && !inventory.loading && !upgradeTargets.loading && inputsReady && names.every((row) => !row.error) && Object.keys(domainErrors).length === 0
     && hyperdriveReady(hyperdriveUnits, form.hyperdriveChoices) && machine.can("PLAN_READY") && !nameTaken;
 
@@ -316,7 +328,7 @@ export function V3Flow(props: V3FlowProps) {
         hyperdriveUnits,
         hyperdriveChoices: form.hyperdriveChoices,
         names,
-        replacedSecrets: form.replacedSecrets,
+        replacedSecrets,
         paidRiskConfirmed: confirmations.paidRisk,
         takeoverConfirmed: confirmations.takeover,
       }));
@@ -331,6 +343,7 @@ export function V3Flow(props: V3FlowProps) {
         ...(envelope.schedulerHints !== undefined ? { schedulerHints: envelope.schedulerHints } : {}),
       }));
       setConfirmed(confirmations);
+      setPlanSecretCreates({ target: secretTarget, names: secretNeedsFor(configText, envelope.graphPlan).filter((need) => need.create).map((need) => need.name) });
     } catch (error) {
       // Defense in depth: a config that changed under a live session must
       // surface the re-authorization state even if the pre-plan probe was
@@ -366,6 +379,8 @@ export function V3Flow(props: V3FlowProps) {
     if (!s.source || !s.releaseProof || !s.graphPlan || !s.executionContext || !s.approval) return;
     setStatuses([]);
     setMessage(null);
+    // Only the values the approved plan needs travel, never one left over from another choice.
+    const secretValues = Object.fromEntries(secretNeedsFor(configText, s.graphPlan as GraphPlan).map((need) => [need.name, form.secretValues[need.name] ?? ""]).filter(([, value]) => value !== ""));
     setSnap(machine.startDeploy());
     const stop = new AbortController();
     deployAbortRef.current = stop;
@@ -382,7 +397,7 @@ export function V3Flow(props: V3FlowProps) {
       approval: s.approval,
       ...(s.bundleDigests ? { bundleDigests: s.bundleDigests } : {}),
       ...(s.schedulerHints ? { schedulerHints: s.schedulerHints } : {}),
-      ...(Object.keys(form.secretValues).length > 0 ? { secretValues: { ...form.secretValues } } : {}),
+      ...(Object.keys(secretValues).length > 0 ? { secretValues } : {}),
       ...(Object.values(form.domainDrafts).some((draft) => draft.bind && draft.confirmReplace) ? { confirmDomainChanges: true } : {}),
       onStep: (status) => setStatuses((prev) => [...prev.filter((entry) => !(entry.unitId === status.unitId && entry.phase === status.phase)), status]),
     });
@@ -413,8 +428,7 @@ export function V3Flow(props: V3FlowProps) {
   const paidRisk = graphPlan?.cost.requiresConfirmation === true || undefined;
   const reconfirm = (next: PlanConfirmations) => { setConfirmed(next); if (snap.releaseProof) void plan(snap.releaseProof, snap.inputs, next); };
   const blocked = graphPlan !== null && (graphPlan.blocked || !snap.executionContext || !snap.approval);
-  const secretPrompts = secretPromptsFor(configText, graphPlan);
-  const secretsReady = secretPrompts.every((prompt) => (form.secretValues[prompt.name] ?? "").length > 0 && secretProblem(prompt, form.secretValues[prompt.name] ?? "") === null);
+  const unmetSecrets = unmetSecretNeeds(secretNeedsFor(configText, graphPlan), form.secretValues);
 
   return (
     <section className="panel" data-testid="v3-flow">
@@ -469,9 +483,11 @@ export function V3Flow(props: V3FlowProps) {
           visibleInputs={shownInputs}
           inputValues={form.inputValues}
           onInputValue={form.setInput}
-          secretsToChange={changeableSecrets(configText)}
-          replacedSecrets={form.replacedSecrets}
+          secretRows={secrets}
+          replacedSecrets={replacedSecrets}
           onReplaceSecret={form.replaceSecret}
+          secretValues={form.secretValues}
+          onSecretValue={form.setSecret}
           upgradeTargets={upgradeTargets.data}
           upgradeTargetsLoading={upgradeTargets.loading}
           upgradeTargetsError={upgradeTargets.error}
@@ -524,10 +540,7 @@ export function V3Flow(props: V3FlowProps) {
         takeoverWorkers={graphPlan?.takeover.workers ?? []}
         takeoverConfirmed={confirmed.takeover}
         onTakeoverConfirm={(checked) => reconfirm({ ...confirmed, takeover: checked })}
-        secretPromptNames={secretPrompts}
-        secretValues={form.secretValues}
-        onSecretValue={form.setSecret}
-        secretsReady={secretsReady}
+        unmetSecrets={unmetSecrets}
         busy={busy}
         blocked={blocked}
         message={message}

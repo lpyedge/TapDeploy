@@ -107,8 +107,9 @@ describe("the Cloudflare route table never deletes a stored resource", () => {
   it("has no R2 object content route and no DELETE route except the declared domain/route/DNS removes", () => {
     // DELETE is only allowed on the zone-scoped DNS record / route / custom
     // domain remove routes; a Worker/R2/D1/KV resource is never deletable.
-    // the only object-path route is the metadata-only HEAD existence probe
-    // (headR2Object); no GET/PUT/POST/DELETE ever addresses an object key.
+    // the only object-path route is the existence probe (r2ObjectExists, a
+    // GET whose body is cancelled unread); no PUT/POST/DELETE ever addresses
+    // an object key.
     const removable = new Set([
       "deleteDnsRecord",
       "deleteWorkerRoute",
@@ -121,8 +122,8 @@ describe("the Cloudflare route table never deletes a stored resource", () => {
       }
       const path = route.path({ accountId: ACCOUNT, bucketName: "b", scriptName: "s" });
       if (path.includes("/objects")) {
-        expect(route.id).toBe("headR2Object");
-        expect(route.method).toBe("HEAD");
+        expect(route.id).toBe("r2ObjectExists");
+        expect(route.method).toBe("GET");
       }
     }
   });

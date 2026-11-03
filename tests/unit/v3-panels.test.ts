@@ -6,9 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { GraphPlan } from "../../src/web/api.js";
 import { V3ConfigurePanel } from "../../src/web/V3ConfigurePanel.js";
-import { changeableSecrets, declaredConfigInputs, inputError, type DeclaredInput } from "../../src/web/config-inputs.js";
+import { declaredConfigInputs, inputError, type DeclaredInput } from "../../src/web/config-inputs.js";
 import { V3ReleasePanel } from "../../src/web/V3ReleasePanel.js";
-import { secretProblem, secretPromptsFor } from "../../src/web/V3DeployPanel.js";
+import { secretNeedsFor, secretRows, secretValueProblem, secretsAwaitingValue, unmetSecretNeeds } from "../../src/web/secret-choices.js";
 
 const noop = () => undefined;
 
@@ -36,15 +36,6 @@ describe("declaredConfigInputs / inputError", () => {
     expect(declaredConfigInputs("{}")).toEqual([]);
   });
 
-  it("lists the secrets an upgrade may replace: the ones the user enters that upgrade still asks for", () => {
-    const secrets = JSON.stringify({ inputs: [
-      { key: "ADMIN_PASSWORD", type: "secret", label: "Admin password" },
-      { key: "FIRST_ONLY", type: "secret", upgradeKeep: true },
-      { key: "SALT", type: "secret", generate: true },
-    ] });
-    expect(changeableSecrets(secrets).map((input) => input.key)).toEqual(["ADMIN_PASSWORD"]);
-  });
-
   it("validates required (per mode), length, pattern and the worker-name shape", () => {
     const def = { key: "x", type: "string" as const, label: "x", validation: { minLength: 3, maxLength: 8, pattern: "[a-z]+" } };
     expect(inputError(def, "install", "")).toBe("required");
@@ -60,14 +51,16 @@ describe("declaredConfigInputs / inputError", () => {
   });
 });
 
-describe("secretPromptsFor", () => {
+describe("secret choices", () => {
   const config = JSON.stringify({
     inputs: [
-      { key: "TOKEN", type: "secret", label: "API token" },
+      { key: "ADMIN_PASSWORD", type: "secret", label: "Admin password", validation: { minLength: 8, pattern: "adm_.+" } },
+      { key: "FIRST_ONLY", type: "secret", label: "First only", upgradeKeep: true },
       { key: "SALT", type: "secret", generate: true },
       { key: "PLAIN", type: "string" },
     ],
   });
+  const rows = (...args: Parameters<typeof secretRows> extends [string, ...infer Rest] ? Rest : never) => secretRows(config, ...args).map((row) => [row.def.key, row.required, row.missing]);
   const plan = (diffs: Array<{ resource: string; action: string; name?: string }>): GraphPlan => ({
     ok: true, blocked: false, digest: "d", guards: [],
     cost: { operations: [], requiresConfirmation: false, confirmed: false, blockedUnknownCost: false },
@@ -75,31 +68,46 @@ describe("secretPromptsFor", () => {
     units: [{ unitId: "main", kind: "worker", name: "api", requiresBundle: true, diffs }],
   });
 
-  it("prompts only for secrets the plan creates and whose policy is prompt", () => {
-    const prompts = secretPromptsFor(config, plan([
-      { resource: "secret", action: "create", name: "TOKEN" },
+  it("install asks for every entered secret, required; generated ones never appear", () => {
+    expect(rows("install", null, [])).toEqual([["ADMIN_PASSWORD", true, false], ["FIRST_ONLY", true, false]]);
+  });
+
+  it("upgrade keeps a secret the Worker has (changeable unless upgradeKeep) and requires one it lacks", () => {
+    expect(rows("upgrade", ["ADMIN_PASSWORD", "FIRST_ONLY"], [])).toEqual([["ADMIN_PASSWORD", false, false]]);
+    expect(rows("upgrade", ["FIRST_ONLY"], [])).toEqual([["ADMIN_PASSWORD", true, true]]);
+    expect(rows("upgrade", [], [])).toEqual([["ADMIN_PASSWORD", true, true], ["FIRST_ONLY", true, true]]);
+  });
+
+  it("with the Worker's secrets unknown, upgrade keeps them unless the last plan creates one", () => {
+    expect(rows("upgrade", null, [])).toEqual([["ADMIN_PASSWORD", false, false]]);
+    expect(rows("upgrade", null, ["FIRST_ONLY"])).toEqual([["ADMIN_PASSWORD", false, false], ["FIRST_ONLY", true, true]]);
+  });
+
+  it("a value is awaited for required rows and the ones chosen for change, and follows the declared rules", () => {
+    const upgrade = secretRows(config, "upgrade", ["ADMIN_PASSWORD"], []);
+    expect(secretsAwaitingValue(upgrade, []).map((row) => row.def.key)).toEqual(["FIRST_ONLY"]);
+    expect(secretsAwaitingValue(upgrade, ["ADMIN_PASSWORD"]).map((row) => row.def.key)).toEqual(["ADMIN_PASSWORD", "FIRST_ONLY"]);
+    const def = upgrade[0]!.def;
+    expect(secretValueProblem(def, "")).toBeNull();
+    expect(secretValueProblem(def, "adm_1")).toBe("at least 8 characters");
+    expect(secretValueProblem(def, "other-password")).toBe("invalid format");
+    expect(secretValueProblem(def, "adm_secret1")).toBeNull();
+  });
+
+  it("the plan's needs are its secret creates and updates, never generated or preserved ones", () => {
+    const needs = secretNeedsFor(config, plan([
+      { resource: "secret", action: "create", name: "FIRST_ONLY" },
+      { resource: "secret", action: "update", name: "ADMIN_PASSWORD" },
       { resource: "secret", action: "create", name: "SALT" },
       { resource: "secret", action: "preserve", name: "OLD" },
       { resource: "worker", action: "create", name: "api" },
     ]));
-    expect(prompts.map((prompt) => [prompt.name, prompt.label, prompt.replacing])).toEqual([["TOKEN", "API token", false]]);
-  });
-
-  it("an undeclared created secret defaults to prompt; no plan means no prompts", () => {
-    const names = (prompts: ReturnType<typeof secretPromptsFor>) => prompts.map((prompt) => [prompt.name, prompt.label]);
-    expect(names(secretPromptsFor(config, plan([{ resource: "secret", action: "create", name: "EXTRA" }])))).toEqual([["EXTRA", "EXTRA"]]);
-    expect(secretPromptsFor(config, null)).toEqual([]);
-    expect(names(secretPromptsFor("not json", plan([{ resource: "secret", action: "create", name: "X" }])))).toEqual([["X", "X"]]);
-  });
-
-  it("an update (a secret the user chose to change on upgrade) is prompted as a replacement and validated", () => {
-    const rules = JSON.stringify({ inputs: [{ key: "ADMIN_PASSWORD", type: "secret", label: "Admin password", required: false, validation: { minLength: 8, pattern: "adm_.+" } }] });
-    const [prompt] = secretPromptsFor(rules, plan([{ resource: "secret", action: "update", name: "ADMIN_PASSWORD" }]));
-    expect(prompt).toMatchObject({ name: "ADMIN_PASSWORD", replacing: true });
-    expect(secretProblem(prompt!, "")).toBeNull();
-    expect(secretProblem(prompt!, "adm_1")).toBe("at least 8 characters");
-    expect(secretProblem(prompt!, "other-password")).toBe("invalid format");
-    expect(secretProblem(prompt!, "adm_secret1")).toBeNull();
+    expect(needs.map((need) => [need.name, need.label, need.create])).toEqual([["FIRST_ONLY", "First only", true], ["ADMIN_PASSWORD", "Admin password", false]]);
+    expect(secretNeedsFor(config, null)).toEqual([]);
+    expect(secretNeedsFor("not json", plan([{ resource: "secret", action: "create", name: "X" }])).map((need) => need.label)).toEqual(["X"]);
+    // Unmet: no value, or one that breaks the declared rules.
+    expect(unmetSecretNeeds(needs, { FIRST_ONLY: "x", ADMIN_PASSWORD: "adm_1" }).map((need) => need.name)).toEqual(["ADMIN_PASSWORD"]);
+    expect(unmetSecretNeeds(needs, { FIRST_ONLY: "x", ADMIN_PASSWORD: "adm_secret1" })).toEqual([]);
   });
 });
 
@@ -149,7 +157,7 @@ describe("panel markup from props alone", () => {
     renderToStaticMarkup(createElement(V3ConfigurePanel, {
       sourceLabel: "release.zip", releaseUnits: [{ unitId: "main", kind: "worker", name: "api" }], workerUnitCount: 1,
       showModeToggle: true, modeIntent: "install", onModeIntent: noop, renameAllowed: true, workerNameDef: undefined,
-      visibleInputs: [], inputValues: { workerName: "api" }, onInputValue: noop, secretsToChange: [], replacedSecrets: [], onReplaceSecret: noop, upgradeTargets: null,
+      visibleInputs: [], inputValues: { workerName: "api" }, onInputValue: noop, secretRows: [], replacedSecrets: [], onReplaceSecret: noop, secretValues: {}, onSecretValue: noop, upgradeTargets: null,
       upgradeTargetsLoading: false, upgradeTargetsError: null, onSwitchToUpgrade: noop, continueDisabled: false, planning: false, onBack: noop, onContinue: noop, ...overrides,
     }));
 
@@ -187,6 +195,25 @@ describe("panel markup from props alone", () => {
     // An invalid optional value keeps its section open so the error cannot hide.
     const invalid = configure({ visibleInputs: [{ key: "N", type: "integer", label: "N", required: false }], inputValues: { workerName: "api", N: "abc" } });
     expect(invalid).toContain('aria-expanded="true"');
+  });
+
+  it("configure: secret values are entered here: required ones up front, kept ones behind Change", () => {
+    const def: DeclaredInput = { key: "ADMIN_PASSWORD", type: "secret", label: "Admin password" };
+    const install = configure({ secretRows: [{ def, required: true, missing: false }] });
+    expect(install).toMatch(/data-testid="v3-secrets-required"[\s\S]*type="password"[\s\S]*data-testid="v3-secret-ADMIN_PASSWORD"/);
+    expect(install).toContain("never with the plan");
+    // Upgrade of a Worker that has no such secret: required, and says why.
+    const missing = configure({ modeIntent: "upgrade", secretRows: [{ def, required: true, missing: true }] });
+    expect(missing).toContain('data-testid="v3-secret-ADMIN_PASSWORD-note"');
+    expect(missing).toContain("This Worker has no Admin password yet");
+    // Upgrade of a Worker that has it: kept, the field appears only once Change is ticked.
+    const kept = configure({ modeIntent: "upgrade", secretRows: [{ def, required: false, missing: false }] });
+    expect(kept).not.toContain('data-testid="v3-secrets-required"');
+    expect(kept).toContain('data-testid="v3-secret-change-ADMIN_PASSWORD"');
+    expect(kept).not.toContain('data-testid="v3-secret-ADMIN_PASSWORD"');
+    const changing = configure({ modeIntent: "upgrade", secretRows: [{ def, required: false, missing: false }], replacedSecrets: ["ADMIN_PASSWORD"] });
+    expect(changing).toContain('data-testid="v3-secret-ADMIN_PASSWORD"');
+    expect(changing).toContain("New Admin password");
   });
 
   it("configure: while planning the button shows a spinner and says what it waits for", () => {

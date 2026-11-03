@@ -22,7 +22,7 @@ export const ENDPOINT_SCOPE_LEDGER: Record<string, EndpointScopeEntry> = {
   startAssetUploadSession: entry("worker-admin"), uploadWorkerAssets: { capability: "worker-admin", credential: "asset-jwt", reachable: true, live: "unverified-oauth", note: "OAuth authorizes session creation, upload uses only temporary provider JWT." },
   listR2Buckets: entry("r2-write"), getR2Bucket: entry("r2-write", false), createR2Bucket: entry("r2-write"),
   getR2ManagedDomain: entry("r2-write"), listR2CustomDomains: entry("r2-write"),
-  headR2Object: entry("r2-write"),
+  r2ObjectExists: entry("r2-write"),
   listD1Databases: entry("d1-write"), createD1Database: entry("d1-write"),
   listKvNamespaces: entry("kv-write"), createKvNamespace: entry("kv-write"),
   listQueues: entry("queues-write"), createQueue: entry("queues-write"), listQueueConsumers: entry("queues-write"), createQueueConsumer: entry("queues-write"), putQueueConsumer: entry("queues-write", false),

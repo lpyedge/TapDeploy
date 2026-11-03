@@ -901,6 +901,12 @@ describe("worker secret input and inheritance (graph API)", () => {
     const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
     const activated = await t.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] });
     expect(activated.status).toBe(200);
+    // Configure learns which secrets the target Worker has: names, never values.
+    const inventory = await t.app.request("/api/cloudflare/inventory", { method: "POST", headers: { ...t.headers, "content-type": "application/json" }, body: JSON.stringify({ accountId: ACCOUNT, kinds: [], worker: "api" }) });
+    const inventoryText = await inventory.text();
+    expect(inventory.status, inventoryText).toBe(200);
+    expect((JSON.parse(inventoryText) as { secrets?: string[] }).secrets).toEqual(["TOKEN"]);
+    expect(inventoryText).not.toContain(V3_SECRET);
     // A re-plan against the live secret: preserve, no prompt, no rotation.
     const upgrade = await t.replan();
     expect(upgrade.graphPlan.blocked, JSON.stringify(upgrade.graphPlan)).toBe(false);
@@ -1389,16 +1395,18 @@ async function setupBootstrap(
   };
   const ok = (result: unknown) => Response.json({ success: true, result });
   const notFound = () => Response.json({ success: false, errors: [{ code: 10007, message: "not found" }] }, { status: 404 });
-  const noContent = () => new Response(null, { status: 204 });
+  const objectBody = () => new Response("{\"owner\":\"private\"}", { status: 200, headers: { "content-type": "application/octet-stream" } });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     expect(url.origin).toBe("https://api.cloudflare.com");
     const method = init?.method ?? "GET";
     const path = url.pathname;
     world.calls.push({ method, path });
-    // R2 object existence (HEAD only — never contents).
+    // R2 object existence. Provider parity: GET is the object route's only
+    // read method; the body is the object (the installer discards it unread).
     const objMatch = /^\/client\/v4\/accounts\/[^/]+\/r2\/buckets\/([^/]+)\/objects\/(.+)$/.exec(path);
     if (objMatch) {
+      if (method !== "GET") return new Response(null, { status: 405 });
       if (world.denyObjects) return Response.json({ success: false, errors: [{ code: 10001, message: "forbidden" }] }, { status: 403 });
       const key = decodeURIComponent(objMatch[2]!).split("/").map(decodeURIComponent).join("/");
       const bucket = decodeURIComponent(objMatch[1]!);
@@ -1407,9 +1415,9 @@ async function setupBootstrap(
       // the first existence read (between inspect and prewrite recheck).
       if (key === "owner.json" && world.ownerAfterFirstRead) {
         world.ownerReads += 1;
-        return world.ownerReads > 1 ? noContent() : notFound();
+        return world.ownerReads > 1 ? objectBody() : notFound();
       }
-      return world.objects.has(`${bucket}/${key}`) ? noContent() : notFound();
+      return world.objects.has(`${bucket}/${key}`) ? objectBody() : notFound();
     }
     if (path.endsWith("/domains/managed") && method === "GET") {
       return ok({ domain: "private-data.r2.dev", enabled: world.managedEnabled });

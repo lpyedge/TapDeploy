@@ -3,40 +3,11 @@ import type { V3MachineSnapshot } from "./v3-flow-machine.js";
 import { GraphProgress, dashboardUrlForGraphPlan } from "./DeployProgress.js";
 import type { GraphStepStatus } from "./graph-deploy-runner.js";
 import { describeDiff, resourceLabel } from "./step-labels.js";
-import { declaredSecrets, type DeclaredInput } from "./config-inputs.js";
 import { Spinner } from "./Spinner.js";
 import { boundDomains, deployedTargets, resultLinks, type ResultLink } from "./result-links.js";
 import { useLoaded } from "./use-loaded.js";
 import { V3DomainStatus } from "./V3DomainStatus.js";
-import { inputPatternProblem, inputValueProblem } from "../manifest/input-validation.js";
-
-export interface SecretPrompt {
-  name: string;
-  label: string;
-  /** The declared input: its validation rules apply to the value. */
-  input: DeclaredInput;
-  /** An existing secret the user chose to change (upgrade), not a first-install value. */
-  replacing: boolean;
-}
-
-// Secret prompts. Derived from the approved plan diffs (secret create / update
-// names) joined with the declared config inputs; generate-once secrets are
-// server-generated and never shown. The server re-validates what it can (unknown
-// names refused, missing values block the version upload); this UI is collection
-// only and never persisted, and applies the declared rules to the value.
-export function secretPromptsFor(configText: string, graphPlan: GraphPlan | null): SecretPrompt[] {
-  const declared = new Map(declaredSecrets(configText).map((input) => [input.key, input]));
-  const wanted = new Map((graphPlan?.units ?? []).flatMap((unit) => unit.diffs ?? []).filter((diff) => diff.resource === "secret" && (diff.action === "create" || diff.action === "update") && typeof diff.name === "string").map((diff) => [diff.name as string, diff.action === "update"] as const));
-  return [...wanted].flatMap(([name, replacing]) => {
-    const input = declared.get(name) ?? { key: name, type: "secret" as const, label: name, required: false };
-    return !input.generate ? [{ name, label: input.label, input, replacing }] : [];
-  });
-}
-
-/** What is wrong with a secret's value, or null (an empty value is "not entered yet", reported separately). */
-export function secretProblem(prompt: SecretPrompt, value: string): string | null {
-  return value === "" ? null : inputValueProblem(prompt.input, value) ?? inputPatternProblem(prompt.input, value);
-}
+import type { SecretNeed } from "./secret-choices.js";
 
 /**
  * Success result for the sealed-graph flow. The primary address (verified
@@ -126,10 +97,8 @@ export interface V3DeployPanelProps {
   takeoverWorkers: readonly string[];
   takeoverConfirmed: boolean;
   onTakeoverConfirm: (checked: boolean) => void;
-  secretPromptNames: readonly SecretPrompt[];
-  secretValues: Readonly<Record<string, string>>;
-  onSecretValue: (name: string, value: string) => void;
-  secretsReady: boolean;
+  /** Secret values the approved plan needs that Configure has not collected (values are entered only there). */
+  unmetSecrets: readonly SecretNeed[];
   busy: boolean;
   blocked: boolean;
   message: string | null;
@@ -159,10 +128,7 @@ export function V3DeployPanel({
   takeoverWorkers,
   takeoverConfirmed,
   onTakeoverConfirm,
-  secretPromptNames,
-  secretValues,
-  onSecretValue,
-  secretsReady,
+  unmetSecrets,
   busy,
   blocked,
   message,
@@ -234,32 +200,19 @@ export function V3DeployPanel({
           {graphPlan.guards.filter((guard) => guard.level === "block").map((guard) => (
             <p key={guard.code} className="error-block" data-testid="v3-plan-guard">{guard.code}: {guard.detail}</p>
           ))}
-          {secretPromptNames.length > 0 && (
-            <div className="option-card" data-testid="v3-secret-prompts">
-              <p className="m-0 font-medium text-slate-700">{secretPromptNames.every((prompt) => prompt.replacing) ? "New secret values" : "Secrets"}</p>
-              <p className="meta mt-1">Used once for this {modeIntent === "upgrade" ? "upgrade" : "install"} and sent only with the Worker upload — never stored in this page.</p>
-              {secretPromptNames.map((prompt) => {
-                const problem = secretProblem(prompt, secretValues[prompt.name] ?? "");
-                return (
-                  <label className="field mt-3" key={prompt.name}>
-                    {prompt.replacing ? `New ${prompt.label}` : prompt.label}
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={secretValues[prompt.name] ?? ""}
-                      onChange={(e) => onSecretValue(prompt.name, e.target.value)}
-                      data-testid={`v3-secret-${prompt.name}`}
-                    />
-                    {problem && <span className="error" data-testid={`v3-secret-${prompt.name}-error`}>{problem}</span>}
-                  </label>
-                );
-              })}
-              {!secretsReady && <p className="meta">Enter every secret above to enable deploy.</p>}
+          {unmetSecrets.length > 0 && (
+            <div className="blocked-block" data-testid="v3-secrets-unmet">
+              <h3>{unmetSecrets.length === 1 ? "A secret needs a value" : "Secrets need values"}</h3>
+              <p>
+                {unmetSecrets.map((need) => need.label).join(", ")}: enter {unmetSecrets.length === 1 ? "it" : "them"} in Configure.
+                {unmetSecrets.some((need) => need.create) ? " This Worker has no such secret yet, so there is no current value to keep." : ""}
+              </p>
+              <button type="button" className="link text-sm" disabled={busy} onClick={() => onBackToConfigure()} data-testid="v3-secrets-to-configure">Back to Configure</button>
             </div>
           )}
           <div className="actionbar">
             <button type="button" className="link text-sm" disabled={busy} onClick={() => onBackToConfigure()} data-testid="v3-back-to-configure">Back</button>
-            <button type="button" className="primary" disabled={busy || blocked || !secretsReady} onClick={() => onDeploy()} data-testid="v3-confirm-deploy">
+            <button type="button" className="primary" disabled={busy || blocked || unmetSecrets.length > 0} onClick={() => onDeploy()} data-testid="v3-confirm-deploy">
               {busy ? <><Spinner />Checking with Cloudflare…</> : modeIntent === "upgrade" ? "Confirm and upgrade" : "Confirm and deploy"}
             </button>
           </div>
