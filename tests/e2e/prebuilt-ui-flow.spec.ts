@@ -958,7 +958,7 @@ test.describe("prebuilt UI flow", () => {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       mocks.planBodies.push(body);
       const plan = graphPlanBody();
-      if (Array.isArray(body.replaceSecrets)) plan.graphPlan.units[0]!.diffs.push({ resource: "secret", action: "update", name: "ADMIN_PASSWORD" });
+      if (body.mode === "upgrade" && Array.isArray(body.suppliedSecrets) && body.suppliedSecrets.includes("ADMIN_PASSWORD")) plan.graphPlan.units[0]!.diffs.push({ resource: "secret", action: "update", name: "ADMIN_PASSWORD" });
       return json(route, plan);
     });
     await page.unroute("**/api/cloudflare/targets");
@@ -988,7 +988,7 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-input-RETENTION_DAYS")).toBeVisible();
     await expect(page.getByTestId("v3-optional-inputs-toggle")).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByTestId("v3-input-TAGS")).toBeHidden();
-    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("0 of 2 set");
+    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("0 of 3 set");
     await expect(page.getByTestId("v3-input-EXPIRES")).toHaveAttribute("type", "date");
     await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
     await page.getByTestId("v3-input-REGION").selectOption("eu");
@@ -999,16 +999,21 @@ test.describe("prebuilt UI flow", () => {
     await page.getByTestId("v3-input-TAGS-a").check();
     await page.getByTestId("v3-input-TAGS-b").check();
     await page.getByTestId("v3-input-EXPIRES").fill("2027-02-28");
-    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("2 of 2 set");
-    // A new install needs every entered secret, typed here with the other inputs.
-    await expect(page.getByTestId("v3-secrets-required")).toContainText("Admin password");
+    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("2 of 3 set");
+    // An optional secret (required: false) sits with the other optional settings: empty means not set.
+    await expect(page.getByTestId("v3-secrets-required")).toHaveCount(0);
+    await expect(page.getByTestId("v3-secrets-optional")).toContainText("Leave it empty and it is not set.");
+    await expect(page.getByTestId("v3-to-deploy")).toBeEnabled();
+    await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("short");
+    await expect(page.getByTestId("v3-secret-ADMIN_PASSWORD-error")).toHaveText("at least 8 characters");
     await expect(page.getByTestId("v3-to-deploy")).toBeDisabled();
     await page.getByTestId("v3-secret-ADMIN_PASSWORD").fill("first-install-password");
+    await expect(page.getByTestId("v3-optional-inputs-toggle")).toContainText("3 of 3 set");
     await page.getByTestId("v3-to-deploy").click();
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     expect((mocks.planBodies[0] as Record<string, unknown>).inputs).toEqual({ workerName: "api", REGION: "eu", RETENTION_DAYS: "7", TAGS: "a,b", EXPIRES: "2027-02-28" });
     expect(JSON.stringify(mocks.planBodies[0])).not.toContain("first-install-password");
-    expect((mocks.planBodies[0] as Record<string, unknown>).replaceSecrets).toBeUndefined();
+    expect((mocks.planBodies[0] as Record<string, unknown>).suppliedSecrets).toEqual(["ADMIN_PASSWORD"]);
     // Upgrade: the install-only input is gone, empty optional ones keep the current value, and a secret can be chosen for change.
     await page.getByTestId("v3-back-to-configure").click();
     await page.getByTestId("v3-mode-upgrade").check();
@@ -1033,11 +1038,48 @@ test.describe("prebuilt UI flow", () => {
     await expect(page.getByTestId("v3-plan-review")).toBeVisible();
     const upgradeBody = mocks.planBodies.at(-1) as Record<string, unknown>;
     expect(upgradeBody.mode).toBe("upgrade");
-    expect(upgradeBody.replaceSecrets).toEqual(["ADMIN_PASSWORD"]);
+    expect(upgradeBody.suppliedSecrets).toEqual(["ADMIN_PASSWORD"]);
     expect(upgradeBody.inputs).toMatchObject({ RETENTION_DAYS: "14", workerName: "api-live" });
     expect(upgradeBody.inputs).not.toHaveProperty("REGION");
     expect(JSON.stringify(upgradeBody)).not.toContain("long-enough-password");
     // The review asks for nothing more: the value was entered in Configure.
+    await expect(page.getByTestId("v3-secrets-unmet")).toHaveCount(0);
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeEnabled();
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("an optional password marked upgradeKeep is not asked on upgrade, even when the Worker has none: it stays unset", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/cloudflare/targets");
+    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "pocket-chest" }], pages: [] }));
+    await page.route("**/api/cloudflare/inventory", (route) => json(route, { accountId: "a".repeat(32), names: {}, secrets: ["JWT_SECRET"] }));
+    await page.unroute("**/api/deploy/plan");
+    await page.route("**/api/deploy/plan", (route) => {
+      mocks.planBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      const plan = graphPlanBody();
+      plan.graphPlan.units[0]!.diffs.push({ resource: "secret", action: "skip", name: "OWNER_SETUP_PASSWORD", detail: "optional and left empty: not set" } as (typeof plan.graphPlan.units)[0]["diffs"][0]);
+      return json(route, plan);
+    });
+    const config = JSON.stringify({
+      schemaVersion: 3,
+      app: { id: "example/chest", name: "Chest" },
+      source: { allowLocalZip: true },
+      capabilities: ["workers"],
+      inputs: [{ key: "OWNER_SETUP_PASSWORD", type: "secret", label: "Owner password", required: false, upgradeKeep: true, validation: { minLength: 8 } }],
+    });
+    await page.goto("/");
+    await pasteV3Config(page, config);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await page.getByTestId("v3-mode-upgrade").check();
+    await page.getByTestId("v3-upgrade-target").selectOption("pocket-chest");
+    await expect(page.getByTestId("v3-secret-OWNER_SETUP_PASSWORD")).toHaveCount(0);
+    await expect(page.getByTestId("v3-to-deploy")).toBeEnabled();
+    await page.getByTestId("v3-to-deploy").click();
+    expect(mocks.planBodies.at(-1)).not.toHaveProperty("suppliedSecrets");
+    await expect(page.getByTestId("v3-plan-review")).toContainText("optional and left empty: not set");
     await expect(page.getByTestId("v3-secrets-unmet")).toHaveCount(0);
     await expect(page.getByTestId("v3-confirm-deploy")).toBeEnabled();
     expect(mocks.unexpectedApi).toEqual([]);

@@ -17,13 +17,15 @@ import {
 import { stepFail, stepOk, toStepFailure, type DeployStepOutcome } from "./bindings.js";
 import type { DeployStepContext } from "./steps.js";
 
-type SecretActionKind = "create" | "preserve" | "fail";
+type SecretActionKind = "create" | "preserve" | "skip" | "fail";
 
 type SecretActionReason =
   | "install-create"
   | "exists-preserve"
-  | "replace-value"
+  | "supplied-value"
   | "missing-value"
+  | "optional-unset"
+  | "unplanned-value"
   | "preserve-only-absent";
 
 export interface SecretAction {
@@ -34,10 +36,13 @@ export interface SecretAction {
 }
 
 // Pure: decide each declared secret's fate from the live secret names and the
-// browser-supplied first-install values. Existing secrets are always preserved
-// (upgrades retain without reentry or rotation). generate-once never needs a
-// browser value: the server generates it. prompt-on-install requires a value
-// only when the secret does not yet exist. preserve-only fails when absent.
+// browser-supplied values. A supplied secret takes its value (created, or
+// replacing the live one). Otherwise an existing secret is preserved (upgrades
+// retain without reentry or rotation). generate-once never needs a browser
+// value: the server generates it. prompt-on-install requires a value only when
+// the secret does not yet exist; an optional one is then left unset, and a
+// value for it is refused because the approved plan does not set it.
+// preserve-only fails when absent.
 export function resolveSecretActions(
   spec: DeploySpec,
   snapshot: TargetSnapshot,
@@ -46,11 +51,11 @@ export function resolveSecretActions(
   const existing = new Set(snapshot.secretNames);
   const actions: SecretAction[] = [];
   for (const [name, policy] of Object.entries(spec.cloudflare.secrets)) {
-    // The user asked to change this secret: it needs a new value even though it exists.
-    if (policy === "replace") {
+    // The user gave this secret a value: it is set even when it exists.
+    if (policy === "supplied") {
       const value = providedValues[name];
       actions.push(typeof value === "string" && value.length > 0
-        ? { name, policy, action: "create", reason: "replace-value" }
+        ? { name, policy, action: "create", reason: "supplied-value" }
         : { name, policy, action: "fail", reason: "missing-value" });
       continue;
     }
@@ -69,6 +74,10 @@ export function resolveSecretActions(
       continue;
     }
     const value = providedValues[name];
+    if (policy === "optional") {
+      actions.push(value === undefined ? { name, policy, action: "skip", reason: "optional-unset" } : { name, policy, action: "fail", reason: "unplanned-value" });
+      continue;
+    }
     if (typeof value !== "string" || value.length === 0) {
       actions.push({ name, policy, action: "fail", reason: "missing-value" });
       continue;

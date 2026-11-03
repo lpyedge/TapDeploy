@@ -26,6 +26,7 @@ import type { DeploySpec } from "../deploy-spec.js";
 import { domainBaseline, planReference, resourceBaselineDrift } from "./drift.js";
 import { canonicalJson } from "./digest.js";
 import { resourceCapabilityIssues } from "../deploy/resource-validation.js";
+import { uncarriableBindings } from "../deploy/version-proof.js";
 import {
   authorizeGraphIntent,
   type GraphIntentAuthorization,
@@ -140,7 +141,14 @@ export async function buildDeployPlan(
     } else if (!ownership.owned) {
       guards.push({ code: "unrelated-worker", level: "block", detail: ownership.detail });
     }
+    // The version upload carries what the release does not declare; the same
+    // rule refuses there, so an uncarriable binding is shown before any write.
+    const uncarried = uncarriableBindings(snapshot.activeBindings ?? []);
+    if (uncarried.length > 0) {
+      guards.push({ code: "uncarriable-binding", level: "block", detail: `the live Worker has binding(s) the new version cannot carry over: ${uncarried.map((binding) => `${String(binding.name)} (${String(binding.type)})`).join(", ")}; declare them in the release or remove them from the Worker first` });
+    }
   }
+  const droppedAssets = isInstall || spec.assets.length > 0 ? undefined : snapshot.activeBindings?.find((binding) => binding.type === "assets");
 
   if (expected && !isInstall && expected.activeDeploymentId !== snapshot.activeDeploymentId) {
     guards.push({
@@ -171,7 +179,7 @@ export async function buildDeployPlan(
     }
     diffs.push({ resource: "deployment", action: "create", name: spec.cloudflare.workerName });
   } else {
-    diffs.push({ resource: "worker", action: "update", name: spec.cloudflare.workerName });
+    diffs.push({ resource: "worker", action: "update", name: spec.cloudflare.workerName, ...(droppedAssets ? { detail: `the live version's static assets (binding ${String(droppedAssets.name)}) are not carried over: this release serves without them` } : {}) });
     if (spec.assets.length > 0) {
       diffs.push({ resource: "static-assets", action: "update", name: spec.cloudflare.workerName });
     }

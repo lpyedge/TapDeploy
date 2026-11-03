@@ -31,8 +31,11 @@ step that the user cannot get wrong:
 
 - **Typed, validated inputs:** text, number, date, single or multiple choice,
   secrets; lengths, ranges and allowed values checked in the browser and again
-  on the server (a format `pattern` is checked in the browser); each one required or optional, and either asked again on
-  upgrade or kept (an upgrade can change a secret such as an admin password).
+  on the server (a format `pattern`, and every rule on a secret, only in the
+  browser: a secret value reaches the server only with the upload); each one
+  required or optional (an optional secret left empty is not set), and either
+  asked again on upgrade or kept (an upgrade can change a secret such as an
+  admin password).
   Every value arrives in the Worker as an environment variable.
 - **Resources named and governed in one place:** R2, D1, KV, Queues and
   Vectorize with a suggested name the user may change, and a rule per resource

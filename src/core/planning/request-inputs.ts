@@ -1,4 +1,4 @@
-// What the plan request's `inputs` and `replaceSecrets` mean for one release:
+// What the plan request's `inputs` and `suppliedSecrets` mean for one release:
 // checked against the config and the mode, then turned into Worker variables,
 // secret policies and the operator's Worker name. Pure: no provider reads.
 
@@ -46,13 +46,18 @@ export function normalizeV3Inputs(config: ConfigV3, raw: Record<string, unknown>
   return { ok: true, inputs };
 }
 
-/** The declared secret inputs the operator replaces on upgrade: prompt-policy secrets that upgrade asks for. */
-export function replacedSecrets(config: ConfigV3, raw: unknown, mode: InputMode): { ok: true; names: Set<string> } | { ok: false; detail: string } {
+/**
+ * The declared secrets the operator gives a value that they would not get by
+ * default: an optional one they filled in, or an existing one they replace.
+ * Names only; the values ride the deploy steps. A secret the mode does not ask
+ * for (generated, or kept on upgrade) is refused, so a stale form cannot
+ * overwrite what the publisher keeps.
+ */
+export function suppliedSecrets(config: ConfigV3, raw: unknown, mode: InputMode): { ok: true; names: Set<string> } | { ok: false; detail: string } {
   if (raw === undefined) return { ok: true, names: new Set() };
-  if (!Array.isArray(raw) || raw.some((name) => typeof name !== "string")) return { ok: false, detail: "replaceSecrets must be a list of names" };
-  if (mode !== "upgrade") return { ok: false, detail: "replaceSecrets applies to an upgrade only" };
-  const changeable = new Set((config.inputs ?? []).filter((input) => input.type === "secret" && !input.generate && inputAskedIn(input, "upgrade")).map((input) => input.key));
-  for (const name of raw as string[]) if (!changeable.has(name)) return { ok: false, detail: `replaceSecrets: "${name}" is not a secret this app lets you change on upgrade` };
+  if (!Array.isArray(raw) || raw.some((name) => typeof name !== "string")) return { ok: false, detail: "suppliedSecrets must be a list of names" };
+  const askable = new Set((config.inputs ?? []).filter((input) => input.type === "secret" && !input.generate && inputAskedIn(input, mode)).map((input) => input.key));
+  for (const name of raw as string[]) if (!askable.has(name)) return { ok: false, detail: `suppliedSecrets: "${name}" is not a secret this app asks for on ${mode}` };
   return { ok: true, names: new Set(raw as string[]) };
 }
 
@@ -69,16 +74,16 @@ export function inputVars(config: ConfigV3, inputs: Record<string, PrimitiveInpu
 
 /**
  * Secret policy per declared secret input. The key doubles as the Worker
- * binding name (validated binding-safe); the policy defaults to
- * prompt-on-install because a generate requirement can never be inferred.
- * Values are never projected here: they travel per-step in args.secrets and
- * are never sealed.
+ * binding name (validated binding-safe). A required secret is prompt-on-install
+ * (kept when it exists, created with the operator's value when it does not);
+ * an optional one left empty is never set. Values are never projected here:
+ * they travel per-step in args.secrets and are never sealed.
  */
-export function declaredSecretPolicies(config: ConfigV3, replaceSecrets: ReadonlySet<string>): Record<string, SecretPolicy> {
+export function declaredSecretPolicies(config: ConfigV3, supplied: ReadonlySet<string>): Record<string, SecretPolicy> {
   const policies: Record<string, SecretPolicy> = {};
   for (const input of config.inputs ?? []) {
     if (input.type === "secret" && typeof input.key === "string" && input.key.length > 0) {
-      policies[input.key] = input.generate ? "generate-once" : replaceSecrets.has(input.key) ? "replace" : "prompt-on-install";
+      policies[input.key] = input.generate ? "generate-once" : supplied.has(input.key) ? "supplied" : input.required === false ? "optional" : "prompt-on-install";
     }
   }
   return policies;

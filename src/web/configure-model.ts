@@ -71,7 +71,7 @@ export interface PlanRequestInput {
   hyperdriveUnits: readonly HyperdriveUnit[];
   hyperdriveChoices: HyperdriveChoices;
   names: readonly NameRow[];
-  replacedSecrets: readonly string[];
+  suppliedSecrets: readonly string[];
   paidRiskConfirmed: boolean;
   takeoverConfirmed: boolean;
 }
@@ -90,7 +90,7 @@ export function buildPlanRequest(input: PlanRequestInput): GraphPlanRequest {
       ? { bindings: Object.fromEntries(input.hyperdriveUnits.map((unit) => [unit.unitId, { hyperdrive: { ...(input.hyperdriveChoices[unit.unitId] ?? {}) } }])) }
       : {}),
     ...(names ? { names } : {}),
-    ...(input.mode === "upgrade" && input.replacedSecrets.length > 0 ? { replaceSecrets: [...input.replacedSecrets] } : {}),
+    ...(input.suppliedSecrets.length > 0 ? { suppliedSecrets: [...input.suppliedSecrets] } : {}),
     paidRiskConfirmed: input.paidRiskConfirmed,
     ...(input.mode === "upgrade" && input.takeoverConfirmed ? { takeoverConfirmed: true } : {}),
   };

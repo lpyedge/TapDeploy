@@ -8,8 +8,10 @@ export type SecretPolicy =
   | "generate-once"
   | "prompt-on-install"
   | "preserve-only"
-  // Upgrade: the user supplies a new value that replaces the existing secret.
-  | "replace";
+  // The user supplies a value: it creates the secret, or replaces an existing one.
+  | "supplied"
+  // Optional (`required: false`) and left empty: an existing secret is kept, a missing one is not set.
+  | "optional";
 
 interface ReleaseFile {
   path: string;

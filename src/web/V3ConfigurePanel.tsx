@@ -92,16 +92,22 @@ function SecretField({ def, value, onChange, note }: { def: DeclaredInput; value
 
 const SECRET_NOTE = "Secret values are sent only with the Worker upload: never with the plan, never stored in this page.";
 
+function secretNote(row: SecretRow): string {
+  const left = row.kind === "optional" ? "Leave it empty and it is not set." : "";
+  return row.missing ? `This Worker has no ${row.def.label} yet, so there is no current value to keep. ${left}`.trim() : left;
+}
+
 export function V3ConfigurePanel(props: V3ConfigurePanelProps) {
   const { modeIntent, visibleInputs, inputValues, onInputValue, secretRows, replacedSecrets, secretValues, onSecretValue } = props;
   const requiredInputs = visibleInputs.filter((def) => inputRequiredIn(def, modeIntent));
   const optionalInputs = visibleInputs.filter((def) => !inputRequiredIn(def, modeIntent));
-  const requiredSecrets = secretRows.filter((row) => row.required);
-  const keptSecrets = secretRows.filter((row) => !row.required);
-  const hasOptionalInputs = optionalInputs.length + keptSecrets.length > 0;
-  const setCount = optionalInputs.filter((def) => (inputValues[def.key] ?? "") !== "").length;
+  const requiredSecrets = secretRows.filter((row) => row.kind === "required");
+  const optionalSecrets = secretRows.filter((row) => row.kind === "optional");
+  const keptSecrets = secretRows.filter((row) => row.kind === "kept");
+  const hasOptionalInputs = optionalInputs.length + optionalSecrets.length + keptSecrets.length > 0;
+  const setCount = optionalInputs.filter((def) => (inputValues[def.key] ?? "") !== "").length + optionalSecrets.filter((row) => (secretValues[row.def.key] ?? "") !== "").length;
   const optionalInvalid = optionalInputs.some((def) => inputError(def, modeIntent, inputValues[def.key] ?? "") !== null)
-    || keptSecrets.some((row) => replacedSecrets.includes(row.def.key) && secretValueProblem(row.def, secretValues[row.def.key] ?? "") !== null);
+    || [...optionalSecrets, ...keptSecrets.filter((row) => replacedSecrets.includes(row.def.key))].some((row) => secretValueProblem(row.def, secretValues[row.def.key] ?? "") !== null);
   const noInputs = visibleInputs.length === 0 && !props.renameAllowed && secretRows.length === 0;
   const field = (def: DeclaredInput) => (
     <V3InputField key={def.key} def={def} mode={modeIntent} value={inputValues[def.key] ?? ""} onChange={(value) => onInputValue(def.key, value)} />
@@ -112,7 +118,7 @@ export function V3ConfigurePanel(props: V3ConfigurePanelProps) {
       def={row.def}
       value={secretValues[row.def.key] ?? ""}
       onChange={(value) => onSecretValue(row.def.key, value)}
-      {...(row.missing ? { note: `This Worker has no ${row.def.label} yet, so there is no current value to keep.` } : {})}
+      {...(row.missing || row.kind === "optional" ? { note: secretNote(row) } : {})}
     />
   );
   return (
@@ -149,10 +155,16 @@ export function V3ConfigurePanel(props: V3ConfigurePanelProps) {
         <Disclosure
           testId="v3-optional-inputs"
           title={modeIntent === "upgrade" ? "Settings" : "Optional settings"}
-          summary={optionalInputsSummary(modeIntent, setCount, optionalInputs.length, keptSecrets.filter((row) => replacedSecrets.includes(row.def.key)).length)}
+          summary={optionalInputsSummary(modeIntent, setCount, optionalInputs.length + optionalSecrets.length, keptSecrets.filter((row) => replacedSecrets.includes(row.def.key)).length)}
           forceOpen={optionalInvalid}
         >
           {optionalInputs.map(field)}
+          {optionalSecrets.length > 0 && (
+            <div data-testid="v3-secrets-optional">
+              {optionalSecrets.map(secretField)}
+              <p className="meta">{SECRET_NOTE}</p>
+            </div>
+          )}
           {keptSecrets.length > 0 && (
             <div className="field" data-testid="v3-secrets-change">
               <label>Secrets</label>

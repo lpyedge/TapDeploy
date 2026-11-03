@@ -536,11 +536,15 @@ function planSecrets(c: PlanContext): SecretPlanSummary[] {
   for (const [name, policy] of Object.entries(spec.cloudflare.secrets)) {
     const exists = snapshot.secretNames.includes(name);
     secretSummary.push({ name, policy, exists });
-    diffs.push({
-      resource: "secret",
-      action: policy === "replace" ? "update" : exists ? "preserve" : "create",
-      name,
-    });
+    // Kept when it exists unless the operator supplies a value; a missing
+    // optional one left empty is not set.
+    diffs.push(policy === "supplied"
+      ? { resource: "secret", action: exists ? "update" : "create", name }
+      : exists
+        ? { resource: "secret", action: "preserve", name }
+        : policy === "optional"
+          ? { resource: "secret", action: "skip", name, detail: "optional and left empty: not set" }
+          : { resource: "secret", action: "create", name });
   }
 
   if (expected?.secretNames) {

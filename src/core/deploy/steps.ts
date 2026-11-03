@@ -11,6 +11,7 @@
 // version.
 
 import { verifyDeployedBindings } from "./postcheck-bindings.js";
+import { uncarriableBindings } from "./version-proof.js";
 import { resourceCapabilityIssues } from "./resource-validation.js";
 import { startAssetUploadSession as startSessionFn } from "../../cloudflare/assets/index.js";
 import { buildAssetUploadManifest } from "../../cloudflare/assets/index.js";
@@ -211,7 +212,7 @@ export async function executeDeployStep(
   }
   if (preparation.has(step) && ctx.snapshot.workerExists) {
     const inventory = ctx.snapshot.activeBindings;
-    if (!inventory || ctx.snapshot.activeDeploymentVersionIds?.length !== 1 || inventory.some(b => !preservableBinding(b, ctx.spec.assets.length > 0))) {
+    if (!inventory || ctx.snapshot.activeDeploymentVersionIds?.length !== 1 || uncarriableBindings(inventory).length > 0) {
       return fail("inherit-source-unavailable", "exact active-version binding preservation cannot be proved; preparation stopped before mutation");
     }
   }
@@ -533,29 +534,6 @@ async function createVersion(
 
 const MAIN_MODULE_NAME = "worker.mjs";
 
-function preservableBinding(binding: Record<string, unknown>, hasNewAssets: boolean): boolean {
-  if (typeof binding.name !== "string" || !binding.name) return false;
-  const required: Record<string, string[]> = {
-    plain_text: ["text"], json: ["json"], r2_bucket: ["bucket_name"], d1: [],
-    kv_namespace: ["namespace_id"], queue: ["queue_name"], hyperdrive: ["id"],
-    vectorize: ["index_name"], service: ["service"], ai: [], browser: [],
-    ratelimit: ["namespace_id", "simple"], secrets_store_secret: ["store_id", "secret_name"],
-    // a Workflow binding is static metadata (name/class/script); there is
-    // no provider-generated id to drift, so verbatim preservation is exactly
-    // provable and a version update must not be refused for carrying one.
-    workflow: ["workflow_name", "class_name"],
-    // a Durable Object binding is static metadata (name/class) likewise;
-    // the namespace is provider-created by the migration, never an id the
-    // binding must carry.
-    durable_object_namespace: ["class_name"],
-  };
-  if (binding.type === "assets") return hasNewAssets;
-  if (binding.type === "secret_text" || binding.type === "secret_key") return true;
-  if (typeof binding.type !== "string" || !Object.hasOwn(required, binding.type)) return false;
-  if (binding.type === "d1" && typeof (binding.database_id ?? binding.id) !== "string") return false;
-  return required[binding.type]!.every(k => binding[k] !== undefined);
-}
-
 // resolve the D1 database id bound under `binding` from the live snapshot
 // (the create/preserve step re-reads state after the resource is ensured).
 // a declared provider id is verified by id first; a rebound or missing id
@@ -794,9 +772,10 @@ function buildVersionMetadata(
     bindings.push({ type: "assets", name: bindingName });
   }
   // Copy only exact-active verified nonsecret bindings not deliberately authored
-  // by this release. Unknown/secret/old-asset preservation was blocked above.
+  // by this release (unknown kinds were blocked above). The old static-assets
+  // binding is never copied: the release brings its own assets or none.
   for (const existing of ctx.snapshot.activeBindings ?? []) {
-    if (!bindings.some(binding => binding.name === existing.name)) bindings.push({ ...existing });
+    if (existing.type !== "assets" && !bindings.some(binding => binding.name === existing.name)) bindings.push({ ...existing });
   }
   if (new Set(bindings.map(binding => binding.name)).size !== bindings.length) return { ok: false, failure: fail("binding-conflict", "Worker credential/resource/plaintext binding names must not overlap; no code upload performed") };
   // the validated pure new-class migrations ride the atomic version

@@ -56,15 +56,24 @@ describe("undeclared active binding preservation", () => {
     expect(metadata?.bindings).toEqual([{ name: "NEW", type: "plain_text", text: "approved" }, ...original!]);
     expect(ctx.snapshot.activeBindings).toEqual(original);
   });
-  it.each(["unproven", "unknown", "secret", "split", "old-assets"])("%s preservation stops before any preparatory write", async kind => {
+  it.each(["unproven", "unknown", "secret", "split"])("%s preservation stops before any preparatory write", async kind => {
     const ctx = context();
     if (kind === "unproven") ctx.snapshot.activeBindings = undefined;
     if (kind === "unknown") ctx.snapshot.activeBindings = [{ name: "OPAQUE", type: "unsupported_future_binding" }];
     if (kind === "secret") ctx.snapshot.secretNames = ["OLD_SECRET"];
     if (kind === "split") ctx.snapshot.activeDeploymentVersionIds.push("another");
-    if (kind === "old-assets") ctx.snapshot.activeBindings = [{ name: "ASSETS", type: "assets" }];
     expect(await executeDeployStep("create-r2-buckets", ctx, {})).toMatchObject({ ok: false, error: { kind: "inherit-source-unavailable" } });
     expect(ctx.client.createVersion).not.toHaveBeenCalled();
+  });
+  it("an old static-assets binding is not carried: a release without assets uploads a version without one", async () => {
+    const ctx = context();
+    ctx.snapshot.activeBindings!.push({ name: "ASSETS", type: "assets" });
+    expect((await executeDeployStep("create-r2-buckets", ctx, {})).ok).toBe(true);
+    const result = await executeDeployStep("create-version", ctx, { scriptB64: btoa("export default {}") });
+    expect(result.ok).toBe(true);
+    const metadata = vi.mocked(ctx.client.createVersion).mock.calls[0]![1].metadata;
+    expect(metadata.bindings?.some((binding) => binding.type === "assets")).toBe(false);
+    expect(metadata.bindings).toContainEqual({ name: "EXTRA", type: "service", service: "legacy", environment: "production" });
   });
   it("a plaintext declaration cannot overwrite an undeclared active secret, even during resource preparation", async () => {
     const ctx = context();

@@ -347,8 +347,9 @@ export interface GraphPlanRequest {
   bindings?: Record<string, { hyperdrive: Record<string, string> }>;
   // Operator-chosen names, keyed like ReleaseResourceName.key.
   names?: Record<string, string>;
-  // Upgrade: declared secrets to replace (their new values come with the deploy).
-  replaceSecrets?: string[];
+  // Secrets given a value they would not get by default (an optional one filled
+  // in, a kept one replaced); names only, the values come with the deploy.
+  suppliedSecrets?: string[];
   paidRiskConfirmed?: boolean;
   // Upgrade: take over Workers TapDeploy did not deploy (named by the previous plan).
   takeoverConfirmed?: boolean;

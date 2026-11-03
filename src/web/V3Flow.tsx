@@ -40,7 +40,7 @@ import { allowsLocalZip, appDisplayName, defaultSourceUrl } from "./config-text.
 import { buildPlanRequest, httpUnitsFor, hyperdriveReady, hyperdriveUnitsFor, planInputs } from "./configure-model.js";
 import { draftErrors } from "./domain-choices.js";
 import { nameRows } from "./name-choices.js";
-import { secretNeedsFor, secretRows, secretValueProblem, secretsAwaitingValue, unmetSecretNeeds } from "./secret-choices.js";
+import { secretNeedsFor, secretRows, secretsReady, suppliedSecretNames, unmetSecretNeeds } from "./secret-choices.js";
 import { phaseLabel } from "./step-labels.js";
 import { useConfigureForm } from "./use-configure-form.js";
 import { useLoaded } from "./use-loaded.js";
@@ -304,10 +304,9 @@ export function V3Flow(props: V3FlowProps) {
   const secretTarget = `${form.mode}|${workerName}`;
   const secrets = secretRows(configText, form.mode, inventoryWorker !== "" ? inventory.data?.secrets ?? null : null, planSecretCreates.target === secretTarget ? planSecretCreates.names : []);
   // Only a secret the target keeps can be replaced; a missing one is created.
-  const replacedSecrets = form.replacedSecrets.filter((key) => secrets.some((row) => !row.required && row.def.key === key));
-  const secretsReady = secretsAwaitingValue(secrets, replacedSecrets).every(({ def }) => (form.secretValues[def.key] ?? "") !== "" && secretValueProblem(def, form.secretValues[def.key] ?? "") === null);
+  const replacedSecrets = form.replacedSecrets.filter((key) => secrets.some((row) => row.kind === "kept" && row.def.key === key));
   const inputsReady = (!renameAllowed || checkWorkerName(workerNameDef, workerName) === null)
-    && shownInputs.every((def) => inputError(def, form.mode, form.inputValues[def.key] ?? "") === null) && secretsReady;
+    && shownInputs.every((def) => inputError(def, form.mode, form.inputValues[def.key] ?? "") === null) && secretsReady(secrets, replacedSecrets, form.secretValues);
   const configureReady = !busy && !inventory.loading && !upgradeTargets.loading && inputsReady && names.every((row) => !row.error) && Object.keys(domainErrors).length === 0
     && hyperdriveReady(hyperdriveUnits, form.hyperdriveChoices) && machine.can("PLAN_READY") && !nameTaken;
 
@@ -328,7 +327,7 @@ export function V3Flow(props: V3FlowProps) {
         hyperdriveUnits,
         hyperdriveChoices: form.hyperdriveChoices,
         names,
-        replacedSecrets,
+        suppliedSecrets: suppliedSecretNames(secrets, replacedSecrets, form.secretValues),
         paidRiskConfirmed: confirmations.paidRisk,
         takeoverConfirmed: confirmations.takeover,
       }));

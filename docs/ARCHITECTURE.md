@@ -86,19 +86,25 @@ missing at install, not asked on upgrade, or breaks the declared type and
 (`inputPatternProblem`), because a publisher's regular expression can backtrack
 exponentially and the server never evaluates one. Non-secret inputs are merged into the Worker's `vars` when the
 specs are built, so the version upload and the postcheck treat them like
-release variables; a key the release already sets is refused. On upgrade
-`replaceSecrets` lists the secrets the user chose to change: their policy
-becomes `replace`, the plan shows `secret: update`, and the new value rides in
-the version upload instead of an inherit directive.
+release variables; a key the release already sets is refused.
 
-Secret values are typed in Configure only (`src/web/secret-choices.ts`) and
-never travel with the plan request. Install asks for every secret the user
-enters. Upgrade reads the target Worker's secret names (inventory, names only)
-and asks for a value only for a secret the Worker lacks, which the server would
-create and cannot keep; one it has is kept unless the user ticks Change. When
-the names cannot be read, the plan decides: a secret it creates becomes
-required in Configure. The deploy sends only the values the approved plan
-needs.
+Secrets (`declaredSecretPolicies`, `planSecrets`, `resolveSecretActions`): the
+plan request's `suppliedSecrets` names the secrets that get a value they would
+not get by default (an optional one filled in, an existing one replaced); a
+secret the mode does not ask for (generated, `upgradeKeep` on upgrade) is
+refused. Policies: `generate-once`; `supplied` (create, or `secret: update`
+with the new value in the version upload instead of an inherit directive);
+`prompt-on-install` for a required one (kept when it exists, else created
+with the value sent at the step); `optional` for `required: false` left empty
+(kept when it exists, else `secret: skip`, never set, and a value sent for it
+is refused). Secret values are typed in Configure only
+(`src/web/secret-choices.ts`), checked against the declared rules in the
+browser only, and never travel with the plan request. Upgrade reads the target
+Worker's secret names (inventory, names only): one it has is kept unless the
+user ticks Change; one it lacks is asked like on install, except an optional
+`upgradeKeep` one, which stays unset. When the names cannot be read, the plan
+decides: a secret it creates becomes required in Configure. The deploy sends
+only the values the approved plan needs.
 
 ## 3. Sealed-graph protocol (do not weaken)
 
@@ -244,6 +250,12 @@ src/runtime/      node.ts (:8787), workers.ts
 
 Worker: the release name, optionally overridden (section 2). Worker static
 assets are disabled at prepare, plan, step and relay boundaries in both runtimes.
+Upgrade: the version upload carries every active binding the release does not
+declare, verbatim, when the copy is exact (`uncarriableBindings`,
+`src/core/deploy/version-proof.ts`); any other kind blocks the plan
+(`uncarriable-binding`) and the preparation step alike. An active static-assets
+binding is not carried: the release decides its assets (none, while they are
+disabled), and the review's Worker line says the old ones are dropped.
 The existing format/hash code does not establish upload authority. Cloudflare
 Workers Assets was observed serving bytes inconsistent with the submitted hash;
 there is no supported browser-trust exception. Pages remains a separate path.

@@ -130,8 +130,8 @@ case and you only write the exception:
 |---|---|---|---|
 | `upgradeKeep` | resource | `true` | `true`: an upgrade keeps the Worker bound to what it uses today (shown read-only). `false`: the user may bind another one. Use `false` for caches, never for a database. |
 | `create` | resource | `true` | `true`: create it when missing. `false`: it must already exist. |
-| `required` | input | `true` | Must be filled at install. On upgrade an empty value always keeps what is deployed. |
-| `upgradeKeep` | input | `false` | `true`: not asked again on upgrade, the deployed value stays. `false`: upgrade shows the field; empty keeps, a value replaces. |
+| `required` | input | `true` | Must be filled at install. On upgrade an empty value always keeps what is deployed. A secret with `false` may be left empty, and is then not set at all (see [Secrets](#secrets)). |
+| `upgradeKeep` | input | `false` | `true`: not asked again on upgrade, the deployed value stays. `false`: upgrade shows the field; empty keeps, a value replaces. For secrets see [Secrets](#secrets): a required one the Worker does not have is still asked. |
 | `generate` | secret input | `false` | `true`: TapDeploy generates a random value once; the user never enters it. |
 | `allowLocalZip` | source | `true` | Let the user pick a local ZIP instead of `defaultUrl`. `false` requires `defaultUrl` and `expectedSha256`. |
 
@@ -180,7 +180,7 @@ Hyperdrive is always the user's own pick, and custom domains can always change.
 
 ### `inputs`
 
-Values the user fills in, each validated in the browser and again by the server.
+Values the user fills in on the Configure step.
 
 - `key` becomes a Worker variable of that name (a `secret` becomes a secret
   binding, entered in the browser and never stored). A key your `wrangler.jsonc`
@@ -190,21 +190,76 @@ Values the user fills in, each validated in the browser and again by the server.
   (`YYYY-MM-DD`), `select`, `multiselect` (both need `options`; a multiselect
   arrives comma-joined) or `secret`.
 - `options`: plain values or `{ "label", "value" }` objects.
-- `validation`: `minLength`, `maxLength`, `pattern` (a regular expression that must
-  match the whole value), `minimum`, `maximum`, `values`. The server checks all
-  of them again except `pattern`, which only the browser applies: a regular
-  expression can take exponential time on a crafted value, so the server never
-  runs one from a config.
-- `label`, `description`, `placeholder` are what the user reads.
-- On upgrade a secret you did not mark `upgradeKeep` or `generate` gets a
-  "Change" checkbox; the new value is entered in the same Configure step. A
-  secret the upgraded Worker does not have yet is always asked for: there is no
-  current value to keep.
+- `validation`: `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`,
+  `values` (see [Validation](#validation)).
+- `label`, `description`, `placeholder` are what the user reads. They are never
+  checked: a rule written only in a description is not enforced.
+
+#### Validation
+
+Only `validation` decides whether a value is accepted.
+
+| Rule | Applies to | Checked by |
+|---|---|---|
+| `minLength`, `maxLength` | text and secrets | browser; server too for non-secret inputs |
+| `minimum`, `maximum` | `integer`, `number` | browser and server |
+| `values` / `options` | any typed value / `select`, `multiselect` | browser and server |
+| `pattern` | text and secrets | browser only |
+
+- `pattern` is a JavaScript regular expression that must match the **whole**
+  value: TapDeploy tests `^(?:your pattern)$`, so do not add `^`/`$` yourself.
+  Lookaheads work. The server never runs a pattern from a config (a regular
+  expression can take exponential time on a crafted value).
+- A secret value never reaches the server before the deploy step, so **every
+  rule on a secret is checked in the browser only**; the server only refuses a
+  missing value it needs. If your app relies on a rule (for example a password
+  strength), check it in the app as well.
+- Combine rules for "at least 8 characters with letters and digits":
+
+  ```json
+  { "key": "OWNER_PASSWORD", "type": "secret", "label": "Owner password",
+    "validation": { "minLength": 8, "pattern": "(?=.*[A-Za-z])(?=.*[0-9]).+" } }
+  ```
+
+  `minLength` alone would accept `12345678`; the description saying "letters
+  and digits" changes nothing.
+
+#### Secrets
+
+A `secret` input becomes a Worker secret named by its `key`. The user types it
+on the Configure step; it travels only with the Worker upload, never with the
+plan, and is never stored. What happens depends on the declaration and on
+whether the Worker already has a secret of that name:
+
+| Declared as | Install | Upgrade, Worker has it | Upgrade, Worker does not have it |
+|---|---|---|---|
+| `"generate": true` | generated once by TapDeploy | kept | generated |
+| required (default) | asked; must be filled | kept; a "Change" box offers a new value | asked; must be filled (there is nothing to keep) |
+| `"required": false` | asked; may be left empty, and then **not set** | kept; "Change" offers a new value | asked; may be left empty, and then not set |
+| … plus `"upgradeKeep": true` | as above | kept; never offered for change | required: still asked; optional: not asked, not set |
+
+- An optional secret that is not set does not exist in the Worker: your code
+  must treat a missing binding as "not provided" (for example generate a
+  password itself).
+- "Upgrade" includes upgrading a Worker that was deployed another way (a Git
+  repository, wrangler): if its secrets have other names than your `key`s,
+  they count as missing. See [Upgrading a Worker TapDeploy did not deploy](#upgrading-a-worker-tapdeploy-did-not-deploy).
 
 ### `install.policies`
 
 Only `private-r2-owner-bootstrap/v1`: a one-time owner bootstrap for apps that
-keep their owner account in a private R2 bucket.
+keep their owner account in a private R2 bucket. Its fields are names in your
+app, not values: `r2Binding` (the bucket binding), `rootSecret` (a secret
+TapDeploy generates once on a fresh install and never resets), `armSecret` and
+`armValue` (`"yes"`, set only while first setup is pending), and the R2 object
+keys `ownerKey`, `markerKey`, `initialPasswordKey` (checked for existence only,
+never read). Before the Worker upload TapDeploy reads the Worker's secret names
+and those objects and decides: fresh (generate the root, arm), resume, or
+upgrade (an Owner exists: nothing is generated or armed). It refuses rather
+than guess: `ROOT_MISSING` when an Owner exists but the Worker has no secret
+named `rootSecret` (a new one would lock the Owner out), `BUCKET_MISSING`,
+`RECOVERY_REQUIRED`. So `rootSecret` must be the exact name the deployed
+Worker already uses. Do not also declare these secrets under `inputs`.
 
 Full field reference: the JSON Schema
 [`schemas/tapdeploy.config.v3.schema.json`](../schemas/tapdeploy.config.v3.schema.json)
@@ -252,6 +307,39 @@ Open the link, sign in, and choose your ZIP from this computer on the release pa
 plan (what will be created, refusals, cost notes) before anything is written. The
 same bytes from the URL are the same release.
 
+## Upgrading a Worker TapDeploy did not deploy
+
+Users may already run your app, deployed from a Git repository (Workers Builds,
+the Deploy to Cloudflare button) or with wrangler, and switch to your release.
+The upgrade works, with these rules:
+
+- **Takeover.** TapDeploy marks every version it uploads. A Worker whose
+  serving version has no mark is shown as "Not deployed by TapDeploy" on the
+  review, and the user must tick *Take over* first. Tell them to disconnect the
+  Git repository (Worker → Settings → Build) first, or its next push replaces
+  your release again. A Worker of another TapDeploy app, or one whose traffic is
+  split across versions, is refused.
+- **Bindings your release does not declare are carried over** verbatim: R2,
+  D1, KV, queues, Vectorize, services, variables, rate limits, Workflows,
+  Durable Objects, AI, Browser, Hyperdrive, Secrets Store; secrets are
+  inherited by name. Any
+  other kind (Analytics Engine, mTLS, dispatch namespaces, …) cannot be copied
+  exactly, so the plan refuses (`uncarriable-binding`): declare it in your
+  release or have the user remove it first.
+- **Static assets are not carried over.** TapDeploy does not upload Worker
+  static assets (`assets.directory`), so a release serves its frontend from the
+  Worker code (or ships a separate Pages unit). When the deployed version has
+  static assets, the new version has none, and the review says so on the Worker
+  line. Older versions keep their assets.
+- **Names must match the deployment you replace.** Secrets, `rootSecret` and
+  binding names are looked up by name; a different name counts as missing (a
+  required secret is asked for, an optional one stays unset, a missing root
+  secret refuses with `ROOT_MISSING`).
+- **workers.dev** is enabled only when your `wrangler.jsonc` says
+  `"workers_dev": true`; TapDeploy never turns it off, and reports the address
+  only when you declare it. Keep it in the release if your app is meant to be
+  reached there.
+
 ## Release ZIP reference
 
 A ZIP containing **final build output only**. TapDeploy performs no build or
@@ -294,8 +382,8 @@ refused rather than ignored (`UNKNOWN_WRANGLER_FIELD`,
 ### Secrets are never shipped
 
 `.env`, `.env.*`, `.dev.vars*` and key-like files are refused (`SECRET_FILE`).
-Secrets are entered by the user in the browser (at install, or when they choose
-to change one on upgrade) or generated server-side (`"generate": true`).
+Secrets are entered by the user on the Configure step (see [Secrets](#secrets))
+or generated server-side (`"generate": true`).
 
 ## Toolchains
 
@@ -348,7 +436,14 @@ Node build for such releases.
 4. Workflow classes extend `WorkflowEntrypoint`, Durable Object classes extend
    `DurableObject`, and new Durable Object classes use `new_sqlite_classes` in a
    single migration tag.
-5. You tested the ZIP from this computer on an instance and read the plan.
+5. Every rule a value must meet is in `validation` (a description is not
+   checked), and your app copes with an optional secret that is not set.
+6. No `assets.directory` in a Worker's `wrangler.jsonc`; `"workers_dev": true`
+   if the app should answer on workers.dev.
+7. If users may already run the app deployed another way: secret and binding
+   names match that deployment ([upgrading](#upgrading-a-worker-tapdeploy-did-not-deploy)).
+8. You tested the ZIP from this computer on an instance and read the plan,
+   both as a new install and as an upgrade.
 
 ## Distributing TapDeploy itself
 

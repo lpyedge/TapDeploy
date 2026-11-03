@@ -81,6 +81,9 @@ type GuardCode =
   // the target Worker was deployed another way (no installer marker on its
   // active version); blocks unless the operator confirmed taking it over.
   | "unmanaged-worker"
+  // the live Worker binds something the next version cannot carry verbatim
+  // (an unknown kind or an incomplete binding); refused before any write.
+  | "uncarriable-binding"
   | "wrong-project-owner"
   | "r2-drift"
   | "d1-drift"

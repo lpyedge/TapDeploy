@@ -422,11 +422,11 @@ export function preparedGraphInputs(
   archiveSha256: string,
   manifestDigest: string,
   inputs: Record<string, PrimitiveInputValue>,
-  replaceSecrets: ReadonlySet<string> = new Set(),
+  suppliedSecrets: ReadonlySet<string> = new Set(),
 ): { ok: true; specs: Record<string, DeploySpec>; bundles: Record<string, DeployBundle>; proofs: Record<string, unknown> } | { ok: false; detail: string } {
   const byId = new Map((rawUnits as PreparedUnit[]).map((unit) => [unit.unitId, unit]));
   const declared = plannedUnits(config) ?? [];
-  const facts: ReleaseFacts = { config, manifestDigest, archiveSha256, inputs, secretPolicies: declaredSecretPolicies(config, replaceSecrets) };
+  const facts: ReleaseFacts = { config, manifestDigest, archiveSha256, inputs, secretPolicies: declaredSecretPolicies(config, suppliedSecrets) };
   const variables = inputVars(config, inputs);
   const workerName = workerNameOverride(config, inputs);
   if (!workerName.ok) return workerName;

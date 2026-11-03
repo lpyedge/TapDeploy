@@ -8,7 +8,7 @@ import type { GraphPlan } from "../../src/web/api.js";
 import { V3ConfigurePanel } from "../../src/web/V3ConfigurePanel.js";
 import { declaredConfigInputs, inputError, type DeclaredInput } from "../../src/web/config-inputs.js";
 import { V3ReleasePanel } from "../../src/web/V3ReleasePanel.js";
-import { secretNeedsFor, secretRows, secretValueProblem, secretsAwaitingValue, unmetSecretNeeds } from "../../src/web/secret-choices.js";
+import { secretNeedsFor, secretRows, secretValueProblem, secretsReady, suppliedSecretNames, unmetSecretNeeds } from "../../src/web/secret-choices.js";
 
 const noop = () => undefined;
 
@@ -60,7 +60,15 @@ describe("secret choices", () => {
       { key: "PLAIN", type: "string" },
     ],
   });
-  const rows = (...args: Parameters<typeof secretRows> extends [string, ...infer Rest] ? Rest : never) => secretRows(config, ...args).map((row) => [row.def.key, row.required, row.missing]);
+  // Optional ones: changeable on upgrade, and one the upgrade does not ask again.
+  const optional = JSON.stringify({
+    inputs: [
+      { key: "TOKEN", type: "secret", label: "Token", required: false },
+      { key: "OWNER_SETUP_PASSWORD", type: "secret", label: "Owner password", required: false, upgradeKeep: true },
+    ],
+  });
+  const rows = (...args: Parameters<typeof secretRows> extends [string, ...infer Rest] ? Rest : never) => secretRows(config, ...args).map((row) => [row.def.key, row.kind, row.missing]);
+  const optionalRows = (...args: Parameters<typeof secretRows> extends [string, ...infer Rest] ? Rest : never) => secretRows(optional, ...args).map((row) => [row.def.key, row.kind, row.missing]);
   const plan = (diffs: Array<{ resource: string; action: string; name?: string }>): GraphPlan => ({
     ok: true, blocked: false, digest: "d", guards: [],
     cost: { operations: [], requiresConfirmation: false, confirmed: false, blockedUnknownCost: false },
@@ -68,25 +76,38 @@ describe("secret choices", () => {
     units: [{ unitId: "main", kind: "worker", name: "api", requiresBundle: true, diffs }],
   });
 
-  it("install asks for every entered secret, required; generated ones never appear", () => {
-    expect(rows("install", null, [])).toEqual([["ADMIN_PASSWORD", true, false], ["FIRST_ONLY", true, false]]);
+  it("install asks for every entered secret, required unless the config says required: false; generated ones never appear", () => {
+    expect(rows("install", null, [])).toEqual([["ADMIN_PASSWORD", "required", false], ["FIRST_ONLY", "required", false]]);
+    expect(optionalRows("install", null, [])).toEqual([["TOKEN", "optional", false], ["OWNER_SETUP_PASSWORD", "optional", false]]);
   });
 
-  it("upgrade keeps a secret the Worker has (changeable unless upgradeKeep) and requires one it lacks", () => {
-    expect(rows("upgrade", ["ADMIN_PASSWORD", "FIRST_ONLY"], [])).toEqual([["ADMIN_PASSWORD", false, false]]);
-    expect(rows("upgrade", ["FIRST_ONLY"], [])).toEqual([["ADMIN_PASSWORD", true, true]]);
-    expect(rows("upgrade", [], [])).toEqual([["ADMIN_PASSWORD", true, true], ["FIRST_ONLY", true, true]]);
+  it("upgrade keeps a secret the Worker has (changeable unless upgradeKeep) and asks for one it lacks", () => {
+    expect(rows("upgrade", ["ADMIN_PASSWORD", "FIRST_ONLY"], [])).toEqual([["ADMIN_PASSWORD", "kept", false]]);
+    expect(rows("upgrade", ["FIRST_ONLY"], [])).toEqual([["ADMIN_PASSWORD", "required", true]]);
+    expect(rows("upgrade", [], [])).toEqual([["ADMIN_PASSWORD", "required", true], ["FIRST_ONLY", "required", true]]);
+    // A missing optional one may stay empty; one marked upgradeKeep is not asked again at all.
+    expect(optionalRows("upgrade", [], [])).toEqual([["TOKEN", "optional", true]]);
+    expect(optionalRows("upgrade", ["TOKEN", "OWNER_SETUP_PASSWORD"], [])).toEqual([["TOKEN", "kept", false]]);
   });
 
   it("with the Worker's secrets unknown, upgrade keeps them unless the last plan creates one", () => {
-    expect(rows("upgrade", null, [])).toEqual([["ADMIN_PASSWORD", false, false]]);
-    expect(rows("upgrade", null, ["FIRST_ONLY"])).toEqual([["ADMIN_PASSWORD", false, false], ["FIRST_ONLY", true, true]]);
+    expect(rows("upgrade", null, [])).toEqual([["ADMIN_PASSWORD", "kept", false]]);
+    expect(rows("upgrade", null, ["FIRST_ONLY"])).toEqual([["ADMIN_PASSWORD", "kept", false], ["FIRST_ONLY", "required", true]]);
   });
 
-  it("a value is awaited for required rows and the ones chosen for change, and follows the declared rules", () => {
+  it("ready needs required and changed values, valid; an optional one may stay empty and is then not supplied", () => {
     const upgrade = secretRows(config, "upgrade", ["ADMIN_PASSWORD"], []);
-    expect(secretsAwaitingValue(upgrade, []).map((row) => row.def.key)).toEqual(["FIRST_ONLY"]);
-    expect(secretsAwaitingValue(upgrade, ["ADMIN_PASSWORD"]).map((row) => row.def.key)).toEqual(["ADMIN_PASSWORD", "FIRST_ONLY"]);
+    expect(secretsReady(upgrade, [], {})).toBe(false);
+    expect(secretsReady(upgrade, [], { FIRST_ONLY: "x" })).toBe(true);
+    expect(secretsReady(upgrade, ["ADMIN_PASSWORD"], { FIRST_ONLY: "x" })).toBe(false);
+    expect(secretsReady(upgrade, ["ADMIN_PASSWORD"], { FIRST_ONLY: "x", ADMIN_PASSWORD: "adm_1" })).toBe(false);
+    expect(secretsReady(upgrade, ["ADMIN_PASSWORD"], { FIRST_ONLY: "x", ADMIN_PASSWORD: "adm_secret1" })).toBe(true);
+    // Supplied: a changed kept one; a required one is created with its value anyway.
+    expect(suppliedSecretNames(upgrade, ["ADMIN_PASSWORD"], { FIRST_ONLY: "x", ADMIN_PASSWORD: "adm_secret1" })).toEqual(["ADMIN_PASSWORD"]);
+    const install = secretRows(optional, "install", null, []);
+    expect(secretsReady(install, [], {})).toBe(true);
+    expect(suppliedSecretNames(install, [], {})).toEqual([]);
+    expect(suppliedSecretNames(install, [], { TOKEN: "t" })).toEqual(["TOKEN"]);
     const def = upgrade[0]!.def;
     expect(secretValueProblem(def, "")).toBeNull();
     expect(secretValueProblem(def, "adm_1")).toBe("at least 8 characters");
@@ -199,21 +220,26 @@ describe("panel markup from props alone", () => {
 
   it("configure: secret values are entered here: required ones up front, kept ones behind Change", () => {
     const def: DeclaredInput = { key: "ADMIN_PASSWORD", type: "secret", label: "Admin password" };
-    const install = configure({ secretRows: [{ def, required: true, missing: false }] });
+    const install = configure({ secretRows: [{ def, kind: "required", missing: false }] });
     expect(install).toMatch(/data-testid="v3-secrets-required"[\s\S]*type="password"[\s\S]*data-testid="v3-secret-ADMIN_PASSWORD"/);
     expect(install).toContain("never with the plan");
     // Upgrade of a Worker that has no such secret: required, and says why.
-    const missing = configure({ modeIntent: "upgrade", secretRows: [{ def, required: true, missing: true }] });
+    const missing = configure({ modeIntent: "upgrade", secretRows: [{ def, kind: "required", missing: true }] });
     expect(missing).toContain('data-testid="v3-secret-ADMIN_PASSWORD-note"');
     expect(missing).toContain("This Worker has no Admin password yet");
     // Upgrade of a Worker that has it: kept, the field appears only once Change is ticked.
-    const kept = configure({ modeIntent: "upgrade", secretRows: [{ def, required: false, missing: false }] });
+    const kept = configure({ modeIntent: "upgrade", secretRows: [{ def, kind: "kept", missing: false }] });
     expect(kept).not.toContain('data-testid="v3-secrets-required"');
     expect(kept).toContain('data-testid="v3-secret-change-ADMIN_PASSWORD"');
     expect(kept).not.toContain('data-testid="v3-secret-ADMIN_PASSWORD"');
-    const changing = configure({ modeIntent: "upgrade", secretRows: [{ def, required: false, missing: false }], replacedSecrets: ["ADMIN_PASSWORD"] });
+    const changing = configure({ modeIntent: "upgrade", secretRows: [{ def, kind: "kept", missing: false }], replacedSecrets: ["ADMIN_PASSWORD"] });
     expect(changing).toContain('data-testid="v3-secret-ADMIN_PASSWORD"');
     expect(changing).toContain("New Admin password");
+    // Optional: in the optional section, and empty means not set.
+    const optional = configure({ modeIntent: "upgrade", secretRows: [{ def, kind: "optional", missing: true }] });
+    expect(optional).not.toContain('data-testid="v3-secrets-required"');
+    expect(optional).toMatch(/data-testid="v3-optional-inputs"[\s\S]*data-testid="v3-secrets-optional"/);
+    expect(optional).toContain("Leave it empty and it is not set.");
   });
 
   it("configure: while planning the button shows a spinner and says what it waits for", () => {

@@ -182,6 +182,44 @@ it("an upgrade takes over a Worker deployed another way only after the operator 
   expect(next.graphPlan.takeover).toEqual({ workers: [], confirmed: false });
 });
 
+it("an upgrade from a version with static assets to a release without them says so on the review and uploads a version without the old assets", async () => {
+  const f = await graphHonoFixture(baseConfig(["workers"]), {
+    "wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker/main.mjs", compatibility_date: "2026-10-17" })),
+    "worker/main.mjs": enc.encode(code),
+  });
+  const created = await f.step("main", "worker", "create", "api", "create-worker");
+  const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
+  expect((await f.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] })).status).toBe(200);
+  const worker = f.workers.get("api")!;
+  worker.versions.find((version) => version.id === worker.active)!.bindings.push({ type: "assets", name: "ASSETS" });
+
+  const planned = await (await f.plan({ mode: "upgrade" })).json() as typeof f.plannedBody;
+  expect(planned.graphPlan.blocked, JSON.stringify(planned.graphPlan.guards)).toBe(false);
+  const update = planned.graphPlan.units[0]!.diffs.find((diff) => diff.resource === "worker");
+  expect(update).toMatchObject({ action: "update", detail: expect.stringContaining("static assets (binding ASSETS) are not carried over") });
+  const version = await f.makeStep(planned)("main", "worker", "update", "api", "create-version");
+  expect(version.status, await version.clone().text()).toBe(200);
+  expect(worker.versions[0]!.bindings.some((binding) => binding.type === "assets")).toBe(false);
+});
+
+it("an upgrade over a binding the new version cannot carry is refused at plan time, before any write", async () => {
+  const f = await graphHonoFixture(baseConfig(["workers"]), {
+    "wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker/main.mjs", compatibility_date: "2026-10-17" })),
+    "worker/main.mjs": enc.encode(code),
+  });
+  const created = await f.step("main", "worker", "create", "api", "create-worker");
+  const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
+  expect((await f.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] })).status).toBe(200);
+  const worker = f.workers.get("api")!;
+  worker.versions.find((version) => version.id === worker.active)!.bindings.push({ type: "analytics_engine", name: "EVENTS", dataset: "events" });
+  const writes = f.writes().length;
+  const refused = await (await f.plan({ mode: "upgrade" })).json() as typeof f.plannedBody & { approval?: unknown };
+  expect(refused.graphPlan.blocked).toBe(true);
+  expect(refused.graphPlan.guards.find((guard) => guard.code === "unit-blocked")?.detail).toContain("EVENTS (analytics_engine)");
+  expect(refused.approval).toBeUndefined();
+  expect(f.writes()).toHaveLength(writes);
+});
+
 it("enforces server-derived RPC dependency order and unit-bound receipts", async () => {
   const config: ConfigV3 = { ...baseConfig(["workers"]), units: [{ id: "api", kind: "worker", wrangler: "units/api/wrangler.jsonc" }, { id: "jobs", kind: "worker", wrangler: "units/jobs/wrangler.jsonc" }] };
   const f = await graphHonoFixture(config, {
@@ -939,9 +977,9 @@ describe("worker secret input and inheritance (graph API)", () => {
   }
 
   it.each(["node", "workers"] as const)("an upgrade replaces a secret the user chose to change, with the new value (%s)", async (runtime) => {
-    const t = await setupSecrets(runtime, [secretInput({ required: false })]);
+    const t = await setupSecrets(runtime, [secretInput({ required: false })], {}, { suppliedSecrets: ["TOKEN"] });
     await installAndActivate(t);
-    const upgrade = await t.replan({ replaceSecrets: ["TOKEN"] });
+    const upgrade = await t.replan({ suppliedSecrets: ["TOKEN"] });
     expect(upgrade.graphPlan.blocked, JSON.stringify(upgrade.graphPlan)).toBe(false);
     expect(upgrade.graphPlan.units.find((u) => u.unitId === "main")!.diffs.filter((d) => d.resource === "secret")).toEqual([{ resource: "secret", action: "update", name: "TOKEN" }]);
     const ustep = t.makeStep(upgrade);
@@ -958,12 +996,12 @@ describe("worker secret input and inheritance (graph API)", () => {
   });
 
   it("replacing one secret still inherits the others from the active version", async () => {
-    const t = await setupSecrets("node", [secretInput({ required: false }), secretInput({ key: "OTHER", label: "Other", required: false })]);
+    const t = await setupSecrets("node", [secretInput({ required: false }), secretInput({ key: "OTHER", label: "Other", required: false })], {}, { suppliedSecrets: ["TOKEN", "OTHER"] });
     const created = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64"), secrets: { TOKEN: V3_SECRET, OTHER: "other-value" } });
     expect(created.status, await created.clone().text()).toBe(200);
     const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
     expect((await t.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] })).status).toBe(200);
-    const upgrade = await t.replan({ replaceSecrets: ["TOKEN"] });
+    const upgrade = await t.replan({ suppliedSecrets: ["TOKEN"] });
     expect(upgrade.graphPlan.units.find((u) => u.unitId === "main")!.diffs.filter((d) => d.resource === "secret")).toEqual([
       { resource: "secret", action: "update", name: "TOKEN" },
       { resource: "secret", action: "preserve", name: "OTHER" },
@@ -979,17 +1017,32 @@ describe("worker secret input and inheritance (graph API)", () => {
     ["an install-only secret", [secretInput({ upgradeKeep: true })], ["TOKEN"]],
     ["a generate-once secret", [secretInput({ generate: true })], ["TOKEN"]],
     ["an undeclared name", [secretInput({ required: false })], ["OTHER"]],
-  ] as const)("refuses to replace %s on upgrade, before any provider read", async (_label, inputs, replaceSecrets) => {
+  ] as const)("refuses to supply %s on upgrade, before any provider read", async (_label, inputs, suppliedSecrets) => {
     const t = await setupSecrets("node", [...inputs]);
     const callsBefore = t.calls.length;
-    const refused = await t.planUpgrade({ replaceSecrets });
+    const refused = await t.planUpgrade({ suppliedSecrets });
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({ error: "INVALID_INPUT" });
     expect(t.calls).toHaveLength(callsBefore);
   });
 
-  it("refuses replaceSecrets on an install", async () => {
-    const t = await setupSecrets("node", [secretInput({ required: false })], {}, { replaceSecrets: ["TOKEN"] });
+  it("an optional secret left empty is not set, and a value for it at the upload is refused", async () => {
+    const t = await setupSecrets("node", [secretInput({ required: false })]);
+    expect(t.planStatus).toBe(200);
+    expect(t.body.graphPlan.units.find((u) => u.unitId === "main")!.diffs.filter((d) => d.resource === "secret")).toEqual([
+      { resource: "secret", action: "skip", name: "TOKEN", detail: "optional and left empty: not set" },
+    ]);
+    const writes = t.writes().length;
+    const unplanned = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64"), secrets: { TOKEN: V3_SECRET } });
+    expect(unplanned.status).toBe(409);
+    expect(t.writes()).toHaveLength(writes);
+    const created = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64") });
+    expect(created.status, await created.clone().text()).toBe(200);
+    expect(t.workers.get("api")!.versions[0]!.bindings.some((binding) => binding.name === "TOKEN")).toBe(false);
+  });
+
+  it("refuses to supply a generated secret on an install", async () => {
+    const t = await setupSecrets("node", [secretInput({ generate: true })], {}, { suppliedSecrets: ["TOKEN"] });
     expect(t.planStatus).toBe(400);
   });
 

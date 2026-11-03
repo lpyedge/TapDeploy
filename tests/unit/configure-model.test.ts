@@ -49,26 +49,25 @@ describe("buildPlanRequest", () => {
   const base = {
     accountId: "acct", releaseProof: "proof", configText: "{}", inputs: {}, mode: "install" as const,
     httpUnits: [], domainDrafts: {}, domainFacts: null, recordsByZone: {}, hyperdriveUnits: [], hyperdriveChoices: {},
-    names: [], replacedSecrets: [], paidRiskConfirmed: false, takeoverConfirmed: false,
+    names: [], suppliedSecrets: [], paidRiskConfirmed: false, takeoverConfirmed: false,
   };
 
   it("carries only what the operator chose", () => {
     expect(buildPlanRequest(base)).toEqual({ accountId: "acct", releaseProof: "proof", config: { text: "{}" }, mode: "install", paidRiskConfirmed: false });
   });
 
-  it("adds inputs, Hyperdrive picks, renamed resources and (on upgrade only) the secrets to replace", () => {
+  it("adds inputs, Hyperdrive picks, renamed resources and the names (never values) of the supplied secrets", () => {
     const request = buildPlanRequest({
       ...base,
       inputs: { REGION: "eu" },
       hyperdriveUnits: [{ unitId: "api", target: "my-api", bindings: ["DB"] }],
       hyperdriveChoices: { api: { DB: "prod-db" } },
       names: [{ key: "r2:media", kind: "r2", releaseName: "media", mode: "input", value: "photos", options: [], exists: false }],
-      replacedSecrets: ["TOKEN"],
+      suppliedSecrets: ["TOKEN"],
       paidRiskConfirmed: true,
     });
-    expect(request).toMatchObject({ inputs: { REGION: "eu" }, bindings: { api: { hyperdrive: { DB: "prod-db" } } }, names: { "r2:media": "photos" }, paidRiskConfirmed: true });
-    expect(request).not.toHaveProperty("replaceSecrets");
-    expect(buildPlanRequest({ ...base, mode: "upgrade", replacedSecrets: ["TOKEN"] }).replaceSecrets).toEqual(["TOKEN"]);
+    expect(request).toMatchObject({ inputs: { REGION: "eu" }, bindings: { api: { hyperdrive: { DB: "prod-db" } } }, names: { "r2:media": "photos" }, suppliedSecrets: ["TOKEN"], paidRiskConfirmed: true });
+    expect(buildPlanRequest(base)).not.toHaveProperty("suppliedSecrets");
   });
 
   it("asks to take over a Worker TapDeploy did not deploy only on upgrade", () => {

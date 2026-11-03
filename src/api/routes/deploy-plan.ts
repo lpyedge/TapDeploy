@@ -16,7 +16,7 @@ import type { DeploySpec } from "../../core/deploy-spec.js";
 import { snapshotGraphTargets } from "../../core/planning/snapshot.js";
 import { domainEntriesFromChoices } from "../../core/deploy/custom-domains.js";
 import { applyResourceNames, markChangeableOnUpgrade } from "../../core/planning/resource-names.js";
-import { normalizeV3Inputs, replacedSecrets } from "../../core/planning/request-inputs.js";
+import { normalizeV3Inputs, suppliedSecrets } from "../../core/planning/request-inputs.js";
 import { preparedGraphInputs, resourceOnlyDispatchSpecs } from "../../core/planning/unit-specs.js";
 import { buildGraphDeployPlan, graphPlanReferences } from "../../core/planning/plan.js";
 import { buildDeployGraph } from "../../core/planning/deploy-graph.js";
@@ -54,9 +54,10 @@ interface DeployPlanBody {
   // Operator-chosen names for the release's resources and Pages projects:
   // `{ "<kind>:<release name>" | "pages:<unitId>": name }` (resource-names.ts).
   names?: unknown;
-  // Upgrade only: names of declared secret inputs the operator replaces; their
-  // new values are supplied with the deploy steps, never at plan time.
-  replaceSecrets?: unknown;
+  // Names of declared secrets the operator gives a value they would not get by
+  // default (an optional one filled in, an existing one replaced); the values
+  // are supplied with the deploy steps, never at plan time.
+  suppliedSecrets?: unknown;
   // The verified bundle proof + digest binding the
   // exact ZIP content, the per-unit drift reference of a previously approved
   // graph plan, and the operator's explicit paid-risk confirmation.
@@ -180,9 +181,9 @@ function buildSpecs({ body, publicOrigin }: PlanRequest, { config, release }: Op
   if (!renamed.ok) throw new PlanRefusal(400, { error: "INVALID_RESOURCE_NAME", detail: renamed.detail });
   const inputs = normalizeV3Inputs(config, body.inputs, mode);
   if (!inputs.ok) throw new PlanRefusal(400, { error: "INVALID_INPUT", detail: inputs.detail });
-  const replaced = replacedSecrets(config, body.replaceSecrets, mode);
-  if (!replaced.ok) throw new PlanRefusal(400, { error: "INVALID_INPUT", detail: replaced.detail });
-  const prepared = preparedGraphInputs(renamed.config, renamed.units, release.archiveSha256, release.manifestDigest, inputs.inputs, replaced.names);
+  const supplied = suppliedSecrets(config, body.suppliedSecrets, mode);
+  if (!supplied.ok) throw new PlanRefusal(400, { error: "INVALID_INPUT", detail: supplied.detail });
+  const prepared = preparedGraphInputs(renamed.config, renamed.units, release.archiveSha256, release.manifestDigest, inputs.inputs, supplied.names);
   if (!prepared.ok) throw new PlanRefusal(409, { error: "INVALID_RELEASE_PROOF", detail: prepared.detail });
   const specs = prepared.specs;
   markChangeableOnUpgrade(specs, release.units, { units: plannedUnits(config) });
