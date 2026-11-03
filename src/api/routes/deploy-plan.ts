@@ -64,6 +64,9 @@ interface DeployPlanBody {
   bundleDigest?: string;
   expectedUnits?: Record<string, ExpectedTarget>;
   paidRiskConfirmed?: boolean;
+  // Upgrade only: the operator confirmed taking over a Worker TapDeploy did not
+  // deploy (no installer marker on its active version).
+  takeoverConfirmed?: boolean;
   releaseProof?: unknown;
 }
 
@@ -336,6 +339,7 @@ async function planGraph(request: PlanRequest): Promise<Response> {
       ...(body.expectedUnits ? { expected: body.expectedUnits } : {}),
       ...(body.targetKind ? { intent: { targetKind: body.targetKind } } : {}),
       paidRiskConfirmed: body.paidRiskConfirmed === true,
+      takeoverConfirmed: body.takeoverConfirmed === true,
     },
     { salt: payload.csrf },
   );

@@ -8,6 +8,7 @@ const ACCOUNT = "a".repeat(32);
 const plan = (units: Array<{ kind: string; diffs: Array<{ resource: string; action: string; name?: string }> }>): GraphPlan => ({
   ok: true, blocked: false, digest: "d", guards: [],
   cost: { operations: [], requiresConfirmation: false, confirmed: false, blockedUnknownCost: false },
+  takeover: { workers: [], confirmed: false },
   units: units.map((unit, index) => ({ unitId: `u${index}`, name: "n", requiresBundle: false, ...unit })),
 });
 

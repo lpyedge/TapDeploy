@@ -71,6 +71,7 @@ describe("secretPromptsFor", () => {
   const plan = (diffs: Array<{ resource: string; action: string; name?: string }>): GraphPlan => ({
     ok: true, blocked: false, digest: "d", guards: [],
     cost: { operations: [], requiresConfirmation: false, confirmed: false, blockedUnknownCost: false },
+    takeover: { workers: [], confirmed: false },
     units: [{ unitId: "main", kind: "worker", name: "api", requiresBundle: true, diffs }],
   });
 

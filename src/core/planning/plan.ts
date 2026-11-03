@@ -53,6 +53,9 @@ interface BuildPlanOptions {
   // Graph resource ids (`<kind>:<name>`) another unit of the same release
   // creates: a missing one here is that unit's create, not a conflict.
   providedByOtherUnits?: ReadonlySet<string>;
+  // The operator confirmed taking over an existing Worker TapDeploy did not
+  // deploy (upgrade only; any other ownership failure still blocks).
+  takeoverConfirmed?: boolean;
 }
 
 export async function buildDeployPlan(
@@ -119,16 +122,22 @@ export async function buildDeployPlan(
   // resolved only against the ACTUALLY ACTIVE deployment version(s) that are
   // serving traffic. A historical version's marker is an assertion about the
   // past, not evidence that the current deployment belongs to this project.
-  // An unresolvable (no active deployment) or split active version set, an
-  // unmanaged worker, or a worker managed by another project all fail closed
-  // (wrong-project-owner / unrelated-worker) rather than being silently adopted.
+  // An unresolvable (no active deployment) or split active version set, or a
+  // worker managed by another project all fail closed (unrelated-worker) rather
+  // than being silently adopted. A worker deployed another way (unmanaged) is
+  // taken over only on the operator's explicit confirmation; the version this
+  // upgrade uploads carries the marker from then on.
   if (!isInstall) {
     const ownership = resolveActiveOwnership(
       snapshot.versions,
       snapshot.activeDeploymentVersionIds ?? [],
       spec.project.id,
     );
-    if (!ownership.owned) {
+    if (ownership.unmanaged) {
+      guards.push(opts.takeoverConfirmed === true
+        ? { code: "unmanaged-worker", level: "warn", detail: `${ownership.detail}; the operator confirmed taking it over` }
+        : { code: "unmanaged-worker", level: "block", detail: `${ownership.detail}; upgrading replaces its code with this release and needs the operator's explicit takeover confirmation` });
+    } else if (!ownership.owned) {
       guards.push({ code: "unrelated-worker", level: "block", detail: ownership.detail });
     }
   }
@@ -436,6 +445,8 @@ export interface GraphDeployPlan {
   /** Raw structural graph guards, kept for traceability. */
   graphGuards: GraphGuard[];
   cost: GraphPlanCost;
+  /** Existing Workers TapDeploy did not deploy, which this upgrade takes over only once confirmed. */
+  takeover: { workers: string[]; confirmed: boolean };
   scopeCoverage: GraphIntentAuthorization;
   digest: string;
   targets: GraphPlanSyntheticTarget[];
@@ -474,6 +485,8 @@ export interface GraphDeployPlanInput {
   installPolicies?: readonly string[];
   costPolicy?: GraphCostPolicy;
   paidRiskConfirmed?: boolean;
+  /** The operator's explicit confirmation to take over Workers TapDeploy did not deploy. */
+  takeoverConfirmed?: boolean;
   /** Per-unit drift reference (from an approved plan). */
   expected?: Readonly<Record<string, ExpectedTarget>>;
   intent?: { targetKind?: "workers" | "pages" };
@@ -698,6 +711,7 @@ async function buildGraphUnitPlan(
     ...(expected !== undefined ? { expected } : {}),
     ...(input.intent !== undefined ? { intent: input.intent } : {}),
     providedByOtherUnits,
+    takeoverConfirmed: input.takeoverConfirmed === true,
   });
   const target: GraphPlanSyntheticTarget = {
     unitId: unit.id,
@@ -946,6 +960,12 @@ export async function buildGraphDeployPlan(
     opts.salt,
   );
 
+  // Workers a confirmation would take over; an unconfirmed one already blocks
+  // its unit (unmanaged-worker), this only names them for the review.
+  const takeover = {
+    workers: units.filter((unit) => unit.guards.some((guard) => guard.code === "unmanaged-worker")).map((unit) => unit.plan?.workerName ?? unit.name),
+    confirmed: input.takeoverConfirmed === true,
+  };
   const blocked = guards.some((guard) => guard.level === "block");
   return {
     ok: !blocked,
@@ -958,6 +978,7 @@ export async function buildGraphDeployPlan(
     guards,
     graphGuards: graph.guards,
     cost,
+    takeover,
     scopeCoverage,
     digest,
     targets,

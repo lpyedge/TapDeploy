@@ -3,7 +3,7 @@ import { createApp } from "../../src/api/app.js";
 import { deriveSealKey, openSeal, type SealedEnvelope } from "../../src/auth/keys.js";
 import { createSession, sessionCookieName } from "../../src/auth/session.js";
 import type { ConfigV3 } from "../../src/manifest/config-v3.js";
-import { graphActionId } from "../../src/core/planning/digest.js";
+import { graphActionId, TAPDEPLOY_MANAGED_MARKER } from "../../src/core/planning/digest.js";
 import { zipSync } from "fflate";
 import { graphHonoFixture } from "./graph-hono-fixture.js";
 import { prepareForm, sessionBinding } from "./login.js";
@@ -142,6 +142,44 @@ it("New never updates an existing Worker and Upgrade never creates one (TARGET_M
   expect(body.detail).toContain('"api" already exists');
   expect(f.writes()).toHaveLength(writes);
   expect((await f.plan({ mode: "upgrade" })).status).toBe(200);
+});
+
+it("an upgrade takes over a Worker deployed another way only after the operator confirms it, and stamps the marker", async () => {
+  const f = await graphHonoFixture(baseConfig(["workers"]), {
+    "wrangler.jsonc": enc.encode(JSON.stringify({ name: "api", main: "worker/main.mjs", compatibility_date: "2026-10-17" })),
+    "worker/main.mjs": enc.encode(code),
+  });
+  const created = await f.step("main", "worker", "create", "api", "create-worker");
+  const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
+  expect((await f.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] })).status).toBe(200);
+  // The serving version now looks like a Git-integration (Workers Builds) deploy.
+  const worker = f.workers.get("api")!;
+  worker.versions.find((version) => version.id === worker.active)!.message = "Merge pull request #12 from you/notes";
+  const writes = f.writes().length;
+
+  const refused = await (await f.plan({ mode: "upgrade" })).json() as typeof f.plannedBody & { approval?: unknown };
+  expect(refused.graphPlan.blocked).toBe(true);
+  expect(refused.graphPlan.takeover).toEqual({ workers: ["api"], confirmed: false });
+  expect(refused.graphPlan.guards.find((guard) => guard.code === "unit-blocked")?.detail).toContain("unmanaged-worker");
+  expect(refused.approval).toBeUndefined();
+  expect(f.writes()).toHaveLength(writes);
+
+  const confirmedPlan = await f.plan({ mode: "upgrade", takeoverConfirmed: true });
+  const confirmed = await confirmedPlan.json() as typeof f.plannedBody;
+  expect(confirmedPlan.status, JSON.stringify(confirmed)).toBe(200);
+  expect(confirmed.graphPlan.blocked).toBe(false);
+  expect(confirmed.graphPlan.takeover).toEqual({ workers: ["api"], confirmed: true });
+  const step = f.makeStep(confirmed);
+  const version = await step("main", "worker", "update", "api", "create-version");
+  expect(version.status, await version.clone().text()).toBe(200);
+  const versionBody = await version.json() as { phaseReceipt: unknown; result: { versionId: string } };
+  expect((await step("main", "deployment", "create", "api", "activate", { versionId: versionBody.result.versionId, receipts: [versionBody.phaseReceipt] })).status).toBe(200);
+  expect(worker.versions.find((entry) => entry.id === worker.active)!.message).toContain(TAPDEPLOY_MANAGED_MARKER);
+
+  // Taken over: the next upgrade is an ordinary one.
+  const next = await (await f.plan({ mode: "upgrade" })).json() as typeof f.plannedBody;
+  expect(next.graphPlan.blocked).toBe(false);
+  expect(next.graphPlan.takeover).toEqual({ workers: [], confirmed: false });
 });
 
 it("enforces server-derived RPC dependency order and unit-bound receipts", async () => {

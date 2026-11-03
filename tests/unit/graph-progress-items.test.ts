@@ -39,6 +39,7 @@ function plan(): GraphPlan {
     ],
     guards: [],
     cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+    takeover: { workers: [], confirmed: false },
   };
 }
 

@@ -78,6 +78,9 @@ type GuardCode =
   | "wrong-account"
   | "wrong-target-kind"
   | "unrelated-worker"
+  // the target Worker was deployed another way (no installer marker on its
+  // active version); blocks unless the operator confirmed taking it over.
+  | "unmanaged-worker"
   | "wrong-project-owner"
   | "r2-drift"
   | "d1-drift"

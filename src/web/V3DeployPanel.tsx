@@ -122,6 +122,10 @@ export interface V3DeployPanelProps {
   paidRisk: true | undefined;
   paidConfirmed: boolean;
   onPaidConfirm: (checked: boolean) => void;
+  /** Existing Workers TapDeploy did not deploy, which this upgrade would take over. */
+  takeoverWorkers: readonly string[];
+  takeoverConfirmed: boolean;
+  onTakeoverConfirm: (checked: boolean) => void;
   secretPromptNames: readonly SecretPrompt[];
   secretValues: Readonly<Record<string, string>>;
   onSecretValue: (name: string, value: string) => void;
@@ -152,6 +156,9 @@ export function V3DeployPanel({
   paidRisk,
   paidConfirmed,
   onPaidConfirm,
+  takeoverWorkers,
+  takeoverConfirmed,
+  onTakeoverConfirm,
   secretPromptNames,
   secretValues,
   onSecretValue,
@@ -198,6 +205,20 @@ export function V3DeployPanel({
               </div>
             ))}
           </div>
+          {takeoverWorkers.length > 0 && (
+            <div className="warn-block" data-testid="v3-takeover">
+              <h3>Not deployed by TapDeploy</h3>
+              <p>
+                {takeoverWorkers.join(", ")} {takeoverWorkers.length === 1 ? "was" : "were"} deployed another way (a Git repository, the dashboard or wrangler).
+                Upgrading replaces {takeoverWorkers.length === 1 ? "its" : "their"} code with this release. If a Git repository is connected under the Worker's
+                Settings → Build, disconnect it first, or its next push replaces this release again.
+              </p>
+              <label className="confirm-label mt-2 mb-0">
+                <input type="checkbox" checked={takeoverConfirmed} disabled={busy} onChange={(e) => onTakeoverConfirm(e.target.checked)} data-testid="v3-takeover-confirm" />
+                Take over {takeoverWorkers.join(", ")} with this release.
+              </label>
+            </div>
+          )}
           {graphPlan.cost.operations.length > 0 && (
             <div className="paid-risk-block" data-testid="v3-cost-ops">
               <h3>May be billed by Cloudflare</h3>

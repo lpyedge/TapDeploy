@@ -4,6 +4,9 @@ import type { ReactNode } from "react";
  * progress and result live on the Deploy step. */
 const STEPS = ["Config", "Release", "Configure", "Deploy"] as const;
 
+// Same-origin hashed asset (the favicon in index.html is the same file).
+const LOGO_URL = new URL("./assets/logo.png", import.meta.url).href;
+
 function Stepper({ current, steps }: { current: number; steps: readonly string[] }) {
   return (
     <nav aria-label="Progress" className="stepper" data-testid="stepper">
@@ -29,9 +32,7 @@ export function Shell({ step, account, notice, children }: { step: number; accou
     <main className="page">
       <header className="topbar">
         <div className="brand">
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <path fill="currentColor" d="M17.5 19H7a5 5 0 1 1 .9-9.92A6 6 0 0 1 19.4 11 4 4 0 0 1 17.5 19z" />
-          </svg>
+          <img src={LOGO_URL} alt="" width="28" height="28" />
           <h1>TapDeploy</h1>
         </div>
         {account}

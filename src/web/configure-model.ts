@@ -73,6 +73,7 @@ export interface PlanRequestInput {
   names: readonly NameRow[];
   replacedSecrets: readonly string[];
   paidRiskConfirmed: boolean;
+  takeoverConfirmed: boolean;
 }
 
 export function buildPlanRequest(input: PlanRequestInput): GraphPlanRequest {
@@ -91,5 +92,6 @@ export function buildPlanRequest(input: PlanRequestInput): GraphPlanRequest {
     ...(names ? { names } : {}),
     ...(input.mode === "upgrade" && input.replacedSecrets.length > 0 ? { replaceSecrets: [...input.replacedSecrets] } : {}),
     paidRiskConfirmed: input.paidRiskConfirmed,
+    ...(input.mode === "upgrade" && input.takeoverConfirmed ? { takeoverConfirmed: true } : {}),
   };
 }

@@ -49,7 +49,7 @@ describe("buildPlanRequest", () => {
   const base = {
     accountId: "acct", releaseProof: "proof", configText: "{}", inputs: {}, mode: "install" as const,
     httpUnits: [], domainDrafts: {}, domainFacts: null, recordsByZone: {}, hyperdriveUnits: [], hyperdriveChoices: {},
-    names: [], replacedSecrets: [], paidRiskConfirmed: false,
+    names: [], replacedSecrets: [], paidRiskConfirmed: false, takeoverConfirmed: false,
   };
 
   it("carries only what the operator chose", () => {
@@ -69,6 +69,12 @@ describe("buildPlanRequest", () => {
     expect(request).toMatchObject({ inputs: { REGION: "eu" }, bindings: { api: { hyperdrive: { DB: "prod-db" } } }, names: { "r2:media": "photos" }, paidRiskConfirmed: true });
     expect(request).not.toHaveProperty("replaceSecrets");
     expect(buildPlanRequest({ ...base, mode: "upgrade", replacedSecrets: ["TOKEN"] }).replaceSecrets).toEqual(["TOKEN"]);
+  });
+
+  it("asks to take over a Worker TapDeploy did not deploy only on upgrade", () => {
+    expect(buildPlanRequest({ ...base, mode: "upgrade", takeoverConfirmed: true }).takeoverConfirmed).toBe(true);
+    expect(buildPlanRequest({ ...base, mode: "upgrade" })).not.toHaveProperty("takeoverConfirmed");
+    expect(buildPlanRequest({ ...base, takeoverConfirmed: true })).not.toHaveProperty("takeoverConfirmed");
   });
 
   it("adds the domain choices", () => {

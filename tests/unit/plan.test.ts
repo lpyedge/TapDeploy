@@ -117,20 +117,39 @@ describe("buildDeployPlan", () => {
     );
   });
 
-  it("blocks adoption of an unmanaged pre-existing worker", async () => {
+  it("blocks taking over a worker TapDeploy did not deploy until the operator confirms it", async () => {
     const spec = specFor("minimal-worker");
-    const plan = await buildDeployPlan(
-      { spec },
-      snapshot({
-        workerExists: true,
-        versions: [{ id: "v-1", number: 1, message: "deployed by hand" }],
-        latestVersionId: "v-1",
-        activeDeploymentId: "dep-1",
-      }),
-      { salt: SALT },
-    );
+    const unmanaged = snapshot({
+      workerExists: true,
+      versions: [{ id: "v-1", number: 1, message: "Merge pull request #12 from you/notes" }],
+      latestVersionId: "v-1",
+      activeDeploymentId: "dep-1",
+      activeDeploymentVersionIds: ["v-1"],
+    });
+    const plan = await buildDeployPlan({ spec }, unmanaged, { salt: SALT });
     expect(plan.blocked).toBe(true);
-    expect(plan.guards.map((g) => g.code)).toContain("unrelated-worker");
+    expect(plan.guards).toContainEqual(expect.objectContaining({ code: "unmanaged-worker", level: "block" }));
+    expect(plan.guards.map((g) => g.code)).not.toContain("unrelated-worker");
+
+    const confirmed = await buildDeployPlan({ spec }, unmanaged, { salt: SALT, takeoverConfirmed: true });
+    expect(confirmed.blocked).toBe(false);
+    expect(confirmed.kind).toBe("upgrade");
+    expect(confirmed.guards).toContainEqual(expect.objectContaining({ code: "unmanaged-worker", level: "warn" }));
+    expect(confirmed.diffs).toContainEqual(expect.objectContaining({ resource: "deployment", action: "create", before: "dep-1" }));
+  });
+
+  it("a takeover confirmation never unlocks a worker of another project, a split or an unresolvable deployment", async () => {
+    const spec = specFor("minimal-worker");
+    const targets: Partial<TargetSnapshot>[] = [
+      { versions: [{ id: "v-1", message: `fixture/other v1 ${TAPDEPLOY_MANAGED_MARKER}` }], activeDeploymentVersionIds: ["v-1"] },
+      { versions: [{ id: "v-1", message: `fixture/minimal-worker v1 ${TAPDEPLOY_MANAGED_MARKER}` }, { id: "v-2", message: `fixture/other v1 ${TAPDEPLOY_MANAGED_MARKER}` }], activeDeploymentVersionIds: ["v-1", "v-2"] },
+      { versions: [{ id: "v-1", message: "by hand" }], activeDeploymentVersionIds: [] },
+    ];
+    for (const target of targets) {
+      const plan = await buildDeployPlan({ spec }, snapshot({ workerExists: true, latestVersionId: "v-1", activeDeploymentId: "dep-1", ...target }), { salt: SALT, takeoverConfirmed: true });
+      expect(plan.blocked).toBe(true);
+      expect(plan.guards.map((g) => g.code)).toContain("unrelated-worker");
+    }
   });
 
   it("blocks when the expected account differs from the snapshot account", async () => {

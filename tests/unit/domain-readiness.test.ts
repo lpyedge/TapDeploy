@@ -39,6 +39,7 @@ describe("resultLinks", () => {
   const plan = {
     ok: true, blocked: false, digest: "d", guards: [],
     cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+    takeover: { workers: [], confirmed: false },
     units: [
       { unitId: "api", kind: "worker", name: "api", requiresBundle: true, diffs: [{ resource: "worker", action: "create", name: "api" }, { resource: "worker-custom-domain", action: "attach", name: "App.Example.com" }] },
       { unitId: "site", kind: "pages-static", name: "notes-site", requiresBundle: true, diffs: [{ resource: "pages-project", action: "create", name: "notes-site" }, { resource: "pages-custom-domain", action: "attach", name: "www.example.com" }] },
@@ -63,6 +64,7 @@ describe("domains an upgrade kept", () => {
   const plan = {
     ok: true, blocked: false, digest: "d", guards: [],
     cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+    takeover: { workers: [], confirmed: false },
     units: [
       { unitId: "api", kind: "worker", name: "api", requiresBundle: true, diffs: [{ resource: "worker", action: "update", name: "api" }] },
       { unitId: "site", kind: "pages-static", name: "notes-site", requiresBundle: true, diffs: [{ resource: "pages-project", action: "preserve", name: "notes-site" }, { resource: "deployment", action: "create", name: "notes-site" }] },

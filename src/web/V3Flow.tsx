@@ -64,6 +64,10 @@ export interface V3FlowProps {
 
 const isValidReleaseUrl = (value: string) => /^https:\/\//i.test(value.trim());
 
+/** What the operator confirmed on the review: billable operations, taking over Workers TapDeploy did not deploy. */
+interface PlanConfirmations { paidRisk: boolean; takeover: boolean }
+const NO_CONFIRMATIONS: PlanConfirmations = { paidRisk: false, takeover: false };
+
 export function V3Flow(props: V3FlowProps) {
   const { csrf, accountId, configText } = props;
   const [machine] = useState(() => new V3FlowMachine());
@@ -71,7 +75,8 @@ export function V3Flow(props: V3FlowProps) {
   const form = useConfigureForm();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [paidConfirmed, setPaidConfirmed] = useState(false);
+  // Review confirmations; each is sealed into the plan approval, so changing one re-plans.
+  const [confirmed, setConfirmed] = useState<PlanConfirmations>(NO_CONFIRMATIONS);
   const [statuses, setStatuses] = useState<GraphStepStatus[]>([]);
 
   // The release comes from one place: a ZIP chosen on this computer when there
@@ -114,7 +119,7 @@ export function V3Flow(props: V3FlowProps) {
     setSnap(machine.reset());
     form.reset();
     setReleaseResources([]);
-    setPaidConfirmed(false);
+    setConfirmed(NO_CONFIRMATIONS);
     setStatuses([]);
     setMessage(null);
     void (async () => {
@@ -294,7 +299,7 @@ export function V3Flow(props: V3FlowProps) {
   const configureReady = !busy && !inventory.loading && !upgradeTargets.loading && inputsReady && names.every((row) => !row.error) && Object.keys(domainErrors).length === 0
     && hyperdriveReady(hyperdriveUnits, form.hyperdriveChoices) && machine.can("PLAN_READY") && !nameTaken;
 
-  const plan = async (proof: unknown, inputs: Record<string, string | number | boolean>, paidRiskConfirmed: boolean) => {
+  const plan = async (proof: unknown, inputs: Record<string, string | number | boolean>, confirmations: PlanConfirmations) => {
     setBusy(true);
     setMessage(null);
     try {
@@ -312,7 +317,8 @@ export function V3Flow(props: V3FlowProps) {
         hyperdriveChoices: form.hyperdriveChoices,
         names,
         replacedSecrets: form.replacedSecrets,
-        paidRiskConfirmed,
+        paidRiskConfirmed: confirmations.paidRisk,
+        takeoverConfirmed: confirmations.takeover,
       }));
       if (envelope.error || !envelope.graphPlan) {
         throw Object.assign(new Error(envelope.detail ?? envelope.error ?? "plan failed"), { kind: envelope.error });
@@ -324,7 +330,7 @@ export function V3Flow(props: V3FlowProps) {
         ...(envelope.bundleDigests && typeof envelope.bundleDigests === "object" ? { bundleDigests: envelope.bundleDigests as Record<string, string> } : {}),
         ...(envelope.schedulerHints !== undefined ? { schedulerHints: envelope.schedulerHints } : {}),
       }));
-      setPaidConfirmed(paidRiskConfirmed);
+      setConfirmed(confirmations);
     } catch (error) {
       // Defense in depth: a config that changed under a live session must
       // surface the re-authorization state even if the pre-plan probe was
@@ -346,7 +352,7 @@ export function V3Flow(props: V3FlowProps) {
     if (!proof || !inputsReady || !machine.can("PLAN_READY")) return;
     const inputs = planInputs(renameAllowed, form.inputValues, shownInputs);
     setSnap(machine.setInputs(inputs, form.mode));
-    await plan(proof, inputs, false);
+    await plan(proof, inputs, NO_CONFIRMATIONS);
   };
 
   // ---- Deploy step ---------------------------------------------------------
@@ -402,9 +408,10 @@ export function V3Flow(props: V3FlowProps) {
   // Signing out mid-deploy would end the session under the running steps.
   const deploying = snap.deployRunning;
   const graphPlan = (snap.graphPlan ?? null) as GraphPlan | null;
-  // The confirmation is sealed into the plan approval, so toggling it re-plans;
-  // the checkbox stays visible (checked) once the confirmed plan arrives.
+  // A confirmation is sealed into the plan approval, so toggling it re-plans;
+  // its checkbox stays visible (checked) once the confirmed plan arrives.
   const paidRisk = graphPlan?.cost.requiresConfirmation === true || undefined;
+  const reconfirm = (next: PlanConfirmations) => { setConfirmed(next); if (snap.releaseProof) void plan(snap.releaseProof, snap.inputs, next); };
   const blocked = graphPlan !== null && (graphPlan.blocked || !snap.executionContext || !snap.approval);
   const secretPrompts = secretPromptsFor(configText, graphPlan);
   const secretsReady = secretPrompts.every((prompt) => (form.secretValues[prompt.name] ?? "").length > 0 && secretProblem(prompt, form.secretValues[prompt.name] ?? "") === null);
@@ -512,8 +519,11 @@ export function V3Flow(props: V3FlowProps) {
         modeIntent={form.mode}
         statuses={statuses}
         paidRisk={paidRisk}
-        paidConfirmed={paidConfirmed}
-        onPaidConfirm={(checked) => { setPaidConfirmed(checked); if (snap.releaseProof) void plan(snap.releaseProof, snap.inputs, checked); }}
+        paidConfirmed={confirmed.paidRisk}
+        onPaidConfirm={(checked) => reconfirm({ ...confirmed, paidRisk: checked })}
+        takeoverWorkers={graphPlan?.takeover.workers ?? []}
+        takeoverConfirmed={confirmed.takeover}
+        onTakeoverConfirm={(checked) => reconfirm({ ...confirmed, takeover: checked })}
         secretPromptNames={secretPrompts}
         secretValues={form.secretValues}
         onSecretValue={form.setSecret}

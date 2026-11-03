@@ -73,6 +73,7 @@ function graphPlanBody() {
       ],
       guards: [],
       cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+      takeover: { workers: [], confirmed: false },
     },
     schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
     executionContext: "ctx-sealed",
@@ -882,6 +883,43 @@ test.describe("prebuilt UI flow", () => {
   });
 
   // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
+  test("upgrading a Worker TapDeploy did not deploy needs the takeover confirmation, which re-plans", async ({ page }) => {
+    const mocks = newMocks();
+    await mockV3Api(page, mocks);
+    await page.unroute("**/api/cloudflare/targets");
+    await page.route("**/api/cloudflare/targets", (route) => json(route, { accountId: "a".repeat(32), workers: [{ name: "api" }], pages: [] }));
+    await page.unroute("**/api/deploy/plan");
+    await page.route("**/api/deploy/plan", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      mocks.planBodies.push(body);
+      const confirmed = body.takeoverConfirmed === true;
+      const envelope = graphPlanBody();
+      envelope.graphPlan.takeover = { workers: ["api"], confirmed } as typeof envelope.graphPlan.takeover;
+      envelope.graphPlan.blocked = !confirmed;
+      envelope.graphPlan.guards = confirmed ? [] : [{ code: "unit-blocked", level: "block", detail: "unit \"main\": not deployed by TapDeploy (unmanaged-worker)" }] as typeof envelope.graphPlan.guards;
+      return json(route, envelope);
+    });
+    await page.goto("/");
+    await pasteV3Config(page);
+    await page.getByTestId("v3-local-zip").setInputFiles({ name: "release.zip", mimeType: "application/zip", buffer: zipBytes() });
+    await page.getByTestId("v3-prepare").click();
+    await page.getByTestId("v3-mode-upgrade").check();
+    await page.getByTestId("v3-upgrade-target").selectOption("api");
+    await page.getByTestId("v3-to-deploy").click();
+    await expect(page.getByTestId("v3-takeover")).toContainText("api was deployed another way");
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
+    expect(mocks.planBodies.at(-1)).not.toHaveProperty("takeoverConfirmed");
+    await page.getByTestId("v3-takeover-confirm").check();
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeEnabled();
+    await expect(page.getByTestId("v3-takeover-confirm")).toBeChecked();
+    expect(mocks.planBodies.at(-1)?.takeoverConfirmed).toBe(true);
+    await page.getByTestId("v3-takeover-confirm").uncheck();
+    await expect(page.getByTestId("v3-confirm-deploy")).toBeDisabled();
+    expect(mocks.planBodies.at(-1)).not.toHaveProperty("takeoverConfirmed");
+    expect(mocks.unexpectedApi).toEqual([]);
+  });
+
+  // OFFLINE: API is mocked; this proves UI behaviour only, not Cloudflare.
   test("configure requires choosing the operator's Hyperdrive configuration for each declared binding", async ({ page }) => {
     const mocks = newMocks();
     await mockV3Api(page, mocks);
@@ -1272,6 +1310,7 @@ test.describe("prebuilt UI flow", () => {
           ] }],
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+          takeover: { workers: [], confirmed: false },
         },
         schedulerHints: { version: 1, topoOrder: ["resources"], dependencies: [] },
         executionContext: "ctx-r", approval: "appr-r", bundleDigests: { resources: "bd-r" },
@@ -1339,6 +1378,7 @@ test.describe("prebuilt UI flow", () => {
           ] }],
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+          takeover: { workers: [], confirmed: false },
         },
         schedulerHints: { version: 1, topoOrder: ["site"], dependencies: [] },
         executionContext: "ctx-p", approval: "appr-p", bundleDigests: { site: "bd-site" },
@@ -1484,6 +1524,7 @@ test.describe("bridge contracts (no browser)", () => {
       ],
       guards: [],
       cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+      takeover: { workers: [], confirmed: false },
     });
     expect(actions.map((action) => action.phase)).toEqual(["create-r2-buckets", "create-worker"]);
     expect(actions[1]?.actionId).toContain("api");
@@ -1499,6 +1540,7 @@ test.describe("bridge contracts (no browser)", () => {
         units: [{ unitId: "m", kind: "worker", name: "w", requiresBundle: false, diffs: [{ resource: "worker", action: "detach", name: "w" }] }],
         guards: [],
         cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+        takeover: { workers: [], confirmed: false },
       }),
     ).toThrow(/not safely dispatchable/);
   });
@@ -1592,6 +1634,7 @@ test.describe("bridge contracts (no browser)", () => {
           ] }],
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+          takeover: { workers: [], confirmed: false },
         },
         schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
         executionContext: "ctx",
@@ -1683,6 +1726,7 @@ test.describe("bridge contracts (no browser)", () => {
           ] }],
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+          takeover: { workers: [], confirmed: false },
         },
         schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
         executionContext: "ctx",
@@ -1717,6 +1761,7 @@ test.describe("bridge contracts (no browser)", () => {
         graphPlan: {
           ok: true, blocked: false, digest: "g", guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+          takeover: { workers: [], confirmed: false },
           units: ["first", "second"].map((unitId) => ({ unitId, kind: "worker", name: unitId, requiresBundle: false,
             diffs: [{ resource: "workers-dev", action: "create", name: unitId }],
           })),
@@ -1785,6 +1830,7 @@ test.describe("bridge contracts (no browser)", () => {
             ] }],
             guards: [],
             cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+            takeover: { workers: [], confirmed: false },
           },
           schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
         executionContext: "ctx",
@@ -1842,6 +1888,7 @@ test.describe("bridge contracts (no browser)", () => {
           ] }],
           guards: [],
           cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+          takeover: { workers: [], confirmed: false },
         },
         schedulerHints: { version: 1, topoOrder: ["main"], dependencies: [] },
         executionContext: "ctx",

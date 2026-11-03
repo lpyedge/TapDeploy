@@ -41,6 +41,7 @@ describe("Stop at action/postcheck boundaries", () => {
           releaseProof: "proof", executionContext: "context", approval: "approval",
           graphPlan: { ok: true, blocked: false, digest: "graph", guards: [],
             cost: { operations: [], requiresConfirmation: false, confirmed: true, blockedUnknownCost: false },
+            takeover: { workers: [], confirmed: false },
             units: units.map((id) => ({ unitId: id, kind: id.startsWith("w") ? "worker" : "pages-static", name: id, requiresBundle: id.startsWith("w"),
               diffs: [{ resource: id.startsWith("w") ? "worker" : "deployment", action: "create", name: id }] })),
           },

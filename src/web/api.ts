@@ -316,6 +316,8 @@ export interface GraphPlan {
   units: GraphPlanUnit[];
   guards: { code: string; level: string; detail: string }[];
   cost: { operations: { unitId: string; resource: string; action: string; name?: string }[]; requiresConfirmation: boolean; confirmed: boolean; blockedUnknownCost: boolean };
+  /** Existing Workers TapDeploy did not deploy; upgrading them needs the takeover confirmation. */
+  takeover: { workers: string[]; confirmed: boolean };
 }
 
 export interface GraphPlanEnvelope {
@@ -346,6 +348,8 @@ export interface GraphPlanRequest {
   // Upgrade: declared secrets to replace (their new values come with the deploy).
   replaceSecrets?: string[];
   paidRiskConfirmed?: boolean;
+  // Upgrade: take over Workers TapDeploy did not deploy (named by the previous plan).
+  takeoverConfirmed?: boolean;
 }
 
 export async function fetchGraphPlan(

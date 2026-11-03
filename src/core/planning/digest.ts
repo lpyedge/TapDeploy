@@ -42,6 +42,9 @@ export interface ActiveOwnershipVerdict {
   owned: boolean;
   // The active version(s) are installer-managed but by a different project.
   managedOther: boolean;
+  // No active version carries the installer marker: the Worker was deployed
+  // another way (dashboard, Git integration, wrangler).
+  unmanaged: boolean;
   // The active deployment is split across versions with inconsistent ownership.
   ambiguous: boolean;
   // The active deployment version could not be resolved at all.
@@ -55,8 +58,9 @@ export interface ActiveOwnershipVerdict {
 // assertion about the past, not evidence that the currently-serving deployment
 // belongs to this project. Fail closed (owned=false) when the active version set
 // is missing/unresolvable, when traffic is split across versions with
-// inconsistent ownership, or when the current owner is unmanaged or another
-// project.
+// inconsistent ownership, or when the current owner is unmanaged (`unmanaged`:
+// the planner takes it over only on the operator's explicit confirmation) or
+// another project.
 export function resolveActiveOwnership(
   versions: VersionRef[],
   activeVersionIds: string[],
@@ -69,6 +73,7 @@ export function resolveActiveOwnership(
     return {
       owned: false,
       managedOther: false,
+      unmanaged: false,
       ambiguous: false,
       unresolved: true,
       detail:
@@ -84,6 +89,7 @@ export function resolveActiveOwnership(
       return {
         owned: false,
         managedOther: false,
+        unmanaged: false,
         ambiguous: false,
         unresolved: true,
         detail:
@@ -113,6 +119,7 @@ export function resolveActiveOwnership(
     return {
       owned: false,
       managedOther: false,
+      unmanaged: false,
       ambiguous: true,
       unresolved: false,
       detail:
@@ -124,24 +131,26 @@ export function resolveActiveOwnership(
     return {
       owned: false,
       managedOther: false,
+      unmanaged: true,
       ambiguous: false,
       unresolved: false,
       detail:
-        "Target worker already exists but none of its active deployment versions carry the installer marker; adopting an unknown/unmanaged worker is not supported in v1",
+        "Target worker already exists but was not deployed by TapDeploy: its active deployment version carries no installer marker (deployed from a Git repository, the dashboard or wrangler)",
     };
   }
 
   if (projectId === undefined) {
-    return { owned: true, managedOther: false, ambiguous: false, unresolved: false, detail: "" };
+    return { owned: true, managedOther: false, unmanaged: false, ambiguous: false, unresolved: false, detail: "" };
   }
 
   const owner = [...owners][0];
   if (owner === projectId) {
-    return { owned: true, managedOther: false, ambiguous: false, unresolved: false, detail: "" };
+    return { owned: true, managedOther: false, unmanaged: false, ambiguous: false, unresolved: false, detail: "" };
   }
   return {
     owned: false,
     managedOther: true,
+    unmanaged: false,
     ambiguous: false,
     unresolved: false,
     detail: `Target worker already exists and is managed by a different installer project (expected "${projectId}"); adopting an unrelated/mismatched worker is not supported in v1`,
