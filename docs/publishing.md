@@ -298,11 +298,51 @@ Full field reference: the JSON Schema
    address: the browser fetches the config directly, so its host must send
    CORS headers (raw.githubusercontent.com does).
 3. Share `https://<instance>/?config=<URL-encoded config address>`, for example
-   as a README button:
+   as a README button. Every instance serves the button image at
+   `https://<instance>/button.svg`: the same height, border and type as
+   Cloudflare's *Deploy to Cloudflare* button, so the two sit together as a pair.
 
 ```markdown
-[![Deploy with TapDeploy](https://img.shields.io/badge/Deploy%20with-TapDeploy-f38020)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
+[![Deploy with TapDeploy](https://deploy.example.com/button.svg)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
 ```
+
+### Offering both TapDeploy and Deploy to Cloudflare
+
+Put the two buttons on one line, TapDeploy first, and say right below them how
+they differ: users pick by what they want to do, not by the button. Recommend
+TapDeploy to people who want to run the app; *Deploy to Cloudflare* suits people
+who want their own copy of the code to change. A template (replace the instance,
+repository and config addresses, and keep the rows true for your app):
+
+```markdown
+## Deploy
+
+[![Deploy with TapDeploy](https://deploy.example.com/button.svg)](https://deploy.example.com/?config=https%3A%2F%2Fraw.githubusercontent.com%2Fyou%2Fnotes%2Fmain%2Ftapdeploy.config.json)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/you/notes)
+
+**Recommended: TapDeploy.** It installs the prebuilt release into your
+Cloudflare account from the browser, and upgrading is the same link again.
+Choose *Deploy to Cloudflare* if you want your own copy of the code to change.
+
+| | TapDeploy (recommended) | Deploy to Cloudflare |
+|---|---|---|
+| You need | a Cloudflare account | a Cloudflare account and a GitHub account |
+| What happens | the prebuilt release is installed; you see every change before anything is written | this repository is copied into your GitHub account and built by Workers Builds |
+| Settings | a form, checked before install | Cloudflare's setup form |
+| Upgrade | open the same link and choose *Upgrade existing*; your data and secrets are kept | bring this repository's changes into your copy; every push redeploys |
+| Best for | running the app | changing the code |
+
+Already deployed with *Deploy to Cloudflare*? TapDeploy can upgrade that Worker:
+disconnect its Git repository first (Worker → Settings → Build), then tick
+*Take over* on the review.
+```
+
+Keep every row accurate for your app (for example, drop "your data and secrets
+are kept" if an upgrade resets something), and write the same text in each
+language your README has. In Chinese or Japanese, end bold text before
+full-width punctuation (`**推薦使用 TapDeploy**。`, not `**推薦使用 TapDeploy。**`):
+GitHub does not close bold that ends in such punctuation right before more text,
+and shows the asterisks.
 
 ## 5. Test before you share
 
@@ -447,6 +487,8 @@ Node build for such releases.
    names match that deployment ([upgrading](#upgrading-a-worker-tapdeploy-did-not-deploy)).
 8. You tested the ZIP from this computer on an instance and read the plan,
    both as a new install and as an upgrade.
+9. The README button uses `https://<instance>/button.svg`; next to *Deploy to
+   Cloudflare* it says how the two differ ([template](#offering-both-tapdeploy-and-deploy-to-cloudflare)).
 
 ## Distributing TapDeploy itself
 

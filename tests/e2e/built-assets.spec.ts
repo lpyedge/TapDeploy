@@ -39,6 +39,12 @@ test.describe("built assets", () => {
     const valid = await page.evaluate(async (base64) => WebAssembly.validate(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))), bytes.toString("base64"));
     expect(valid).toBe(true);
   });
+  test("serves the README deploy button at a stable address", async ({ request }) => {
+    const button = await request.get("/button.svg");
+    expect(button.status()).toBe(200);
+    expect(button.headers()["content-type"]).toMatch(/^image\/svg\+xml/);
+    expect(await button.text()).toMatch(/^<svg [^>]*aria-label="Deploy with TapDeploy"/);
+  });
   test("CSP blocks inline script but permits publisher HTTPS downloads", async ({ page }) => {
     await page.route("https://publisher.example/config.json", (route) => route.fulfill({
       status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"publisher":true}',
