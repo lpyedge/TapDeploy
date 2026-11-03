@@ -12,6 +12,8 @@ const ORIGIN = "https://installer.example.com";
 const scopes = WORKER_CONFIG_SCOPES.join(" ");
 const ASSET = "https://github.com/example/app/releases/download/v1.0.0/app.zip";
 const CDN = "https://release-assets.githubusercontent.com/github-production-release-asset/1/abc?sig=x";
+// The URL publishers document; GitHub redirects it to the tagged asset, then to the CDN.
+const LATEST = "https://github.com/example/app/releases/latest/download/app.zip";
 
 async function setup() {
   const app = createApp({ RUNTIME: "node", PUBLIC_ORIGIN: ORIGIN, OAUTH_CLIENT_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", OAUTH_CLIENT_ID: "fake-client" });
@@ -38,13 +40,16 @@ function download(app: ReturnType<typeof createApp>, login: { sessionCookie: str
 
 describe("relay URL policy", () => {
   it("allows GitHub release downloads and the GitHub asset CDNs only", () => {
-    for (const ok of [ASSET, "https://github.com/o/r/archive/refs/tags/v1.zip", "https://codeload.github.com/o/r/zip/refs/heads/main", CDN, "https://objects.githubusercontent.com/x"]) {
+    for (const ok of [ASSET, LATEST, "https://github.com/o/r/archive/refs/tags/v1.zip", "https://codeload.github.com/o/r/zip/refs/heads/main", CDN, "https://objects.githubusercontent.com/x"]) {
       expect(relayedDownloadProblem(ok), ok).toBeNull();
     }
     for (const bad of [
       "http://github.com/o/r/releases/download/v1/a.zip",
       "https://github.com/o/r",
       "https://github.com/o/r/issues/1",
+      "https://github.com/o/r/releases/latest",
+      "https://github.com/o/r/releases/tag/v1",
+      "https://github.com/o/r/blob/main/a.zip",
       "https://github.com.evil.example/o/r/releases/download/v1/a.zip",
       "https://user:pw@github.com/o/r/releases/download/v1/a.zip",
       "https://github.com:8443/o/r/releases/download/v1/a.zip",
@@ -72,6 +77,19 @@ describe("release download relay", () => {
       expect(init?.redirect).toBe("manual");
       expect(Object.keys((init?.headers ?? {}) as Record<string, string>)).toEqual(["Accept"]);
     }
+  });
+
+  it("follows a latest-release URL through the tagged asset to the CDN", async () => {
+    const { app, login } = await setup();
+    stub((url) => {
+      if (url === LATEST) return new Response(null, { status: 302, headers: { location: ASSET } });
+      if (url === ASSET) return new Response(null, { status: 302, headers: { location: CDN } });
+      return new Response(new Uint8Array([5, 6]), { headers: { "content-length": "2" } });
+    });
+    const res = await download(app, login, LATEST);
+    expect(res.status).toBe(200);
+    expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([5, 6]);
+    expect(seen.map((s) => s.url)).toEqual([LATEST, ASSET, CDN]);
   });
 
   it("needs a session and CSRF, and refuses URLs outside the allowlist without fetching", async () => {

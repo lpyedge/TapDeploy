@@ -121,4 +121,15 @@ describe("verifyDeployedBindings", () => {
     expect(missing.ok).toBe(false);
     expect(missing.mismatches).toEqual(['rate-limit binding "RATE_B" is missing from the deployed Worker']);
   });
+
+  it("requires every secret on the active Worker except an optional one left unset", () => {
+    const secretSpec = spec({ secrets: { JWT: "generate-once", API_KEY: "prompt-on-install", TOKEN: "supplied", OWNER_PASSWORD: "optional" } });
+    expect(verifyDeployedBindings(secretSpec, snapshot({ secretNames: ["JWT", "API_KEY", "TOKEN"] }))).toEqual({ ok: true, mismatches: [] });
+    expect(verifyDeployedBindings(secretSpec, snapshot({ secretNames: ["JWT", "API_KEY", "TOKEN", "OWNER_PASSWORD"] }))).toEqual({ ok: true, mismatches: [] });
+    expect(verifyDeployedBindings(secretSpec, snapshot({ secretNames: ["OWNER_PASSWORD"] })).mismatches).toEqual([
+      'secret binding "JWT" is missing from the exact active Worker',
+      'secret binding "API_KEY" is missing from the exact active Worker',
+      'secret binding "TOKEN" is missing from the exact active Worker',
+    ]);
+  });
 });

@@ -8,7 +8,9 @@ const RELAYED_DOWNLOAD_HOSTS = new Set([
   "objects.githubusercontent.com",
   "release-assets.githubusercontent.com",
 ]);
-const GITHUB_DOWNLOAD_PATH = /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(releases\/download|archive)\/.+/;
+// <owner>/<repo>/releases/download/<tag>/<asset>, releases/latest/download/<asset>
+// (GitHub redirects it to the tagged path) or archive/<ref>.
+const GITHUB_DOWNLOAD_PATH = /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(releases\/(latest\/)?download|archive)\/.+/;
 
 export function isRelayedDownloadHost(raw: string): boolean {
   try {

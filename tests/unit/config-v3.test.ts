@@ -211,6 +211,22 @@ describe("tapdeploy.config.v3 schema contract", () => {
     expect(assertConfigV3Safe(withUrl("https://localhost/x.zip")).some((i) => /private/.test(i.detail))).toBe(true);
   });
 
+  it("accepts the GitHub release URL forms the installer downloads and refuses other github.com pages", () => {
+    const base = loadFixture("minimal");
+    const issuesFor = (defaultUrl: string) =>
+      assertConfigV3Safe({ ...base, source: { defaultUrl } } as unknown as ConfigV3).filter((i) => i.field === "source.defaultUrl");
+    for (const ok of [
+      "https://github.com/o/r/releases/latest/download/app.zip",
+      "https://github.com/o/r/releases/download/v1.0.0-build.3/app.zip",
+      "https://github.com/o/r/archive/refs/tags/v1.zip",
+    ]) {
+      expect(issuesFor(ok), ok).toEqual([]);
+    }
+    for (const bad of ["https://github.com/o/r/blob/main/app.zip", "https://github.com/o/r/releases/tag/v1", "https://github.com/o/r/releases/latest"]) {
+      expect(issuesFor(bad).map((i) => i.detail), bad).toEqual(["only GitHub release downloads can be fetched from github.com"]);
+    }
+  });
+
   it("requires defaultUrl when allowLocalZip is false (schema and guard)", () => {
     const base = loadFixture("minimal");
     expect(validateConfigV3({ ...base, source: { allowLocalZip: false } }).ok).toBe(false);

@@ -522,7 +522,9 @@ export async function postcheckPagesDeployment(
       for (const [name, value] of Object.entries(desired.env_vars ?? {})) {
         if (canonicalJson(deployment.env_vars?.[name]) !== canonicalJson(value)) return fail("validation", "Pages deployment variables differ from the approved configuration");
       }
-      for (const name of Object.keys(spec.cloudflare.secrets)) {
+      for (const [name, policy] of Object.entries(spec.cloudflare.secrets)) {
+        // An optional secret with no value is left unset; one the project has must still reach the deployment.
+        if (policy === "optional" && actual.env_vars?.[name] === undefined) continue;
         if (actual.env_vars?.[name]?.type !== "secret_text" || deployment.env_vars?.[name]?.type !== "secret_text") return fail("validation", "Pages required secret was not attested in the deployment");
       }
     }

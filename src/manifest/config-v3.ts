@@ -14,7 +14,7 @@
 // no older config shape is accepted.
 
 import validateSchema from "./config-v3-validator.generated.js";
-import { isPrivateHost } from "../release/url.js";
+import { isPrivateHost, isRelayedDownloadHost, relayedDownloadProblem } from "../release/url.js";
 import type { ScopeCapability } from "../auth/scope-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -422,6 +422,8 @@ function checkDefaultUrl(raw: string): string | null {
   if (url.username || url.password) return "credentials in the URL are not allowed";
   const host = url.hostname.toLowerCase();
   if (isPrivateHost(host)) return "private/local host is not allowed";
+  // GitHub hosts are downloaded through the installer's relay: refuse here what it would refuse later.
+  if (isRelayedDownloadHost(raw)) return relayedDownloadProblem(raw);
   return null;
 }
 

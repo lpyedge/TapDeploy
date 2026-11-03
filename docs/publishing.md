@@ -140,7 +140,10 @@ case and you only write the exception:
 - `schemaVersion` is `3`. `app.id` is the immutable project identity (stamped
   into versions, Pages ownership markers and receipts): keep it stable.
 - `source`: `defaultUrl` (https), `allowLocalZip`, `expectedSha256` (pins the
-  exact ZIP).
+  exact ZIP). On github.com, `defaultUrl` must be a download:
+  `…/releases/latest/download/<file>.zip`, `…/releases/download/<tag>/<file>.zip`
+  or `…/archive/<ref>.zip`. A repository, release or file page (`…/releases/tag/…`,
+  `…/blob/…`) is refused when the config is validated.
 - `capabilities` are symbolic and must cover every family your Wrangler configs use,
   otherwise the plan fails with `DEVELOPER_SCOPE_UNDERDECLARED`. They map to OAuth
   scopes in code; a config can never author a raw scope. `zone` and `dns` are implied

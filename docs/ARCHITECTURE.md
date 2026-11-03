@@ -97,7 +97,9 @@ with the new value in the version upload instead of an inherit directive);
 `prompt-on-install` for a required one (kept when it exists, else created
 with the value sent at the step); `optional` for `required: false` left empty
 (kept when it exists, else `secret: skip`, never set, and a value sent for it
-is refused). Secret values are typed in Configure only
+is refused). The postcheck (Worker and Pages) requires every declared secret on
+what now serves, except an `optional` one left unset; one that existed was
+inherited, which the version readback already proved. Secret values are typed in Configure only
 (`src/web/secret-choices.ts`), checked against the declared rules in the
 browser only, and never travel with the plan request. Upgrade reads the target
 Worker's secret names (inventory, names only): one it has is kept unless the
@@ -303,6 +305,8 @@ the BLAKE3 WASM are served same-origin, validate, and ask for no `unsafe-eval`.
 | Symptom | Root cause | Rule |
 |---|---|---|
 | Every Worker deploy failed at postcheck | postcheck version id was always empty | accept only a version equal to the verified receipt's sealed version; keep success and forged-input tests |
+| Upgrading a Git-deployed Worker failed at a new step on every attempt (takeover, Owner read, static assets, optional secret, postcheck) | each fix was tested only up to its own step | `tests/contracts/worker-takeover-upgrade.test.ts` drives the browser runner through every step to a verified postcheck; extend it whenever the upgrade path changes |
+| The documented `…/releases/latest/download/…` URL was refused | the relay allowed only tagged downloads while the docs recommended the latest form | config validation and the relay share `relayedDownloadProblem`; test every documented URL form |
 | `GRAPH_PHASE_MISMATCH` after postcheck | Worker deployment id leaked into the Pages loop | only Pages-kind units contribute deployment ids; mocks return the real shape |
 | `config_mismatch` after switching config | config text was lost across the redirect, no pre-check | `check-config` probe, re-authorize at submit, persist/restore, map 409 to the same panel |
 | Review appeared skipped | the flow lacked a Configure stage and a stepper tied to the stage | stepper follows the machine; flow changes update e2e |

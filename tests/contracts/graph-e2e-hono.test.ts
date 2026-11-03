@@ -1039,6 +1039,15 @@ describe("worker secret input and inheritance (graph API)", () => {
     const created = await t.step("main", "worker", "create", "api", "create-worker", { scriptB64: Buffer.from(code).toString("base64") });
     expect(created.status, await created.clone().text()).toBe(200);
     expect(t.workers.get("api")!.versions[0]!.bindings.some((binding) => binding.name === "TOKEN")).toBe(false);
+    // The postcheck accepts the unset secret: its absence is what the plan approved.
+    const createdBody = await created.json() as { phaseReceipt: unknown; result: { versionId: string } };
+    const activated = await t.step("main", "deployment", "create", "api", "activate", { versionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt] });
+    expect(activated.status).toBe(200);
+    const activatedBody = await activated.json() as { phaseReceipt: unknown };
+    const post = await t.step("main", "worker", "create", "api", "postcheck", { expectedVersionId: createdBody.result.versionId, receipts: [createdBody.phaseReceipt, activatedBody.phaseReceipt] });
+    const postBody = await post.json() as { result?: { deployed?: boolean; bindingsVerified?: boolean; bindingMismatches?: string[] } };
+    expect(post.status, JSON.stringify(postBody)).toBe(200);
+    expect(postBody.result).toMatchObject({ deployed: true, bindingsVerified: true, bindingMismatches: [] });
   });
 
   it("refuses to supply a generated secret on an install", async () => {

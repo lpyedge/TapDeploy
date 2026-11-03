@@ -96,8 +96,10 @@ export function verifyDeployedBindings(spec: DeploySpec, snapshot: TargetSnapsho
       mismatches.push(`rate-limit binding "${b.name}" is missing from the deployed Worker`);
     }
   }
-  for (const name of Object.keys(spec.cloudflare.secrets ?? {})) {
-    if (!(snapshot.secretNames ?? []).includes(name)) mismatches.push(`secret binding "${name}" is missing from the exact active Worker`);
+  // An optional secret with no value is left unset, so its absence matches the
+  // plan; when it existed it was inherited, which the version readback proves.
+  for (const [name, policy] of Object.entries(spec.cloudflare.secrets ?? {})) {
+    if (policy !== "optional" && !(snapshot.secretNames ?? []).includes(name)) mismatches.push(`secret binding "${name}" is missing from the exact active Worker`);
   }
   for (const [name, value] of Object.entries(spec.wrangler.vars ?? {})) {
     if (!(snapshot.activeBindings ?? []).some(b => b.name === name && b.type === "plain_text" && b.text === String(value))) mismatches.push(`plaintext binding "${name}" differs from the approved value`);

@@ -23,3 +23,19 @@ it("an unowned existing project is refused before any configuration write", asyn
   expect(patch).not.toHaveBeenCalled();
   expect(result).toMatchObject({ ok: false, error: { kind: "wrong-project-owner" } });
 });
+it("the Pages postcheck requires every secret except an optional one left unset", async () => {
+  const withSecrets = { ...spec, cloudflare: { ...spec.cloudflare, secrets: { API_KEY: "prompt-on-install", OWNER_PASSWORD: "optional" } } } as unknown as DeploySpec;
+  const marker = { TAPDEPLOY_MANAGED_PROJECT: { type: "plain_text", value: "owned-project" } };
+  const postcheck = (projectVars: Record<string, unknown>, deploymentVars: Record<string, unknown>) => {
+    const client = {
+      getPagesDeployment: vi.fn(async () => ({ id: "deployment", project_id: "project", environment: "production", latest_stage: { name: "deploy", status: "success" }, env_vars: { ...marker, ...deploymentVars } })),
+      getPagesProject: vi.fn(async () => ({ id: "project", name: "site", deployment_configs: { production: { compatibility_date: "2026-10-10", env_vars: { ...marker, ...projectVars } } } })),
+    } as unknown as CloudflareApiClient;
+    return postcheckPagesDeployment(client, withSecrets, "deployment", { pagesProjectId: "project", r2Buckets: [], d1Databases: [], kvNamespaces: [] } as unknown as TargetSnapshot);
+  };
+  const secret = { type: "secret_text" };
+  expect(await postcheck({ API_KEY: secret }, { API_KEY: secret })).toMatchObject({ ok: true, result: { succeeded: true } });
+  expect(await postcheck({ API_KEY: secret, OWNER_PASSWORD: secret }, { API_KEY: secret, OWNER_PASSWORD: secret })).toMatchObject({ ok: true, result: { succeeded: true } });
+  expect(await postcheck({}, {})).toMatchObject({ ok: false, error: { kind: "validation" } });
+  expect(await postcheck({ API_KEY: secret, OWNER_PASSWORD: secret }, { API_KEY: secret })).toMatchObject({ ok: false, error: { kind: "validation" } });
+});

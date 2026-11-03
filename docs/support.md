@@ -96,6 +96,9 @@ what the interrupted run already created and only does what is missing.
 | `unrelated-worker` | the Worker belongs to another TapDeploy app, or no single version serves it (split traffic, no active deployment) | choose another name, or deploy one version to all traffic in the dashboard; no write happened |
 | Sending files fails with "rate limited" (429) or a Cloudflare 5xx | the installer already retried that upload once, waiting the time Cloudflare asked for (at most 10 s) | wait a minute and start over; files Cloudflare already stores are not sent again |
 | Any other step fails with a Cloudflare 429/5xx | not retried automatically | wait, then start over |
+| "could not download the release (only GitHub release downloads can be fetched from github.com)" | the URL is a GitHub page, not a file download | use the release asset link (`…/releases/latest/download/<file>.zip` or `…/releases/download/<tag>/<file>.zip`), or download the ZIP and choose it as a local file |
+| "postcheck: the deployed Worker bindings differ from the approved plan (…)" | the new version is live, but what it is bound to does not match what you approved | check the Worker's bindings in the dashboard, then start over; report the message if it repeats |
+| *Stop after this step* (while deploying) | an emergency brake: the step in progress finishes and nothing after it runs; it does not undo anything | use it only to halt further writes; start over to finish |
 | "Deployment did not complete", "Stopped at …" | a step failed or you pressed Stop; earlier steps stay live | check the dashboard link, then start over |
 | "Still in progress at Cloudflare" | the Pages deployment is still building | open the dashboard link; start over once it settles |
 | Success without an address | the release has no HTTP entry (cron, queue, Workflow) or no `workers.dev` name | the card lists what was created and the dashboard link; check it there |
